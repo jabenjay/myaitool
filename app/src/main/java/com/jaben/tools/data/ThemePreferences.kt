@@ -248,6 +248,22 @@ class ThemePreferences(private val context: Context) {
         return bestColor
     }
 
+    fun setOutputRoot(uri: Uri, label: String) {
+        prefs.edit()
+            .putString(KEY_OUTPUT_ROOT_URI, uri.toString())
+            .putString(KEY_OUTPUT_ROOT_LABEL, label)
+            .apply()
+        _settings.value = _settings.value.copy(outputRootUri = uri.toString(), outputRootLabel = label)
+    }
+
+    fun resetOutputRoot() {
+        prefs.edit()
+            .remove(KEY_OUTPUT_ROOT_URI)
+            .putString(KEY_OUTPUT_ROOT_LABEL, "Download/Jools")
+            .apply()
+        _settings.value = _settings.value.copy(outputRootUri = null, outputRootLabel = "Download/Jools")
+    }
+
     private companion object {
         const val KEY_THEME_MODE = "theme_mode"
         const val KEY_UI_STYLE = "ui_style"
@@ -257,6 +273,8 @@ class ThemePreferences(private val context: Context) {
         const val KEY_SOFT_WRAP = "default_soft_wrap"
         const val KEY_HOME_COLUMNS = "home_columns"
         const val KEY_TOOL_ORDER = "tool_order"
+        const val KEY_OUTPUT_ROOT_URI = "output_root_uri"
+        const val KEY_OUTPUT_ROOT_LABEL = "output_root_label"
         const val KEY_HAS_BG = "has_custom_bg"
         const val KEY_BG_BLUR = "custom_bg_blur"
         const val KEY_BG_VERSION = "custom_bg_version"
