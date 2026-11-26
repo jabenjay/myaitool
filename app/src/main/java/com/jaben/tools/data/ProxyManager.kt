@@ -96,6 +96,13 @@ class ProxyManager(
     private val prefs = context.getSharedPreferences("toolbox_proxy", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val relay = LocalProxyRelay(gfwRuleManager)
+    @Volatile private var activeRelayPort: Int? = null
+
+    fun activeJavaProxy(): java.net.Proxy? {
+        val port = activeRelayPort ?: return null
+        if (!_state.value.enabled) return null
+        return java.net.Proxy(java.net.Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
+    }
 
     private val _state = MutableStateFlow(loadState())
     val state: StateFlow<ProxyState> = _state.asStateFlow()
@@ -350,6 +357,7 @@ class ProxyManager(
         val supportsOverride = WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)
 
         if (!state.enabled || activeNode == null) {
+            activeRelayPort = null
             relay.stop()
             if (supportsOverride) {
                 runCatching { ProxyController.getInstance().clearProxyOverride(Runnable::run) {} }
@@ -370,6 +378,7 @@ class ProxyManager(
             username = activeNode.username,
             password = activeNode.password
         )
+        activeRelayPort = localPort
         val config = ProxyConfig.Builder()
             .addProxyRule("socks5://127.0.0.1:$localPort")
             .build()

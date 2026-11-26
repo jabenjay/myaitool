@@ -82,6 +82,7 @@ import androidx.navigation.compose.rememberNavController
 import android.content.Intent
 import com.jaben.tools.data.AppShortcutHelper
 import com.jaben.tools.data.BookmarkManager
+import com.jaben.tools.data.BrowserDownloadManager
 import com.jaben.tools.tools.qr.QrRouter
 import com.jaben.tools.data.GfwRuleManager
 import com.jaben.tools.data.ProxyManager
@@ -126,6 +127,7 @@ class MainActivity : ComponentActivity() {
         val gfwRuleManager = GfwRuleManager(applicationContext)
         val proxyManager = ProxyManager(applicationContext, gfwRuleManager)
         val bookmarkManager = BookmarkManager(applicationContext)
+        val downloadManager = BrowserDownloadManager(applicationContext, proxyManager)
         pendingShortcutState.value = AppShortcutHelper.extractRoute(intent)
 
         setContent {
@@ -166,6 +168,7 @@ class MainActivity : ComponentActivity() {
                     proxyManager = proxyManager,
                     gfwRuleManager = gfwRuleManager,
                     bookmarkManager = bookmarkManager,
+                    downloadManager = downloadManager,
                     pendingShortcutRoute = pendingShortcut,
                     onShortcutHandled = { pendingShortcut = null }
                 )
@@ -180,6 +183,7 @@ fun PocketToolboxApp(
     proxyManager: ProxyManager,
     gfwRuleManager: GfwRuleManager,
     bookmarkManager: BookmarkManager,
+    downloadManager: BrowserDownloadManager,
     pendingShortcutRoute: String? = null,
     onShortcutHandled: () -> Unit = {}
 ) {
@@ -188,6 +192,7 @@ fun PocketToolboxApp(
     val proxyState by proxyManager.state.collectAsState()
     val gfwRuleState by gfwRuleManager.state.collectAsState()
     val bookmarks by bookmarkManager.bookmarks.collectAsState()
+    val downloadItems by downloadManager.items.collectAsState()
     val browserHomeUrl by bookmarkManager.homeUrl.collectAsState()
     val visuals = LocalAppThemeVisuals.current
     val appScope = rememberCoroutineScope()
@@ -387,7 +392,14 @@ fun PocketToolboxApp(
                         bookmarks = bookmarks,
                         proxyState = proxyState,
                         onToggleProxy = { proxyManager.setEnabled(it) },
-                        onTestActiveProxy = { proxyState.selectedId?.let { proxyManager.testNode(it) } },
+                        onSelectProxy = { proxyManager.selectNode(it) },
+                        onTestProxyNode = { proxyManager.testNode(it) },
+                        onTestAllProxies = { proxyManager.testAllNodes() },
+                        downloadItems = downloadItems,
+                        onStartDownload = { url, ua, cd, mime, len -> downloadManager.startDownload(url, ua, cd, mime, len) },
+                        onCancelDownload = { downloadManager.cancelDownload(it) },
+                        onRemoveDownload = { downloadManager.removeRecord(it) },
+                        onClearFinishedDownloads = { downloadManager.clearFinished() },
                         onSetHomeUrl = { bookmarkManager.setHomeUrl(it) },
                         onAddBookmark = { n, u -> bookmarkManager.addBookmark(n, u) },
                         onUpdateBookmark = { id, n, u -> bookmarkManager.updateBookmark(id, n, u) },

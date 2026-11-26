@@ -8,6 +8,8 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.content.Intent
+import android.net.Uri
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -27,7 +29,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -47,7 +51,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -63,7 +70,16 @@ import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.AudioFile
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.InsertDriveFile
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.VideoFile
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.AlertDialog
@@ -75,7 +91,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -89,6 +107,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.Modifier
@@ -102,7 +121,9 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -116,12 +137,16 @@ import androidx.compose.ui.zIndex
 import com.jaben.tools.data.AppLogManager
 import com.jaben.tools.data.BookmarkItem
 import com.jaben.tools.data.ProxyLatency
+import com.jaben.tools.data.DownloadStatus
+import com.jaben.tools.data.DownloadTaskItem
+import com.jaben.tools.data.OutputStorageHelper
 import com.jaben.tools.data.ProxyState
 import com.jaben.tools.ui.theme.LocalAppThemeVisuals
 import com.jaben.tools.ui.theme.liquidPress
 
 private const val DEFAULT_HOME_URL = "https://cn.pornhub.com/"
 
+@OptIn(ExperimentalFoundationApi::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun BrowserScreen(
@@ -130,7 +155,14 @@ fun BrowserScreen(
     bookmarks: List<BookmarkItem>,
     proxyState: ProxyState,
     onToggleProxy: (Boolean) -> Unit,
-    onTestActiveProxy: () -> Unit,
+    onSelectProxy: (String) -> Unit,
+    onTestProxyNode: (String) -> Unit,
+    onTestAllProxies: () -> Unit,
+    downloadItems: List<DownloadTaskItem>,
+    onStartDownload: (url: String, userAgent: String?, contentDisposition: String?, mimeType: String?, contentLength: Long) -> Unit,
+    onCancelDownload: (String) -> Unit,
+    onRemoveDownload: (String) -> Unit,
+    onClearFinishedDownloads: () -> Unit,
     onSetHomeUrl: (String) -> Unit,
     onAddBookmark: (String, String) -> Unit,
     onUpdateBookmark: (String, String, String) -> Unit,
@@ -142,6 +174,7 @@ fun BrowserScreen(
     val visuals = LocalAppThemeVisuals.current
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
+    val haptic = LocalHapticFeedback.current
 
     val barBg = if (visuals.isDark) Color(0xFF14161C) else Color(0xFFFFFFFF)
     val pillBg = if (visuals.isDark) Color(0xFF232732) else Color(0xFFEEF1F6)
@@ -168,7 +201,7 @@ fun BrowserScreen(
     LaunchedEffect(proxyState.enabled, proxyState.selectedId) {
         val sid = proxyState.selectedId
         if (proxyState.enabled && sid != null && proxyState.latencies[sid] == null) {
-            onTestActiveProxy()
+            onTestProxyNode(sid)
         }
     }
 
@@ -177,6 +210,8 @@ fun BrowserScreen(
 
     var editingBookmark by remember { mutableStateOf<BookmarkItem?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
+    var showProxyDialog by remember { mutableStateOf(false) }
+    var showDownloadsDialog by remember { mutableStateOf(false) }
 
     fun navigateTo(raw: String) {
         val trimmed = raw.trim()
@@ -328,24 +363,32 @@ fun BrowserScreen(
                         else -> MaterialTheme.colorScheme.primary
                     }
 
-                    IconButton(
-                        onClick = {
-                            val next = !proxyState.enabled
-                            onToggleProxy(next)
-                            if (next) {
-                                onTestActiveProxy()
-                                Toast.makeText(context, "代理已开启", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "代理已关闭", Toast.LENGTH_SHORT).show()
-                            }
-                        },
+                    Box(
                         modifier = Modifier
                             .size(36.dp)
+                            .clip(CircleShape)
                             .liquidPress()
+                            .combinedClickable(
+                                onClick = {
+                                    val next = !proxyState.enabled
+                                    onToggleProxy(next)
+                                    if (next) {
+                                        proxyState.selectedId?.let { onTestProxyNode(it) }
+                                        Toast.makeText(context, "代理已开启", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "代理已关闭", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                onLongClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    showProxyDialog = true
+                                }
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = if (proxyState.enabled) Icons.Rounded.Public else Icons.Outlined.Public,
-                            contentDescription = "代理开关",
+                            contentDescription = "代理开关（长按配置）",
                             tint = proxyIconTint,
                             modifier = Modifier.size(20.dp)
                         )
@@ -429,6 +472,12 @@ fun BrowserScreen(
                         settings.mediaPlaybackRequiresUserGesture = true
                         clipToOutline = true
                         setBackgroundColor(barBg.toArgb())
+                        setDownloadListener { url, userAgent, contentDisposition, mimetype, contentLength ->
+                            if (!url.isNullOrBlank()) {
+                                onStartDownload(url, userAgent, contentDisposition, mimetype, contentLength)
+                                Toast.makeText(context, "已添加到下载队列", Toast.LENGTH_SHORT).show()
+                            }
+                        }
 
                         webViewClient = object : WebViewClient() {
                             override fun shouldOverrideUrlLoading(
@@ -655,6 +704,30 @@ fun BrowserScreen(
                         modifier = Modifier.size(21.dp)
                     )
                 }
+                val activeDownloadCount = downloadItems.count { it.status == DownloadStatus.DOWNLOADING }
+                Box(contentAlignment = Alignment.Center) {
+                    IconButton(
+                        onClick = { showDownloadsDialog = true },
+                        modifier = Modifier.liquidPress()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Download,
+                            contentDescription = "下载管理",
+                            tint = if (activeDownloadCount > 0) MaterialTheme.colorScheme.primary else barFg,
+                            modifier = Modifier.size(21.dp)
+                        )
+                    }
+                    if (activeDownloadCount > 0) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 8.dp, end = 8.dp)
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
+                    }
+                }
                 IconButton(
                     onClick = onExit,
                     modifier = Modifier.liquidPress()
@@ -668,6 +741,332 @@ fun BrowserScreen(
                 }
             }
         }
+    }
+
+    if (showDownloadsDialog) {
+        val activeRootLabel = OutputStorageHelper.getDisplayPath(context, "").trimEnd('/')
+        AlertDialog(
+            onDismissRequest = { showDownloadsDialog = false },
+            title = {
+                Column {
+                    Text("下载管理", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "保存目录: $activeRootLabel/<分类>",
+                        fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            },
+            text = {
+                if (downloadItems.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "暂无下载记录",
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 360.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        downloadItems.forEach { item ->
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = when (item.subFolder) {
+                                                OutputStorageHelper.SUB_PICTURES -> Icons.Rounded.Image
+                                                OutputStorageHelper.SUB_VIDEOS -> Icons.Rounded.VideoFile
+                                                OutputStorageHelper.SUB_SOUNDS -> Icons.Rounded.AudioFile
+                                                else -> Icons.Rounded.InsertDriveFile
+                                            },
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = item.fileName,
+                                                fontSize = 13.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            val statusText = when (item.status) {
+                                                DownloadStatus.DOWNLOADING -> {
+                                                    if (item.totalBytes > 0L) {
+                                                        "${formatDlBytes(item.downloadedBytes)} / ${formatDlBytes(item.totalBytes)}"
+                                                    } else {
+                                                        "已下载 ${formatDlBytes(item.downloadedBytes)}"
+                                                    }
+                                                }
+                                                DownloadStatus.COMPLETED -> "${item.subFolder} · ${formatDlBytes(item.downloadedBytes)}"
+                                                DownloadStatus.FAILED -> "失败: ${item.errorMessage ?: "未知错误"}"
+                                                DownloadStatus.CANCELLED -> "已取消"
+                                            }
+                                            Text(
+                                                text = statusText,
+                                                fontSize = 11.5.sp,
+                                                color = if (item.status == DownloadStatus.FAILED) {
+                                                    MaterialTheme.colorScheme.error
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        if (item.status == DownloadStatus.DOWNLOADING) {
+                                            IconButton(
+                                                onClick = { onCancelDownload(item.id) },
+                                                modifier = Modifier.size(30.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Close,
+                                                    contentDescription = "取消",
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        } else {
+                                            if (item.status == DownloadStatus.COMPLETED && item.savedUri != null) {
+                                                IconButton(
+                                                    onClick = {
+                                                        val uri = Uri.parse(item.savedUri)
+                                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                            type = item.mimeType
+                                                            putExtra(Intent.EXTRA_STREAM, uri)
+                                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                        }
+                                                        context.startActivity(Intent.createChooser(shareIntent, "分享文件"))
+                                                    },
+                                                    modifier = Modifier.size(30.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.Share,
+                                                        contentDescription = "分享",
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                            IconButton(
+                                                onClick = { onRemoveDownload(item.id) },
+                                                modifier = Modifier.size(30.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.DeleteOutline,
+                                                    contentDescription = "删除记录",
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    if (item.status == DownloadStatus.DOWNLOADING) {
+                                        if (item.totalBytes > 0L) {
+                                            LinearProgressIndicator(
+                                                progress = { (item.downloadedBytes.toFloat() / item.totalBytes).coerceIn(0f, 1f) },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(3.dp)
+                                            )
+                                        } else {
+                                            LinearProgressIndicator(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(3.dp)
+                                            )
+                                        }
+                                    } else if (item.status == DownloadStatus.COMPLETED && item.savedUri != null) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
+                                            TextButton(
+                                                onClick = {
+                                                    runCatching {
+                                                        val uri = Uri.parse(item.savedUri)
+                                                        val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                                                            setDataAndType(uri, item.mimeType)
+                                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                        }
+                                                        context.startActivity(viewIntent)
+                                                    }.onFailure {
+                                                        Toast.makeText(context, "未找到可打开该文件的应用", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            ) {
+                                                Text("打开文件", fontSize = 12.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDownloadsDialog = false }) {
+                    Text("关闭")
+                }
+            },
+            dismissButton = {
+                if (downloadItems.any { it.status != DownloadStatus.DOWNLOADING }) {
+                    TextButton(onClick = onClearFinishedDownloads) {
+                        Text("清空已完成")
+                    }
+                }
+            }
+        )
+    }
+
+    if (showProxyDialog) {
+        AlertDialog(
+            onDismissRequest = { showProxyDialog = false },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("网络代理", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = proxyState.statusMessage,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Switch(
+                        checked = proxyState.enabled,
+                        onCheckedChange = { next ->
+                            onToggleProxy(next)
+                            if (next) {
+                                proxyState.selectedId?.let { onTestProxyNode(it) }
+                            }
+                        }
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 300.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    proxyState.nodes.forEach { node ->
+                        val isSelected = node.id == proxyState.selectedId
+                        val lat = proxyState.latencies[node.id]
+                        val (latText, latColor) = when (lat) {
+                            is ProxyLatency.Testing -> "测速中..." to MaterialTheme.colorScheme.primary
+                            is ProxyLatency.Success -> "${lat.ms} ms" to (if (lat.ms < 600L) Color(0xFF22C55E) else Color(0xFFF59E0B))
+                            is ProxyLatency.Failed -> "不可用" to Color(0xFFEF4444)
+                            null -> "未测速" to MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { onSelectProxy(node.id) }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = isSelected,
+                                    onClick = { onSelectProxy(node.id) }
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = node.name,
+                                        fontSize = 14.sp,
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    val sub = node.summary()
+                                    if (sub.isNotBlank()) {
+                                        Text(
+                                            text = sub,
+                                            fontSize = 11.5.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = latText,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = latColor
+                                )
+                                IconButton(
+                                    onClick = { onTestProxyNode(node.id) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Speed,
+                                        contentDescription = "测速",
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showProxyDialog = false }) {
+                    Text("完成")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = onTestAllProxies,
+                    enabled = !proxyState.isTestingAll
+                ) {
+                    Text(if (proxyState.isTestingAll) "测速中..." else "全部测速")
+                }
+            }
+        )
     }
 
     if (showAddDialog) {
@@ -979,4 +1378,13 @@ private fun BookmarkEditDialog(
             }
         }
     )
+}
+
+private fun formatDlBytes(bytes: Long): String {
+    if (bytes <= 0L) return "0 B"
+    return when {
+        bytes < 1024 -> "${bytes} B"
+        bytes < 1024 * 1024 -> String.format("%.1f KB", bytes / 1024.0)
+        else -> String.format("%.2f MB", bytes / (1024.0 * 1024.0))
+    }
 }
