@@ -22,20 +22,15 @@ import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MediumTopAppBar
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
@@ -43,8 +38,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.lerp
-import androidx.compose.ui.unit.sp
+import com.toolbox.pocket.ui.components.SmoothCollapsingHeader
+import com.toolbox.pocket.ui.components.rememberSmoothHeaderScrollState
 import com.toolbox.pocket.ui.theme.LocalAppThemeVisuals
 import com.toolbox.pocket.ui.theme.liquidGlassSurface
 import com.toolbox.pocket.ui.theme.liquidPress
@@ -56,7 +51,6 @@ data class ToolboxModule(
     val icon: ImageVector
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ToolboxHomeScreen(
     homeColumns: Int,
@@ -64,9 +58,8 @@ fun ToolboxHomeScreen(
     onOpenTool: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val headerState = rememberSmoothHeaderScrollState()
     val visuals = LocalAppThemeVisuals.current
-    val titleFontSize = lerp(24.sp, 18.sp, scrollBehavior.state.collapsedFraction)
     val columns = homeColumns.coerceIn(1, 4)
 
     val tools = listOf(
@@ -84,35 +77,25 @@ fun ToolboxHomeScreen(
         )
     )
 
-    Scaffold(
-        modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = Color.Transparent,
-        topBar = {
-            MediumTopAppBar(
-                title = {
-                    Text(
-                        text = "工具箱",
-                        fontSize = titleFontSize,
-                        fontWeight = FontWeight.Bold
-                    )
-                },
-                scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.mediumTopAppBarColors(
-                    containerColor = Color.Transparent,
-                    scrolledContainerColor = Color.Transparent
-                )
-            )
-        }
-    ) { innerPadding ->
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .nestedScroll(headerState.nestedScrollConnection)
+    ) {
+        SmoothCollapsingHeader(
+            title = "工具箱",
+            collapseProgress = headerState.progress
+        )
+
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
             modifier = Modifier
-                .fillMaxSize()
-                .padding(top = innerPadding.calculateTopPadding()),
+                .fillMaxWidth()
+                .weight(1f),
             contentPadding = PaddingValues(
                 start = 16.dp,
                 end = 16.dp,
-                top = 10.dp,
+                top = 8.dp,
                 bottom = 16.dp + bottomExtraPadding
             ),
             horizontalArrangement = Arrangement.spacedBy(if (columns >= 3) 10.dp else 12.dp),
@@ -162,7 +145,7 @@ fun ToolboxHomeScreen(
                                 Text(
                                     text = tool.title,
                                     style = MaterialTheme.typography.titleLarge,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = visuals.cardContentColor
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
@@ -208,7 +191,7 @@ fun ToolboxHomeScreen(
                                 text = tool.title,
                                 style = if (columns >= 3) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface,
+                                color = visuals.cardContentColor,
                                 textAlign = TextAlign.Center,
                                 maxLines = if (columns >= 3) 2 else 1,
                                 overflow = TextOverflow.Ellipsis

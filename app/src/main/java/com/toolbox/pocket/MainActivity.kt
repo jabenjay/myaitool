@@ -323,7 +323,9 @@ fun PocketToolboxApp(
                             onProxyToggle = { proxyManager.setEnabled(it) },
                             onSelectProxy = { proxyManager.selectNode(it) },
                             onAddProxy = { proxyManager.addNode(it) },
-                            onDeleteProxy = { proxyManager.deleteNode(it) }
+                            onDeleteProxy = { proxyManager.deleteNode(it) },
+                            onTestNode = { proxyManager.testNode(it) },
+                            onTestAllNodes = { proxyManager.testAllNodes() }
                         )
                     }
                 }
@@ -457,7 +459,9 @@ fun PocketToolboxApp(
                             onProxyToggle = { proxyManager.setEnabled(it) },
                             onSelectProxy = { proxyManager.selectNode(it) },
                             onAddProxy = { proxyManager.addNode(it) },
-                            onDeleteProxy = { proxyManager.deleteNode(it) }
+                            onDeleteProxy = { proxyManager.deleteNode(it) },
+                            onTestNode = { proxyManager.testNode(it) },
+                            onTestAllNodes = { proxyManager.testAllNodes() }
                         )
                     }
                 }

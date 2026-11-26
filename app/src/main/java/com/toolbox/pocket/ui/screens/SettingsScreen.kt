@@ -33,13 +33,10 @@ import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Style
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material.icons.rounded.WrapText
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -48,30 +45,28 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.toolbox.pocket.data.AppSettings
 import com.toolbox.pocket.data.M3ColorSource
 import com.toolbox.pocket.data.ProxyState
 import com.toolbox.pocket.data.ThemeMode
 import com.toolbox.pocket.data.UiStyle
+import com.toolbox.pocket.ui.components.SmoothCollapsingHeader
+import com.toolbox.pocket.ui.components.rememberSmoothHeaderScrollState
 import com.toolbox.pocket.ui.theme.LocalAppThemeVisuals
 import com.toolbox.pocket.ui.theme.liquidGlassSurface
 import com.toolbox.pocket.ui.theme.liquidPress
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
@@ -90,10 +85,8 @@ fun SettingsScreen(
     onDefaultSoftWrapChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    val visuals = LocalAppThemeVisuals.current
+    val headerState = rememberSmoothHeaderScrollState()
     val supportsSystemDynamic = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-    val titleFontSize = lerp(24.sp, 18.sp, scrollBehavior.state.collapsedFraction)
 
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -103,39 +96,28 @@ fun SettingsScreen(
         }
     }
 
-    Scaffold(
-        modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = Color.Transparent,
-        topBar = {
-            MediumTopAppBar(
-                title = {
-                    Text(
-                        text = "设置",
-                        fontSize = titleFontSize,
-                        fontWeight = FontWeight.Bold
-                    )
-                },
-                scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.mediumTopAppBarColors(
-                    containerColor = Color.Transparent,
-                    scrolledContainerColor = Color.Transparent
-                )
-            )
-        }
-    ) { innerPadding ->
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .nestedScroll(headerState.nestedScrollConnection)
+    ) {
+        SmoothCollapsingHeader(
+            title = "设置",
+            collapseProgress = headerState.progress
+        )
+
         LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(top = innerPadding.calculateTopPadding()),
+                .fillMaxWidth()
+                .weight(1f),
             contentPadding = PaddingValues(
                 start = 16.dp,
                 end = 16.dp,
-                top = 10.dp,
+                top = 8.dp,
                 bottom = 16.dp + bottomExtraPadding
             ),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Top-level Proxy option -> opens dedicated ProxySettingsScreen
             item {
                 GlassCard {
                     Row(
@@ -143,7 +125,7 @@ fun SettingsScreen(
                             .fillMaxWidth()
                             .liquidPress(pressedScale = 0.98f)
                             .clickable(onClick = onOpenProxySettings)
-                            .padding(horizontal = 16.dp, vertical = 16.dp),
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
@@ -151,16 +133,22 @@ fun SettingsScreen(
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary
                         )
-                        Spacer(modifier = Modifier.width(16.dp))
+                        Spacer(modifier = Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "网络代理",
-                                style = MaterialTheme.typography.titleMedium
+                                fontSize = 15.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = proxyState.statusMessage,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                fontSize = 11.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         Icon(
@@ -225,7 +213,10 @@ fun SettingsScreen(
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text(
                                         text = "配色来源",
-                                        style = MaterialTheme.typography.bodyLarge
+                                        fontSize = 14.5.sp,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                                 SingleChoiceSegmentedButtonRow(
@@ -246,7 +237,13 @@ fun SettingsScreen(
                                             shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
                                             modifier = Modifier.liquidPress(pressedScale = 0.96f)
                                         ) {
-                                            Text(source.label, maxLines = 1)
+                                            Text(
+                                                text = source.label,
+                                                fontSize = 12.5.sp,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
                                     }
                                 }
@@ -273,13 +270,18 @@ fun SettingsScreen(
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(
                                             text = "液态玻璃可视度",
-                                            style = MaterialTheme.typography.bodyLarge
+                                            fontSize = 14.5.sp,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                     Text(
                                         text = "${(settings.glassOpacity * 100f).roundToInt()}%",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.primary
+                                        fontSize = 12.5.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                                 Slider(
@@ -309,13 +311,18 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
                                 text = "每行工具数量",
-                                style = MaterialTheme.typography.bodyLarge,
+                                fontSize = 14.5.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
                             )
                             Text(
                                 text = "${settings.homeColumns} 个/行",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary
+                                fontSize = 12.5.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                         SingleChoiceSegmentedButtonRow(
@@ -330,7 +337,7 @@ fun SettingsScreen(
                                     shape = SegmentedButtonDefaults.itemShape(index = index, count = 4),
                                     modifier = Modifier.liquidPress(pressedScale = 0.96f)
                                 ) {
-                                    Text("$count")
+                                    Text("$count", maxLines = 1, softWrap = false)
                                 }
                             }
                         }
@@ -347,23 +354,29 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Rounded.Image,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary
                                 )
-                                Spacer(modifier = Modifier.width(12.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = if (settings.backgroundImagePath != null) "已设置背景图" else "未设置背景图",
-                                    style = MaterialTheme.typography.bodyLarge
+                                    text = if (settings.backgroundImagePath != null) "已设置背景" else "未设置背景",
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
 
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 if (settings.backgroundImagePath != null) {
                                     TextButton(onClick = onClearBackground, modifier = Modifier.liquidPress()) {
-                                        Text("清除")
+                                        Text("清除", fontSize = 12.5.sp, maxLines = 1, softWrap = false)
                                     }
                                 }
                                 FilledTonalButton(
@@ -375,7 +388,12 @@ fun SettingsScreen(
                                     },
                                     modifier = Modifier.liquidPress()
                                 ) {
-                                    Text(if (settings.backgroundImagePath != null) "更换" else "选择图片")
+                                    Text(
+                                        text = if (settings.backgroundImagePath != null) "更换" else "选择图片",
+                                        fontSize = 12.5.sp,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
                             }
                         }
@@ -396,13 +414,17 @@ fun SettingsScreen(
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(
                                             text = "模糊程度",
-                                            style = MaterialTheme.typography.bodyMedium
+                                            fontSize = 13.5.sp,
+                                            maxLines = 1,
+                                            softWrap = false
                                         )
                                     }
                                     Text(
                                         text = "${settings.backgroundBlurDp.roundToInt()} dp",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.primary
+                                        fontSize = 12.5.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                                 Slider(
@@ -463,6 +485,8 @@ private fun SectionLabel(text: String) {
         text = text,
         style = MaterialTheme.typography.titleMedium,
         color = MaterialTheme.colorScheme.primary,
+        maxLines = 1,
+        softWrap = false,
         modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
     )
 }
@@ -490,7 +514,10 @@ private fun RadioSettingRow(
         Spacer(modifier = Modifier.width(16.dp))
         Text(
             text = title,
-            style = MaterialTheme.typography.bodyLarge,
+            fontSize = 14.5.sp,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
         RadioButton(
@@ -524,7 +551,10 @@ private fun SwitchSettingRow(
         Spacer(modifier = Modifier.width(16.dp))
         Text(
             text = title,
-            style = MaterialTheme.typography.bodyLarge,
+            fontSize = 14.5.sp,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
         Switch(

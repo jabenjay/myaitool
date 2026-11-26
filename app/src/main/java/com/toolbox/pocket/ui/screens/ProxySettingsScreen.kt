@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -48,9 +49,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.toolbox.pocket.data.GfwRuleState
+import com.toolbox.pocket.data.ProxyLatency
 import com.toolbox.pocket.data.ProxyNode
 import com.toolbox.pocket.data.ProxyProtocol
 import com.toolbox.pocket.data.ProxyState
@@ -68,6 +73,8 @@ fun ProxySettingsScreen(
     onSelectProxy: (String) -> Unit,
     onAddProxy: (ProxyNode) -> Unit,
     onDeleteProxy: (String) -> Unit,
+    onTestNode: (String) -> Unit,
+    onTestAllNodes: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val visuals = LocalAppThemeVisuals.current
@@ -81,7 +88,10 @@ fun ProxySettingsScreen(
                 title = {
                     Text(
                         text = "网络代理",
-                        style = MaterialTheme.typography.titleLarge
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                     )
                 },
                 navigationIcon = {
@@ -137,12 +147,19 @@ fun ProxySettingsScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "启用应用内代理",
-                                    style = MaterialTheme.typography.titleMedium
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     text = proxyState.statusMessage,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                             Switch(
@@ -165,8 +182,11 @@ fun ProxySettingsScreen(
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
                                 text = gfwRuleState.lastStatus,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                fontSize = 11.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -182,18 +202,42 @@ fun ProxySettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "代理节点（SOCKS / HTTP）",
+                        text = "代理节点",
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        softWrap = false
                     )
-                    FilledTonalButton(
-                        shape = RoundedCornerShape(50),
-                        onClick = { showAddDialog = true },
-                        modifier = Modifier.liquidPress()
-                    ) {
-                        Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("添加节点")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(
+                            shape = RoundedCornerShape(50),
+                            onClick = onTestAllNodes,
+                            enabled = proxyState.nodes.isNotEmpty() && !proxyState.isTestingAll,
+                            modifier = Modifier.liquidPress()
+                        ) {
+                            Icon(Icons.Rounded.Speed, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (proxyState.isTestingAll) "测试中" else "全部测试",
+                                fontSize = 12.5.sp,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                        FilledTonalButton(
+                            shape = RoundedCornerShape(50),
+                            onClick = { showAddDialog = true },
+                            modifier = Modifier.liquidPress()
+                        ) {
+                            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "添加",
+                                fontSize = 12.5.sp,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
                     }
                 }
             }
@@ -210,15 +254,19 @@ fun ProxySettingsScreen(
                             .liquidGlassSurface(26.dp)
                     ) {
                         Text(
-                            text = "暂无代理节点，点击右上角「+」添加 SOCKS5、SOCKS4 或 HTTP 节点。",
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = "暂无节点，点击右上角「添加」配置 SOCKS / HTTP",
+                            fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(20.dp)
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(18.dp)
                         )
                     }
                 }
             } else {
                 items(proxyState.nodes, key = { it.id }) { node ->
+                    val latency = proxyState.latencies[node.id]
                     Surface(
                         shape = MaterialTheme.shapes.large,
                         color = visuals.cardContainerColor,
@@ -233,7 +281,7 @@ fun ProxySettingsScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(start = 12.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+                                .padding(start = 10.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
@@ -241,17 +289,64 @@ fun ProxySettingsScreen(
                                 onClick = { onSelectProxy(node.id) }
                             )
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(text = node.name, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    text = node.name,
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                                 Text(
                                     text = node.summary(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            IconButton(onClick = { onDeleteProxy(node.id) }) {
+
+                            // Latency badge to the left of the Test button
+                            if (latency != null) {
+                                val (latText, latColor) = when (latency) {
+                                    is ProxyLatency.Testing -> "测速中" to MaterialTheme.colorScheme.onSurfaceVariant
+                                    is ProxyLatency.Success -> "${latency.ms} ms" to MaterialTheme.colorScheme.primary
+                                    is ProxyLatency.Failed -> latency.reason to MaterialTheme.colorScheme.error
+                                }
+                                Text(
+                                    text = latText,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = latColor,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(end = 4.dp)
+                                )
+                            }
+
+                            TextButton(
+                                onClick = { onTestNode(node.id) },
+                                enabled = latency !is ProxyLatency.Testing,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                modifier = Modifier.liquidPress()
+                            ) {
+                                Text(
+                                    text = "测试",
+                                    fontSize = 12.5.sp,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { onDeleteProxy(node.id) },
+                                modifier = Modifier.size(34.dp)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Rounded.DeleteOutline,
-                                    contentDescription = "删除"
+                                    contentDescription = "删除",
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
@@ -286,7 +381,7 @@ private fun AddProxyNodeDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加代理节点") },
+        title = { Text("添加代理节点", maxLines = 1, softWrap = false) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
@@ -299,28 +394,28 @@ private fun AddProxyNodeDialog(
                         FilterChip(
                             selected = protocol == item,
                             onClick = { protocol = item },
-                            label = { Text(item.label) }
+                            label = { Text(item.label, maxLines = 1, softWrap = false) }
                         )
                     }
                 }
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("节点名称（可选）") },
+                    label = { Text("节点名称（可选）", maxLines = 1, softWrap = false) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = host,
                     onValueChange = { host = it },
-                    label = { Text("服务器地址") },
+                    label = { Text("服务器地址", maxLines = 1, softWrap = false) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = portText,
                     onValueChange = { portText = it.filter { ch -> ch.isDigit() } },
-                    label = { Text("端口") },
+                    label = { Text("端口", maxLines = 1, softWrap = false) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
@@ -328,14 +423,14 @@ private fun AddProxyNodeDialog(
                 OutlinedTextField(
                     value = username,
                     onValueChange = { username = it },
-                    label = { Text("用户名（可选）") },
+                    label = { Text("用户名（可选）", maxLines = 1, softWrap = false) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
-                    label = { Text("密码（可选）") },
+                    label = { Text("密码（可选）", maxLines = 1, softWrap = false) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -359,11 +454,11 @@ private fun AddProxyNodeDialog(
                     )
                 }
             ) {
-                Text("保存")
+                Text("保存", maxLines = 1, softWrap = false)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text("取消", maxLines = 1, softWrap = false) }
         }
     )
 }
