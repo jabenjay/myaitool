@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import com.jaben.tools.data.AppSettings
 import com.jaben.tools.data.ProxyState
 import com.jaben.tools.ui.components.SmoothCollapsingHeader
+import com.jaben.tools.ui.components.UpdateBottomSheet
 import com.jaben.tools.ui.components.rememberSmoothHeaderScrollState
 import com.jaben.tools.ui.theme.LocalAppThemeVisuals
 import com.jaben.tools.ui.theme.liquidGlassSurface
@@ -191,59 +192,39 @@ fun SettingsScreen(
     }
 
     updateResult?.let { res ->
-        AlertDialog(
-            onDismissRequest = { updateResult = null },
-            title = {
-                Text(
-                    when (res) {
-                        is UpdateCheckResult.UpdateAvailable -> "发现新版本 ${res.latestVersion}"
-                        is UpdateCheckResult.UpToDate -> "已是最新版本"
-                        is UpdateCheckResult.Error -> "检查更新失败"
-                    }
-                )
-            },
-            text = {
-                Text(
-                    when (res) {
-                        is UpdateCheckResult.UpdateAvailable ->
-                            "当前版本: v${res.currentVersion}\n最新版本: ${res.latestVersion}" +
-                                if (res.releaseNotes.isNotBlank()) "\n\n${res.releaseNotes}" else ""
-                        is UpdateCheckResult.UpToDate -> "当前版本 v${res.currentVersion} 已是最新。"
-                        is UpdateCheckResult.Error -> res.message
-                    }
-                )
-            },
-            confirmButton = {
-                if (res is UpdateCheckResult.UpdateAvailable) {
-                    TextButton(
-                        onClick = {
-                            val url = res.downloadUrl
-                            val ver = res.latestVersion
-                            updateResult = null
-                            val ok = AppUpdateChecker.startSystemDownload(context, url, ver)
-                            if (ok) {
-                                Toast.makeText(context, "已调用系统下载器开始下载，请在通知栏查看进度", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "启动系统下载器失败", Toast.LENGTH_SHORT).show()
-                            }
+        if (res is UpdateCheckResult.UpdateAvailable) {
+            UpdateBottomSheet(
+                updateInfo = res,
+                onDismiss = { updateResult = null }
+            )
+        } else {
+            AlertDialog(
+                onDismissRequest = { updateResult = null },
+                title = {
+                    Text(
+                        when (res) {
+                            is UpdateCheckResult.UpToDate -> "已是最新版本"
+                            is UpdateCheckResult.Error -> "检查更新失败"
+                            else -> ""
                         }
-                    ) {
-                        Text("立即下载")
-                    }
-                } else {
+                    )
+                },
+                text = {
+                    Text(
+                        when (res) {
+                            is UpdateCheckResult.UpToDate -> "当前版本 v${res.currentVersion} 已是最新。"
+                            is UpdateCheckResult.Error -> res.message
+                            else -> ""
+                        }
+                    )
+                },
+                confirmButton = {
                     TextButton(onClick = { updateResult = null }) {
                         Text("确定")
                     }
                 }
-            },
-            dismissButton = {
-                if (res is UpdateCheckResult.UpdateAvailable) {
-                    TextButton(onClick = { updateResult = null }) {
-                        Text("取消")
-                    }
-                }
-            }
-        )
+            )
+        }
     }
 
 }

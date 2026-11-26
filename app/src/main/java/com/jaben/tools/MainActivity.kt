@@ -81,6 +81,9 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import android.content.Intent
 import com.jaben.tools.data.AppShortcutHelper
+import com.jaben.tools.data.AppUpdateChecker
+import com.jaben.tools.data.UpdateCheckResult
+import com.jaben.tools.ui.components.UpdateBottomSheet
 import com.jaben.tools.data.BookmarkManager
 import com.jaben.tools.data.BrowserDownloadManager
 import com.jaben.tools.tools.qr.QrRouter
@@ -200,6 +203,7 @@ fun PocketToolboxApp(
 
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
     var isHomeDragging by remember { mutableStateOf(false) }
+    var startupUpdateInfo by remember { mutableStateOf<UpdateCheckResult.UpdateAvailable?>(null) }
 
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
@@ -209,6 +213,13 @@ fun PocketToolboxApp(
 
     LaunchedEffect(Unit) {
         gfwRuleManager.updateRulesOnStartup()
+    }
+
+    LaunchedEffect(Unit) {
+        val res = AppUpdateChecker.checkLatestRelease(context, proxyManager.activeJavaProxy())
+        if (res is UpdateCheckResult.UpdateAvailable) {
+            startupUpdateInfo = res
+        }
     }
 
     LaunchedEffect(settings.toolOrder) {
@@ -560,6 +571,13 @@ fun PocketToolboxApp(
             ) { innerPadding ->
                 contentHost(Modifier.padding(bottom = innerPadding.calculateBottomPadding()))
             }
+        }
+
+        startupUpdateInfo?.let { info ->
+            UpdateBottomSheet(
+                updateInfo = info,
+                onDismiss = { startupUpdateInfo = null }
+            )
         }
     }
 }

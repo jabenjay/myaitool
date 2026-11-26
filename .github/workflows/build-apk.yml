@@ -10,7 +10,7 @@ on:
         required: false
         default: ''
       changelog:
-        description: '更新日志（Changelog），可用分号 ; 或换行分隔多条内容'
+        description: '单行快捷更新日志（留空则自动读取仓库根目录的 CHANGELOG.md 多行文件）'
         required: false
         default: ''
 
@@ -66,6 +66,14 @@ jobs:
             {
               echo "changelog<<EOF_CHANGELOG"
               printf '%b\n' "$FORMATTED"
+              echo "EOF_CHANGELOG"
+            } >> "$GITHUB_OUTPUT"
+            echo "has_changelog=true" >> "$GITHUB_OUTPUT"
+          elif [ -f CHANGELOG.md ] && [ -s CHANGELOG.md ]; then
+            {
+              echo "changelog<<EOF_CHANGELOG"
+              cat CHANGELOG.md
+              echo ""
               echo "EOF_CHANGELOG"
             } >> "$GITHUB_OUTPUT"
             echo "has_changelog=true" >> "$GITHUB_OUTPUT"
