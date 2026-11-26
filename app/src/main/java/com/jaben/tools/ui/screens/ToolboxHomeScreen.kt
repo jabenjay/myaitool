@@ -125,7 +125,7 @@ fun ToolboxHomeScreen(
             "compressor" to ToolboxModule(
                 id = "compressor",
                 title = "文件压缩",
-                subtitle = "GPU加速视频、图片、音频及文件压缩",
+                subtitle = "视频、图片、音频及文件压缩",
                 icon = Icons.Rounded.Compress
             )
         )

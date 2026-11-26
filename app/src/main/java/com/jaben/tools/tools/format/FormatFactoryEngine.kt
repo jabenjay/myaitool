@@ -82,12 +82,12 @@ enum class TargetFormat(
 
     // Audio (7 formats)
     AUD_M4A("aud_m4a", "M4A (AAC)", "m4a", "audio/mp4", MediaCategory.AUDIO, "主流高效"),
-    AUD_AAC("aud_aac", "AAC", "aac", "audio/aac", MediaCategory.AUDIO, "ADTS裸流"),
-    AUD_WAV("aud_wav", "WAV", "wav", "audio/wav", MediaCategory.AUDIO, "无损PCM"),
+    AUD_AAC("aud_aac", "AAC", "aac", "audio/aac", MediaCategory.AUDIO, "标准音频流"),
+    AUD_WAV("aud_wav", "WAV", "wav", "audio/wav", MediaCategory.AUDIO, "无损音质"),
     AUD_AIFF("aud_aiff", "AIFF", "aiff", "audio/aiff", MediaCategory.AUDIO, "苹果无损"),
     AUD_OGG("aud_ogg", "OGG (Opus)", "ogg", "audio/ogg", MediaCategory.AUDIO, "高音质低码率"),
     AUD_3GP("aud_3gp", "3GP (AMR)", "3gp", "audio/3gpp", MediaCategory.AUDIO, "语音极简"),
-    AUD_PCM("aud_pcm", "PCM", "pcm", "application/octet-stream", MediaCategory.AUDIO, "原始采样流")
+    AUD_PCM("aud_pcm", "PCM", "pcm", "application/octet-stream", MediaCategory.AUDIO, "无压缩音频")
 }
 
 data class SourceMediaInfo(

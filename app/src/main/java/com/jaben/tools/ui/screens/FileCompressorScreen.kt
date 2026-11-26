@@ -31,7 +31,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Compress
 import androidx.compose.material.icons.rounded.FileOpen
@@ -108,8 +107,9 @@ fun FileCompressorScreen(
     var progress by remember { mutableFloatStateOf(0f) }
     var compressJob by remember { mutableStateOf<Job?>(null) }
 
-    // Reversed slider: 10 (smallest) .. 95 (closest to original)
-    var targetSizePercent by rememberSaveable { mutableIntStateOf(50) }
+    // Slider: 5 (left = largest/lightest) .. 90 (right = smallest/strongest)
+    var compressionPercent by rememberSaveable { mutableIntStateOf(50) }
+    val targetSizePercent = (100 - compressionPercent).coerceIn(10, 95)
     var videoMaxHeight by rememberSaveable { mutableIntStateOf(0) }
     var videoTargetFps by rememberSaveable { mutableIntStateOf(0) }
     var useHevc by rememberSaveable { mutableStateOf(true) }
@@ -191,31 +191,7 @@ fun FileCompressorScreen(
                 color = visuals.cardContentColor,
                 modifier = Modifier.weight(1f)
             )
-            if (sourceMeta?.fileType == CompressFileType.VIDEO) {
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Bolt,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text(
-                            text = "GPU加速",
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            }
+
         }
 
         Column(
@@ -337,7 +313,7 @@ fun FileCompressorScreen(
                                     }
                                 }
 
-                                Text("视频编码 (GPU 硬件加速)", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                                Text("视频编码", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     FilterChip(
                                         selected = useHevc,
@@ -408,12 +384,12 @@ fun FileCompressorScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "目标体积比例（左小右大）",
+                            text = "压缩程度",
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "${targetSizePercent}%",
+                            text = "${compressionPercent}%",
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (isBelowFloor) warnColor else MaterialTheme.colorScheme.primary
@@ -442,19 +418,20 @@ fun FileCompressorScreen(
                         }
 
                         Slider(
-                            value = targetSizePercent.toFloat(),
+                            value = compressionPercent.toFloat(),
                             onValueChange = { raw ->
-                                val pct = raw.roundToInt().coerceIn(10, 95)
-                                targetSizePercent = pct
+                                val cmp = raw.roundToInt().coerceIn(5, 90)
+                                compressionPercent = cmp
+                                val tPct = (100 - cmp).coerceIn(10, 95)
                                 sourceMeta?.let { meta ->
                                     if (meta.fileType == CompressFileType.VIDEO) {
-                                        val (autoH, autoFps) = FileCompressorEngine.suggestVideoParams(meta, pct)
+                                        val (autoH, autoFps) = FileCompressorEngine.suggestVideoParams(meta, tPct)
                                         videoMaxHeight = autoH
                                         videoTargetFps = autoFps
                                     }
                                 }
                             },
-                            valueRange = 10f..95f,
+                            valueRange = 5f..90f,
                             enabled = sourceMeta != null && !isCompressing,
                             modifier = Modifier
                                 .weight(1f)
