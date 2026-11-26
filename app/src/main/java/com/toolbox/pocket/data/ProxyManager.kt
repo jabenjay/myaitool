@@ -42,7 +42,7 @@ data class ProxyNode(
     val password: String = "",
     val isBuiltIn: Boolean = false
 ) {
-    fun summary(): String = if (isBuiltIn) "内置加密节点" else "${protocol.label} · $host:$port"
+    fun summary(): String = if (isBuiltIn) "" else "${protocol.label} · $host:$port"
 }
 
 sealed class ProxyLatency {

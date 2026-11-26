@@ -297,14 +297,17 @@ fun ProxySettingsScreen(
                                     softWrap = false,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                Text(
-                                    text = node.summary(),
-                                    fontSize = 11.5.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                val sumText = node.summary()
+                                if (sumText.isNotEmpty()) {
+                                    Text(
+                                        text = sumText,
+                                        fontSize = 11.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
 
                             // Latency badge to the left of the Test button

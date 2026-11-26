@@ -2,8 +2,11 @@ package com.toolbox.pocket.ui.screens
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.os.Build
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
@@ -40,6 +43,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -47,7 +51,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
@@ -58,7 +62,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.toolbox.pocket.ui.theme.LocalAppThemeVisuals
-import com.toolbox.pocket.ui.theme.liquidGlassSurface
 import com.toolbox.pocket.ui.theme.liquidPress
 
 private const val DEFAULT_HOME_URL = "https://cn.pornhub.com/"
@@ -71,6 +74,10 @@ fun BrowserScreen(
 ) {
     val visuals = LocalAppThemeVisuals.current
     val focusManager = LocalFocusManager.current
+
+    val barBg = if (visuals.isDark) Color(0xFF14161C) else Color(0xFFFFFFFF)
+    val pillBg = if (visuals.isDark) Color(0xFF232732) else Color(0xFFEEF1F6)
+    val barFg = if (visuals.isDark) Color(0xFFF5F5F7) else Color(0xFF1C1C1E)
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var urlInput by remember { mutableStateOf(DEFAULT_HOME_URL) }
@@ -88,26 +95,39 @@ fun BrowserScreen(
             else -> "https://www.bing.com/search?q=${android.net.Uri.encode(trimmed)}"
         }
         urlInput = target
-        webViewRef?.loadUrl(target)
-        focusManager.clearFocus()
+        runCatching {
+            webViewRef?.stopLoading()
+            webViewRef?.loadUrl(target)
+        }
+        runCatching { focusManager.clearFocus() }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            runCatching {
+                webViewRef?.stopLoading()
+                webViewRef?.destroy()
+                webViewRef = null
+            }
+        }
     }
 
     BackHandler(enabled = canGoBack) {
-        webViewRef?.goBack()
+        runCatching { webViewRef?.goBack() }
     }
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surface)
+            .background(barBg)
             .statusBarsPadding()
             .navigationBarsPadding()
             .imePadding()
     ) {
-        // Sleek Via-style top address bar
+        // High-contrast Via-style address bar
         Surface(
-            color = visuals.cardContainerColor,
-            contentColor = visuals.cardContentColor,
+            color = barBg,
+            contentColor = barFg,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column {
@@ -119,13 +139,11 @@ fun BrowserScreen(
                 ) {
                     Surface(
                         shape = RoundedCornerShape(50),
-                        color = visuals.innerFieldColor,
-                        contentColor = visuals.cardContentColor,
+                        color = pillBg,
+                        contentColor = barFg,
                         modifier = Modifier
                             .weight(1f)
                             .height(40.dp)
-                            .clip(RoundedCornerShape(50))
-                            .liquidGlassSurface(20.dp)
                     ) {
                         Row(
                             modifier = Modifier
@@ -148,7 +166,7 @@ fun BrowserScreen(
                                     Text(
                                         text = "输入网址或搜索...",
                                         fontSize = 13.5.sp,
-                                        color = visuals.cardContentColor.copy(alpha = 0.5f),
+                                        color = barFg.copy(alpha = 0.5f),
                                         maxLines = 1,
                                         softWrap = false,
                                         overflow = TextOverflow.Ellipsis
@@ -159,7 +177,7 @@ fun BrowserScreen(
                                     onValueChange = { urlInput = it },
                                     singleLine = true,
                                     textStyle = TextStyle(
-                                        color = visuals.cardContentColor,
+                                        color = barFg,
                                         fontSize = 13.5.sp
                                     ),
                                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -181,7 +199,7 @@ fun BrowserScreen(
                                     Icon(
                                         imageVector = Icons.Rounded.Close,
                                         contentDescription = "清空",
-                                        tint = visuals.cardContentColor.copy(alpha = 0.6f),
+                                        tint = barFg.copy(alpha = 0.6f),
                                         modifier = Modifier.size(15.dp)
                                     )
                                 }
@@ -192,7 +210,7 @@ fun BrowserScreen(
                     Spacer(modifier = Modifier.width(6.dp))
 
                     IconButton(
-                        onClick = { webViewRef?.reload() },
+                        onClick = { runCatching { webViewRef?.reload() } },
                         modifier = Modifier
                             .size(38.dp)
                             .liquidPress()
@@ -200,7 +218,7 @@ fun BrowserScreen(
                         Icon(
                             imageVector = Icons.Rounded.Refresh,
                             contentDescription = "刷新",
-                            tint = visuals.cardContentColor,
+                            tint = barFg,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -217,7 +235,7 @@ fun BrowserScreen(
             }
         }
 
-        // Full-screen WebView
+        // Crash-hardened WebView
         AndroidView(
             factory = { ctx ->
                 WebView(ctx).apply {
@@ -227,25 +245,43 @@ fun BrowserScreen(
                     settings.loadWithOverviewMode = true
                     settings.builtInZoomControls = true
                     settings.displayZoomControls = false
+                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                    settings.mediaPlaybackRequiresUserGesture = true
 
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(
                             view: WebView?,
                             request: WebResourceRequest?
-                        ): Boolean = false
+                        ): Boolean {
+                            val scheme = request?.url?.scheme?.lowercase() ?: return true
+                            // Only allow http/https inside WebView; ignore intent:// etc. so it never crashes
+                            return scheme != "http" && scheme != "https"
+                        }
 
                         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                             isLoading = true
-                            if (!url.isNullOrEmpty()) urlInput = url
+                            if (!url.isNullOrEmpty() && (url.startsWith("http://") || url.startsWith("https://"))) {
+                                urlInput = url
+                            }
                             canGoBack = view?.canGoBack() == true
                             canGoForward = view?.canGoForward() == true
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             isLoading = false
-                            if (!url.isNullOrEmpty()) urlInput = url
+                            if (!url.isNullOrEmpty() && (url.startsWith("http://") || url.startsWith("https://"))) {
+                                urlInput = url
+                            }
                             canGoBack = view?.canGoBack() == true
                             canGoForward = view?.canGoForward() == true
+                        }
+
+                        override fun onRenderProcessGone(
+                            view: WebView?,
+                            detail: RenderProcessGoneDetail?
+                        ): Boolean {
+                            // Prevent WebView renderer crash from taking down the entire app
+                            return true
                         }
                     }
 
@@ -267,8 +303,8 @@ fun BrowserScreen(
 
         // Minimal Via-style bottom toolbar
         Surface(
-            color = visuals.dockContainerColor,
-            contentColor = visuals.cardContentColor,
+            color = barBg,
+            contentColor = barFg,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
@@ -279,26 +315,26 @@ fun BrowserScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
-                    onClick = { webViewRef?.goBack() },
+                    onClick = { runCatching { webViewRef?.goBack() } },
                     enabled = canGoBack,
                     modifier = Modifier.liquidPress()
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                         contentDescription = "后退",
-                        tint = if (canGoBack) visuals.cardContentColor else visuals.cardContentColor.copy(alpha = 0.3f),
+                        tint = if (canGoBack) barFg else barFg.copy(alpha = 0.3f),
                         modifier = Modifier.size(21.dp)
                     )
                 }
                 IconButton(
-                    onClick = { webViewRef?.goForward() },
+                    onClick = { runCatching { webViewRef?.goForward() } },
                     enabled = canGoForward,
                     modifier = Modifier.liquidPress()
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
                         contentDescription = "前进",
-                        tint = if (canGoForward) visuals.cardContentColor else visuals.cardContentColor.copy(alpha = 0.3f),
+                        tint = if (canGoForward) barFg else barFg.copy(alpha = 0.3f),
                         modifier = Modifier.size(21.dp)
                     )
                 }
@@ -309,7 +345,7 @@ fun BrowserScreen(
                     Icon(
                         imageVector = Icons.Rounded.Home,
                         contentDescription = "主页",
-                        tint = visuals.cardContentColor,
+                        tint = barFg,
                         modifier = Modifier.size(21.dp)
                     )
                 }
@@ -320,7 +356,7 @@ fun BrowserScreen(
                     Icon(
                         imageVector = Icons.Rounded.Close,
                         contentDescription = "退出浏览器",
-                        tint = visuals.cardContentColor,
+                        tint = barFg,
                         modifier = Modifier.size(21.dp)
                     )
                 }
