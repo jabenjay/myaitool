@@ -148,7 +148,7 @@ fun SettingsScreen(
                 SettingsEntryCard(
                     icon = Icons.Rounded.SystemUpdate,
                     title = "检查更新",
-                    subtitle = if (isCheckingUpdate) "正在检查 GitHub Release..." else "当前版本 v$currentVersion",
+                    subtitle = if (isCheckingUpdate) "正在检查更新..." else "当前版本 v$currentVersion",
                     onClick = {
                         if (!isCheckingUpdate) {
                             isCheckingUpdate = true
@@ -182,7 +182,7 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     CircularProgressIndicator(modifier = Modifier.width(24.dp))
-                    Text("正在连接 GitHub 获取最新版本...")
+                    Text("正在检查更新...")
                 }
             },
             confirmButton = {}
