@@ -56,6 +56,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -75,6 +76,8 @@ import com.toolbox.pocket.tools.base64.Base64Variant
 import com.toolbox.pocket.tools.base64.LineWrapWidth
 import com.toolbox.pocket.ui.components.PinchZoomTextViewer
 import com.toolbox.pocket.ui.theme.LocalAppThemeVisuals
+import com.toolbox.pocket.ui.theme.liquidGlassSurface
+import com.toolbox.pocket.ui.theme.liquidPress
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -221,10 +224,11 @@ fun Base64Screen(
             Surface(
                 shape = MaterialTheme.shapes.large,
                 color = visuals.cardContainerColor,
-                border = visuals.cardBorder,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(topBoxHeightDp.dp)
+                    .clip(MaterialTheme.shapes.large)
+                    .liquidGlassSurface(26.dp)
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     Column(
@@ -376,10 +380,11 @@ fun Base64Screen(
             Surface(
                 shape = MaterialTheme.shapes.large,
                 color = visuals.cardContainerColor,
-                border = visuals.cardBorder,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(bottomBoxHeightDp.dp)
+                    .clip(MaterialTheme.shapes.large)
+                    .liquidGlassSurface(26.dp)
                     .padding(bottom = 8.dp)
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
