@@ -77,6 +77,7 @@ import com.toolbox.pocket.data.ThemeMode
 import com.toolbox.pocket.data.ThemePreferences
 import com.toolbox.pocket.ui.screens.Base64Screen
 import com.toolbox.pocket.ui.screens.BrowserScreen
+import com.toolbox.pocket.ui.screens.LogViewerScreen
 import com.toolbox.pocket.ui.screens.ProxySettingsScreen
 import com.toolbox.pocket.ui.screens.SettingsScreen
 import com.toolbox.pocket.ui.screens.ToolboxHomeScreen
@@ -297,7 +298,11 @@ fun PocketToolboxApp(
                             onBack = { navController.popBackStack() }
                         )
                     }
-                    composable("tool/browser") {
+                    composable(
+                        "tool/browser",
+                        enterTransition = { fadeIn(tween(180)) },
+                        exitTransition = { fadeOut(tween(150)) }
+                    ) {
                         BrowserScreen(
                             bookmarks = bookmarks,
                             onAddBookmark = { n, u -> bookmarkManager.addBookmark(n, u) },
@@ -313,6 +318,7 @@ fun PocketToolboxApp(
                             proxyState = proxyState,
                             bottomExtraPadding = floatingDockPadding,
                             onOpenProxySettings = { navController.navigate("settings/proxy") },
+                            onOpenLogs = { navController.navigate("settings/logs") },
                             onThemeModeChange = { themePreferences.setThemeMode(it) },
                             onUiStyleChange = { themePreferences.setUiStyle(it) },
                             onM3ColorSourceChange = { themePreferences.setM3ColorSource(it) },
@@ -324,6 +330,9 @@ fun PocketToolboxApp(
                             onDefaultLineNumbersChange = { themePreferences.setDefaultLineNumbers(it) },
                             onDefaultSoftWrapChange = { themePreferences.setDefaultSoftWrap(it) }
                         )
+                    }
+                    composable("settings/logs") {
+                        LogViewerScreen(onBack = { navController.popBackStack() })
                     }
                     composable("settings/proxy") {
                         ProxySettingsScreen(
@@ -439,7 +448,11 @@ fun PocketToolboxApp(
                             onBack = { navController.popBackStack() }
                         )
                     }
-                    composable("tool/browser") {
+                    composable(
+                        "tool/browser",
+                        enterTransition = { fadeIn(tween(180)) },
+                        exitTransition = { fadeOut(tween(150)) }
+                    ) {
                         BrowserScreen(
                             bookmarks = bookmarks,
                             onAddBookmark = { n, u -> bookmarkManager.addBookmark(n, u) },
@@ -454,6 +467,7 @@ fun PocketToolboxApp(
                             settings = settings,
                             proxyState = proxyState,
                             onOpenProxySettings = { navController.navigate("settings/proxy") },
+                            onOpenLogs = { navController.navigate("settings/logs") },
                             onThemeModeChange = { themePreferences.setThemeMode(it) },
                             onUiStyleChange = { themePreferences.setUiStyle(it) },
                             onM3ColorSourceChange = { themePreferences.setM3ColorSource(it) },
@@ -465,6 +479,9 @@ fun PocketToolboxApp(
                             onDefaultLineNumbersChange = { themePreferences.setDefaultLineNumbers(it) },
                             onDefaultSoftWrapChange = { themePreferences.setDefaultSoftWrap(it) }
                         )
+                    }
+                    composable("settings/logs") {
+                        LogViewerScreen(onBack = { navController.popBackStack() })
                     }
                     composable("settings/proxy") {
                         ProxySettingsScreen(

@@ -62,7 +62,7 @@ class LocalProxyRelay(
 
         val ss = ServerSocket(0, 64, InetAddress.getByName("127.0.0.1"))
         serverSocket = ss
-        pool = Executors.newCachedThreadPool()
+        pool = Executors.newFixedThreadPool(24)
         running = true
 
         acceptThread = Thread {
@@ -167,10 +167,8 @@ class LocalProxyRelay(
             upstream.soTimeout = 0
             client.soTimeout = 0
 
-            val t1 = Thread { pipe(cIn, upstream.getOutputStream(), client, upstream) }
-            val t2 = Thread { pipe(upstream.getInputStream(), cOut, upstream, client) }
-            t1.start()
-            t2.start()
+            pool?.execute { pipe(cIn, upstream.getOutputStream(), client, upstream) }
+            pool?.execute { pipe(upstream.getInputStream(), cOut, upstream, client) }
         } catch (_: Exception) {
             runCatching { client.close() }
         }

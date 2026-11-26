@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BlurOn
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.FormatListNumbered
@@ -73,6 +74,7 @@ fun SettingsScreen(
     proxyState: ProxyState,
     bottomExtraPadding: Dp = 0.dp,
     onOpenProxySettings: () -> Unit,
+    onOpenLogs: () -> Unit,
     onThemeModeChange: (ThemeMode) -> Unit,
     onUiStyleChange: (UiStyle) -> Unit,
     onM3ColorSourceChange: (M3ColorSource) -> Unit,
@@ -151,6 +153,39 @@ fun SettingsScreen(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            item {
+                GlassCard {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .liquidPress(pressedScale = 0.98f)
+                            .clickable(onClick = onOpenLogs)
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.BugReport,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Text(
+                            text = "运行日志",
+                            fontSize = 15.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
                         Icon(
                             imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
                             contentDescription = null,

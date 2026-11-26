@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -77,6 +78,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -95,6 +97,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
+import com.toolbox.pocket.data.AppLogManager
 import com.toolbox.pocket.data.BookmarkItem
 import com.toolbox.pocket.ui.theme.LocalAppThemeVisuals
 import com.toolbox.pocket.ui.theme.liquidPress
@@ -143,6 +146,7 @@ fun BrowserScreen(
         showBookmarks = false
         runCatching {
             webViewRef?.stopLoading()
+            AppLogManager.log("BROWSER", "访问: $target")
             webViewRef?.loadUrl(target)
         }
         runCatching { focusManager.clearFocus() }
@@ -337,10 +341,23 @@ fun BrowserScreen(
                                 canGoForward = view?.canGoForward() == true
                             }
 
+                            override fun onReceivedError(
+                                view: WebView?,
+                                request: WebResourceRequest?,
+                                error: WebResourceError?
+                            ) {
+                                if (request?.isForMainFrame == true) {
+                                    AppLogManager.log("BROWSER", "加载失败: ${error?.description} (${error?.errorCode})")
+                                }
+                            }
+
                             override fun onRenderProcessGone(
                                 view: WebView?,
                                 detail: RenderProcessGoneDetail?
-                            ): Boolean = true
+                            ): Boolean {
+                                AppLogManager.log("BROWSER", "WebView渲染进程异常退出，已拦截防闪退")
+                                return true
+                            }
                         }
 
                         webChromeClient = object : WebChromeClient() {
@@ -350,7 +367,8 @@ fun BrowserScreen(
                             }
                         }
 
-                        loadUrl(DEFAULT_HOME_URL)
+                        AppLogManager.log("BROWSER", "初始化WebView并加载主页")
+                    loadUrl(DEFAULT_HOME_URL)
                         webViewRef = this
                     }
                 },
@@ -533,23 +551,25 @@ private fun BookmarkDropdownPanel(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 320.dp)
+                    .clipToBounds()
             ) {
                 itemsIndexed(bookmarks, key = { _, item -> item.id }) { index, item ->
                     val isDragging = draggedId == item.id
                     val scale by animateFloatAsState(
-                        targetValue = if (isDragging) 1.03f else 1f,
+                        targetValue = if (isDragging) 1.015f else 1f,
                         animationSpec = spring(
-                            dampingRatio = 0.72f,
+                            dampingRatio = 0.76f,
                             stiffness = Spring.StiffnessMedium
                         ),
                         label = "bookmarkFloatScale"
                     )
                     val elevation by animateDpAsState(
-                        targetValue = if (isDragging) 8.dp else 0.dp,
+                        targetValue = if (isDragging) 12.dp else 0.dp,
                         label = "bookmarkFloatElevation"
                     )
+                    val isDarkPanel = panelBg.red < 0.5f
                     val rowBg = if (isDragging) {
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                        if (isDarkPanel) Color(0xFF2B3140) else Color(0xFFF0F4FA)
                     } else {
                         panelBg
                     }
