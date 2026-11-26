@@ -1,0 +1,7 @@
+<resources>
+    <color name="ic_bg_base">#1E4B9E</color>
+    <color name="ic_bg_wave_light">#2E65C7</color>
+    <color name="ic_bg_wave_dark">#153778</color>
+    <color name="ic_fg_box">#EBF1FF</color>
+    <color name="ic_fg_clasp">#1E4B9E</color>
+</resources>

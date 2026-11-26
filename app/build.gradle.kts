@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.toolbox.pocket"
+    namespace = "com.jaben.tools"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.toolbox.pocket"
+        applicationId = "com.jaben.tools"
         minSdk = 24
         targetSdk = 36
         versionCode = 1

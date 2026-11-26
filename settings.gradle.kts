@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PocketToolbox"
+rootProject.name = "Jools"
 include(":app")
