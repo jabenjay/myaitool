@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build Debug APK
+    name: Build Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -25,12 +25,21 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Build Debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+      - name: Generate CI Signing Key
+        run: |
+          keytool -genkeypair -v \
+            -keystore app/ci-release.jks \
+            -alias toolbox \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass toolbox_ci_password -keypass toolbox_ci_password \
+            -dname "CN=PocketToolbox, OU=CI, O=PocketToolbox, L=Local, ST=Local, C=CN"
+
+      - name: Build Release APK
+        run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PocketToolbox-Debug-APK
-          path: app/build/outputs/apk/debug/*.apk
+          name: PocketToolbox-Release-APK
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
