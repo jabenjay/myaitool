@@ -49,6 +49,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -60,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -91,6 +93,12 @@ fun FileCompressorScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    DisposableEffect(Unit) {
+        onDispose {
+            FileCompressorEngine.clearCache(context)
+        }
+    }
+
     var sourceMeta by remember { mutableStateOf<CompressSourceMeta?>(null) }
     var outputResult by remember { mutableStateOf<CompressOutputResult?>(null) }
     var savedUri by remember { mutableStateOf<Uri?>(null) }
@@ -100,7 +108,8 @@ fun FileCompressorScreen(
     var progress by remember { mutableFloatStateOf(0f) }
     var compressJob by remember { mutableStateOf<Job?>(null) }
 
-    var compressionPercent by rememberSaveable { mutableIntStateOf(55) }
+    // Reversed slider: 10 (smallest) .. 95 (closest to original)
+    var targetSizePercent by rememberSaveable { mutableIntStateOf(50) }
     var videoMaxHeight by rememberSaveable { mutableIntStateOf(0) }
     var videoTargetFps by rememberSaveable { mutableIntStateOf(0) }
     var useHevc by rememberSaveable { mutableStateOf(true) }
@@ -118,9 +127,9 @@ fun FileCompressorScreen(
         } else null
     }
 
-    val estimatedSize = remember(
+    val estimate = remember(
         sourceMeta,
-        compressionPercent,
+        targetSizePercent,
         videoMaxHeight,
         videoTargetFps,
         useHevc,
@@ -129,20 +138,27 @@ fun FileCompressorScreen(
         sourceMeta?.let {
             FileCompressorEngine.estimateCompressedSize(
                 meta = it,
-                compressionPercent = compressionPercent,
+                targetSizePercent = targetSizePercent,
                 videoMaxHeight = videoMaxHeight,
                 videoTargetFps = videoTargetFps,
                 useHevc = useHevc,
                 imageScalePercent = imageScalePercent
             )
-        } ?: 0L
+        }
     }
 
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
-            sourceMeta = FileCompressorEngine.inspectFile(context, uri)
+            FileCompressorEngine.clearCache(context)
+            val meta = FileCompressorEngine.inspectFile(context, uri)
+            sourceMeta = meta
+            if (meta.fileType == CompressFileType.VIDEO) {
+                val (autoH, autoFps) = FileCompressorEngine.suggestVideoParams(meta, targetSizePercent)
+                videoMaxHeight = autoH
+                videoTargetFps = autoFps
+            }
             outputResult = null
             savedUri = null
             errorMsg = null
@@ -370,6 +386,10 @@ fun FileCompressorScreen(
                 }
             }
 
+            // Reversed slider: Left (smaller) <-> Right (closer to original)
+            val warnColor = Color(0xFFF59E0B)
+            val isBelowFloor = estimate?.isBelowFloor == true
+
             Surface(
                 shape = RoundedCornerShape(22.dp),
                 color = visuals.cardContainerColor,
@@ -388,15 +408,15 @@ fun FileCompressorScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "压缩程度",
+                            text = "目标体积比例（左小右大）",
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "${compressionPercent}%",
+                            text = "${targetSizePercent}%",
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = if (isBelowFloor) warnColor else MaterialTheme.colorScheme.primary
                         )
                     }
 
@@ -422,8 +442,18 @@ fun FileCompressorScreen(
                         }
 
                         Slider(
-                            value = compressionPercent.toFloat(),
-                            onValueChange = { compressionPercent = it.roundToInt().coerceIn(10, 95) },
+                            value = targetSizePercent.toFloat(),
+                            onValueChange = { raw ->
+                                val pct = raw.roundToInt().coerceIn(10, 95)
+                                targetSizePercent = pct
+                                sourceMeta?.let { meta ->
+                                    if (meta.fileType == CompressFileType.VIDEO) {
+                                        val (autoH, autoFps) = FileCompressorEngine.suggestVideoParams(meta, pct)
+                                        videoMaxHeight = autoH
+                                        videoTargetFps = autoFps
+                                    }
+                                }
+                            },
                             valueRange = 10f..95f,
                             enabled = sourceMeta != null && !isCompressing,
                             modifier = Modifier
@@ -442,14 +472,23 @@ fun FileCompressorScreen(
                                 textAlign = TextAlign.End
                             )
                             Text(
-                                text = if (sourceMeta != null) formatBytes(estimatedSize) else "--",
+                                text = if (estimate != null) formatBytes(estimate.estimatedBytes) else "--",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = if (isBelowFloor) warnColor else MaterialTheme.colorScheme.primary,
                                 maxLines = 1,
                                 textAlign = TextAlign.End
                             )
                         }
+                    }
+
+                    if (isBelowFloor) {
+                        Text(
+                            text = "当前分辨率/帧率较高，无法压至 ${formatBytes(estimate!!.requestedBytes)}，将以所选分辨率和帧率为准输出",
+                            fontSize = 11.5.sp,
+                            color = warnColor,
+                            lineHeight = 16.sp
+                        )
                     }
                 }
             }
@@ -486,6 +525,7 @@ fun FileCompressorScreen(
                                 compressJob?.cancel()
                                 isCompressing = false
                                 progress = 0f
+                                FileCompressorEngine.clearCache(context)
                             },
                             modifier = Modifier.align(Alignment.End)
                         ) {
@@ -507,7 +547,7 @@ fun FileCompressorScreen(
                                 val res = FileCompressorEngine.compress(
                                     context = context,
                                     meta = meta,
-                                    compressionPercent = compressionPercent,
+                                    targetSizePercent = targetSizePercent,
                                     videoMaxHeight = videoMaxHeight,
                                     videoTargetFps = videoTargetFps,
                                     useHevc = useHevc,
@@ -517,8 +557,10 @@ fun FileCompressorScreen(
                                 )
                                 outputResult = res
                             } catch (_: CancellationException) {
+                                FileCompressorEngine.clearCache(context)
                                 errorMsg = "已取消压缩"
                             } catch (t: Throwable) {
+                                FileCompressorEngine.clearCache(context)
                                 errorMsg = t.message ?: "压缩失败，请尝试降低参数或更换编码"
                             } finally {
                                 isCompressing = false
@@ -614,6 +656,7 @@ fun FileCompressorScreen(
                                         )
                                         if (uri != null) {
                                             savedUri = uri
+                                            FileCompressorEngine.clearCache(context)
                                             Toast.makeText(context, "已保存到 $saveDirLabel", Toast.LENGTH_SHORT).show()
                                         } else {
                                             Toast.makeText(context, "保存失败，请检查目录权限", Toast.LENGTH_SHORT).show()
@@ -638,7 +681,10 @@ fun FileCompressorScreen(
                                             fileName = res.outputName,
                                             mimeType = res.mimeType,
                                             sourceFile = res.tempFile
-                                        )?.also { savedUri = it }
+                                        )?.also {
+                                            savedUri = it
+                                            FileCompressorEngine.clearCache(context)
+                                        }
                                         if (shareUri != null) {
                                             val intent = Intent(Intent.ACTION_SEND).apply {
                                                 type = res.mimeType

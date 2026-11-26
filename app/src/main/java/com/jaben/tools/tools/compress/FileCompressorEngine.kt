@@ -65,6 +65,12 @@ data class CompressSourceMeta(
     val fps: Int = 30
 )
 
+data class CompressEstimate(
+    val estimatedBytes: Long,
+    val requestedBytes: Long,
+    val isBelowFloor: Boolean
+)
+
 data class CompressOutputResult(
     val tempFile: File,
     val outputName: String,
@@ -74,6 +80,12 @@ data class CompressOutputResult(
 )
 
 object FileCompressorEngine {
+
+    fun clearCache(context: Context) {
+        runCatching {
+            File(context.cacheDir, "compressor_out").deleteRecursively()
+        }
+    }
 
     fun inspectFile(context: Context, uri: Uri): CompressSourceMeta {
         var name = "未命名文件"
@@ -181,41 +193,101 @@ object FileCompressorEngine {
         )
     }
 
+    /**
+     * Suggests (videoMaxHeight, videoTargetFps) for a given targetSizePercent (10..95, higher = larger file),
+     * prioritizing FPS reduction before Resolution reduction.
+     */
+    fun suggestVideoParams(meta: CompressSourceMeta, targetSizePercent: Int): Pair<Int, Int> {
+        val pct = targetSizePercent.coerceIn(10, 95)
+        return when {
+            pct >= 72 -> 0 to 0 // Original resolution & FPS
+            pct >= 52 -> {
+                // Prioritize lowering FPS first
+                val targetFps = if (meta.fps > 30) 30 else 24
+                0 to targetFps
+            }
+            pct >= 34 -> {
+                val targetFps = 24
+                val targetH = when {
+                    meta.height > 1080 -> 1080
+                    meta.height > 720 -> 720
+                    else -> 0
+                }
+                targetH to targetFps
+            }
+            pct >= 20 -> {
+                val targetFps = 15
+                val targetH = if (meta.height > 720) 720 else 480
+                targetH to targetFps
+            }
+            else -> {
+                val targetFps = 15
+                val targetH = if (meta.height > 480) 480 else 360
+                targetH to targetFps
+            }
+        }
+    }
+
     fun estimateCompressedSize(
         meta: CompressSourceMeta,
-        compressionPercent: Int, // 10 (lightest) .. 95 (strongest)
+        targetSizePercent: Int, // 10 (smallest) .. 95 (closest to original)
         videoMaxHeight: Int,
         videoTargetFps: Int,
         useHevc: Boolean,
         imageScalePercent: Int
-    ): Long {
-        if (meta.sizeBytes <= 0L) return 0L
-        val keepRatio = (100 - compressionPercent).coerceIn(5, 95) / 100.0
+    ): CompressEstimate {
+        if (meta.sizeBytes <= 0L) return CompressEstimate(0L, 0L, false)
+        val targetRatio = targetSizePercent.coerceIn(10, 95) / 100.0
+        val requestedBytes = (meta.sizeBytes * targetRatio).toLong().coerceAtLeast(1024L)
 
         return when (meta.fileType) {
             CompressFileType.VIDEO -> {
-                val resFactor = if (videoMaxHeight > 0 && meta.height > videoMaxHeight) {
-                    (videoMaxHeight.toDouble() / meta.height).let { it * it }.coerceIn(0.15, 1.0)
-                } else 1.0
-                val fpsFactor = if (videoTargetFps > 0 && meta.fps > videoTargetFps) {
-                    (videoTargetFps.toDouble() / meta.fps).coerceIn(0.35, 1.0)
-                } else 1.0
+                val srcH = meta.height.coerceAtLeast(360)
+                val srcW = meta.width.coerceAtLeast(640)
+                val effH = if (videoMaxHeight > 0 && srcH > videoMaxHeight) videoMaxHeight else srcH
+                val effW = (srcW.toDouble() * effH / srcH).roundToInt().coerceAtLeast(2)
+                val effFps = if (videoTargetFps > 0 && meta.fps > videoTargetFps) videoTargetFps else meta.fps
+
+                val resRatio = (effH.toDouble() / srcH).let { it * it }.coerceIn(0.08, 1.0)
+                val fpsRatio = (effFps.toDouble() / meta.fps.coerceAtLeast(1)).let { Math.pow(it, 0.75) }.coerceIn(0.25, 1.0)
                 val codecFactor = if (useHevc) 0.72 else 1.0
-                val est = meta.sizeBytes * keepRatio * (0.4 + 0.6 * resFactor) * (0.6 + 0.4 * fpsFactor) * codecFactor
-                est.toLong().coerceIn((meta.sizeBytes * 0.04).toLong().coerceAtLeast(1024L), meta.sizeBytes)
+
+                // Realistic minimum bitrate floor for the chosen resolution + FPS
+                val durSec = (meta.durationMs / 1000.0).coerceAtLeast(1.0)
+                val bppFloor = if (useHevc) 0.026 else 0.038
+                val minVideoBps = effW * effH * effFps * bppFloor
+                val minBytesByBpp = ((minVideoBps + 64_000.0) * durSec / 8.0).toLong()
+                val minBytesByRatio = (meta.sizeBytes * resRatio * fpsRatio * codecFactor * 0.28).toLong()
+                val floorBytes = max(minBytesByBpp, minBytesByRatio).coerceAtMost(meta.sizeBytes)
+
+                // Max reasonable size at this resolution/FPS/codec
+                val ceilingBytes = (meta.sizeBytes * resRatio * fpsRatio * codecFactor * 1.02)
+                    .toLong()
+                    .coerceIn(floorBytes, meta.sizeBytes)
+
+                val isBelowFloor = requestedBytes < floorBytes
+                val actualEst = requestedBytes.coerceIn(floorBytes, ceilingBytes)
+                CompressEstimate(
+                    estimatedBytes = actualEst,
+                    requestedBytes = requestedBytes,
+                    isBelowFloor = isBelowFloor
+                )
             }
             CompressFileType.IMAGE -> {
                 val scaleFactor = (imageScalePercent / 100.0).let { it * it }
-                val est = meta.sizeBytes * keepRatio * scaleFactor
-                est.toLong().coerceIn(1024L, meta.sizeBytes)
+                val floorBytes = max(2048L, (meta.sizeBytes * scaleFactor * 0.08).toLong())
+                val est = (meta.sizeBytes * targetRatio * scaleFactor).toLong().coerceIn(floorBytes, meta.sizeBytes)
+                CompressEstimate(est, requestedBytes, requestedBytes < floorBytes)
             }
             CompressFileType.AUDIO -> {
-                val est = meta.sizeBytes * keepRatio
-                est.toLong().coerceIn(2048L, meta.sizeBytes)
+                val floorBytes = max(4096L, (meta.sizeBytes * 0.12).toLong())
+                val est = requestedBytes.coerceIn(floorBytes, meta.sizeBytes)
+                CompressEstimate(est, requestedBytes, requestedBytes < floorBytes)
             }
             CompressFileType.OTHER -> {
-                val levelFactor = 0.88 - (compressionPercent / 100.0) * 0.45
-                (meta.sizeBytes * levelFactor).toLong().coerceIn(256L, meta.sizeBytes)
+                val compressionStrength = (100 - targetSizePercent) / 100.0
+                val est = (meta.sizeBytes * (0.90 - compressionStrength * 0.42)).toLong().coerceIn(512L, meta.sizeBytes)
+                CompressEstimate(est, requestedBytes, false)
             }
         }
     }
@@ -223,12 +295,12 @@ object FileCompressorEngine {
     suspend fun compress(
         context: Context,
         meta: CompressSourceMeta,
-        compressionPercent: Int,
+        targetSizePercent: Int,
         videoMaxHeight: Int,
         videoTargetFps: Int,
         useHevc: Boolean,
         imageScalePercent: Int,
-        imageOutputExt: String, // "jpg" or "webp"
+        imageOutputExt: String,
         onProgress: (Float) -> Unit
     ): CompressOutputResult {
         val outDir = File(context.cacheDir, "compressor_out").apply { mkdirs() }
@@ -239,12 +311,20 @@ object FileCompressorEngine {
 
         return when (meta.fileType) {
             CompressFileType.VIDEO -> {
+                val estimate = estimateCompressedSize(
+                    meta = meta,
+                    targetSizePercent = targetSizePercent,
+                    videoMaxHeight = videoMaxHeight,
+                    videoTargetFps = videoTargetFps,
+                    useHevc = useHevc,
+                    imageScalePercent = imageScalePercent
+                )
                 val outName = "${baseName}_cmp_${suffix}.mp4"
                 val outFile = File(outDir, outName)
                 compressVideoGpu(
                     context = context,
                     meta = meta,
-                    compressionPercent = compressionPercent,
+                    targetOutputBytes = estimate.estimatedBytes,
                     maxHeight = videoMaxHeight,
                     targetFps = videoTargetFps,
                     useHevc = useHevc,
@@ -267,7 +347,7 @@ object FileCompressorEngine {
                 compressImage(
                     context = context,
                     uri = meta.uri,
-                    compressionPercent = compressionPercent,
+                    targetSizePercent = targetSizePercent,
                     scalePercent = imageScalePercent,
                     useWebp = ext == "webp",
                     outFile = outFile,
@@ -282,7 +362,7 @@ object FileCompressorEngine {
                 )
             }
             CompressFileType.AUDIO -> {
-                val qualityRatio = (100 - compressionPercent).coerceIn(10, 95) / 100f
+                val qualityRatio = targetSizePercent.coerceIn(10, 95) / 100f
                 val targetKbps = (32 + (288 * qualityRatio)).roundToInt().coerceIn(32, 320)
                 val res = FormatFactoryEngine.convert(
                     context = context,
@@ -291,18 +371,23 @@ object FileCompressorEngine {
                     audioBitrateKbps = targetKbps,
                     onProgress = onProgress
                 )
+                // Move into compressor_out and clean format_factory_out
+                val outName = "${baseName}_cmp_${suffix}.m4a"
+                val outFile = File(outDir, outName)
+                res.tempFile.copyTo(outFile, overwrite = true)
+                FormatFactoryEngine.clearCache(context)
                 CompressOutputResult(
-                    tempFile = res.tempFile,
-                    outputName = "${baseName}_cmp_${suffix}.m4a",
+                    tempFile = outFile,
+                    outputName = outName,
                     mimeType = "audio/mp4",
                     subFolder = OutputStorageHelper.SUB_SOUNDS,
-                    outputSizeBytes = res.outputSizeBytes
+                    outputSizeBytes = outFile.length()
                 )
             }
             CompressFileType.OTHER -> {
                 val outName = "${baseName}_cmp_${suffix}.zip"
                 val outFile = File(outDir, outName)
-                compressToZip(context, meta, compressionPercent, outFile, onProgress)
+                compressToZip(context, meta, targetSizePercent, outFile, onProgress)
                 CompressOutputResult(
                     tempFile = outFile,
                     outputName = outName,
@@ -318,27 +403,28 @@ object FileCompressorEngine {
     private suspend fun compressVideoGpu(
         context: Context,
         meta: CompressSourceMeta,
-        compressionPercent: Int,
+        targetOutputBytes: Long,
         maxHeight: Int,
         targetFps: Int,
         useHevc: Boolean,
         outFile: File,
         onProgress: (Float) -> Unit
     ) {
-        val keepRatio = (100 - compressionPercent).coerceIn(8, 95) / 100f
-        val baseBitrate = if (meta.videoBitrateBps > 100_000) meta.videoBitrateBps else 4_000_000
-        val hevcFactor = if (useHevc) 0.72f else 1.0f
-        val targetBitrate = (baseBitrate * keepRatio * hevcFactor).roundToInt().coerceIn(250_000, 20_000_000)
+        val durSec = (meta.durationMs / 1000.0).coerceAtLeast(1.0)
+        val totalTargetBps = (targetOutputBytes * 8.0 / durSec).roundToInt()
+        val targetVideoBps = (totalTargetBps - 96_000).coerceIn(250_000, 20_000_000)
 
         AppLogManager.log(
             "COMPRESS",
-            "GPU视频压缩: ${meta.displayName}, bitrate=${targetBitrate / 1000}kbps, h=$maxHeight, fps=$targetFps, hevc=$useHevc"
+            "GPU视频压缩: ${meta.displayName}, videoBitrate=${targetVideoBps / 1000}kbps, h=$maxHeight, fps=$targetFps, hevc=$useHevc"
         )
 
         val deferred = CompletableDeferred<Unit>()
         val transformer = withContext(Dispatchers.Main) {
             val videoEffects = buildList {
-                if (maxHeight > 0) add(Presentation.createForHeight(maxHeight))
+                if (maxHeight > 0 && meta.height > maxHeight) {
+                    add(Presentation.createForHeight(maxHeight))
+                }
                 if (targetFps > 0 && targetFps < meta.fps) {
                     add(FrameDropEffect.createDefaultFrameDropEffect(targetFps.toFloat()))
                 }
@@ -351,7 +437,7 @@ object FileCompressorEngine {
             val encoderFactory = DefaultEncoderFactory.Builder(context)
                 .setRequestedVideoEncoderSettings(
                     VideoEncoderSettings.Builder()
-                        .setBitrate(targetBitrate)
+                        .setBitrate(targetVideoBps)
                         .build()
                 )
                 .build()
@@ -402,7 +488,7 @@ object FileCompressorEngine {
     private suspend fun compressImage(
         context: Context,
         uri: Uri,
-        compressionPercent: Int,
+        targetSizePercent: Int,
         scalePercent: Int,
         useWebp: Boolean,
         outFile: File,
@@ -428,7 +514,7 @@ object FileCompressorEngine {
         }
 
         onProgress(0.55f)
-        val quality = (105 - compressionPercent).coerceIn(10, 95)
+        val quality = targetSizePercent.coerceIn(10, 95)
         try {
             FileOutputStream(outFile).use { fos ->
                 if (useWebp) {
@@ -451,11 +537,11 @@ object FileCompressorEngine {
     private suspend fun compressToZip(
         context: Context,
         meta: CompressSourceMeta,
-        compressionPercent: Int,
+        targetSizePercent: Int,
         outFile: File,
         onProgress: (Float) -> Unit
     ) = withContext(Dispatchers.IO) {
-        val level = (compressionPercent / 11).coerceIn(1, Deflater.BEST_COMPRESSION)
+        val level = ((100 - targetSizePercent) / 10).coerceIn(1, Deflater.BEST_COMPRESSION)
         val total = meta.sizeBytes.coerceAtLeast(1L)
         var readBytes = 0L
         val buf = ByteArray(8192)

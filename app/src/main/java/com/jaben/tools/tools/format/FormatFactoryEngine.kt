@@ -106,6 +106,10 @@ data class ConversionResult(
 
 object FormatFactoryEngine {
 
+    fun clearCache(context: Context) {
+        runCatching { File(context.cacheDir, "format_factory_out").deleteRecursively() }
+    }
+
     fun inspectSource(context: Context, uri: Uri, category: MediaCategory): SourceMediaInfo {
         var name = "未命名文件"
         var size = -1L

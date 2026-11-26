@@ -51,6 +51,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -92,6 +93,10 @@ fun FormatFactoryScreen(
     val visuals = LocalAppThemeVisuals.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    DisposableEffect(Unit) {
+        onDispose { FormatFactoryEngine.clearCache(context) }
+    }
 
     var selectedCategoryIdx by rememberSaveable { mutableIntStateOf(0) }
     val category = MediaCategory.entries[selectedCategoryIdx]
@@ -584,6 +589,7 @@ fun FormatFactoryScreen(
                                         val uri = FormatFactoryEngine.saveToGalleryOrDownloads(context, res)
                                         if (uri != null) {
                                             savedUri = uri
+                                            FormatFactoryEngine.clearCache(context)
                                             Toast.makeText(context, "已保存到 $saveDirLabel", Toast.LENGTH_SHORT).show()
                                         } else {
                                             Toast.makeText(context, "保存失败，请检查存储权限", Toast.LENGTH_SHORT).show()
@@ -604,6 +610,7 @@ fun FormatFactoryScreen(
                                     onClick = {
                                         val shareUri = savedUri ?: FormatFactoryEngine.saveToGalleryOrDownloads(context, res)?.also {
                                             savedUri = it
+                                            FormatFactoryEngine.clearCache(context)
                                         }
                                         if (shareUri != null) {
                                             val shareIntent = Intent(Intent.ACTION_SEND).apply {

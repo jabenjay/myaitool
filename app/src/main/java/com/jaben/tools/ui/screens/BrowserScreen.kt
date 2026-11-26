@@ -59,6 +59,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Public
@@ -114,6 +115,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import com.jaben.tools.data.AppLogManager
 import com.jaben.tools.data.BookmarkItem
+import com.jaben.tools.data.ProxyLatency
+import com.jaben.tools.data.ProxyState
 import com.jaben.tools.ui.theme.LocalAppThemeVisuals
 import com.jaben.tools.ui.theme.liquidPress
 
@@ -125,6 +128,9 @@ fun BrowserScreen(
     initialUrl: String = DEFAULT_HOME_URL,
     homeUrl: String = DEFAULT_HOME_URL,
     bookmarks: List<BookmarkItem>,
+    proxyState: ProxyState,
+    onToggleProxy: (Boolean) -> Unit,
+    onTestActiveProxy: () -> Unit,
     onSetHomeUrl: (String) -> Unit,
     onAddBookmark: (String, String) -> Unit,
     onUpdateBookmark: (String, String, String) -> Unit,
@@ -159,6 +165,13 @@ fun BrowserScreen(
     var isLoading by remember { mutableStateOf(true) }
     var showLoadingOverlay by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) { kotlinx.coroutines.delay(6000); showLoadingOverlay = false }
+    LaunchedEffect(proxyState.enabled, proxyState.selectedId) {
+        val sid = proxyState.selectedId
+        if (proxyState.enabled && sid != null && proxyState.latencies[sid] == null) {
+            onTestActiveProxy()
+        }
+    }
+
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
 
@@ -305,6 +318,38 @@ fun BrowserScreen(
                     }
 
                     Spacer(modifier = Modifier.width(4.dp))
+
+                    val activeLatency = proxyState.selectedId?.let { proxyState.latencies[it] }
+                    val proxyIconTint = when {
+                        !proxyState.enabled -> barFg.copy(alpha = 0.72f)
+                        activeLatency is ProxyLatency.Success && activeLatency.ms < 600L -> Color(0xFF22C55E)
+                        activeLatency is ProxyLatency.Success -> Color(0xFFF59E0B)
+                        activeLatency is ProxyLatency.Failed -> Color(0xFFEF4444)
+                        else -> MaterialTheme.colorScheme.primary
+                    }
+
+                    IconButton(
+                        onClick = {
+                            val next = !proxyState.enabled
+                            onToggleProxy(next)
+                            if (next) {
+                                onTestActiveProxy()
+                                Toast.makeText(context, "代理已开启", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "代理已关闭", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .liquidPress()
+                    ) {
+                        Icon(
+                            imageVector = if (proxyState.enabled) Icons.Rounded.Public else Icons.Outlined.Public,
+                            contentDescription = "代理开关",
+                            tint = proxyIconTint,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
 
                     IconButton(
                         onClick = { runCatching { webViewRef?.reload() } },
