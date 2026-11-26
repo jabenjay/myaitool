@@ -75,6 +75,7 @@ fun ProxySettingsScreen(
     onDeleteProxy: (String) -> Unit,
     onTestNode: (String) -> Unit,
     onTestAllNodes: () -> Unit,
+    onRefreshGfwRules: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val visuals = LocalAppThemeVisuals.current
@@ -186,8 +187,22 @@ fun ProxySettingsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 softWrap = false,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
                             )
+                            TextButton(
+                                onClick = onRefreshGfwRules,
+                                enabled = !gfwRuleState.isUpdating,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.liquidPress()
+                            ) {
+                                Text(
+                                    text = if (gfwRuleState.isUpdating) "更新中" else "手动更新",
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
                         }
                     }
                 }

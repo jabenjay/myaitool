@@ -20,6 +20,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -196,9 +197,10 @@ fun BrowserScreen(
                         shape = RoundedCornerShape(50),
                         color = pillBg,
                         contentColor = barFg,
+                        border = BorderStroke(1.dp, barFg.copy(alpha = 0.14f)),
                         modifier = Modifier
                             .weight(1f)
-                            .height(40.dp)
+                            .height(42.dp)
                     ) {
                         Row(
                             modifier = Modifier
@@ -214,7 +216,9 @@ fun BrowserScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Box(
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(24.dp),
                                 contentAlignment = Alignment.CenterStart
                             ) {
                                 if (urlInput.isEmpty()) {

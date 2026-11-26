@@ -62,7 +62,7 @@ class LocalProxyRelay(
 
         val ss = ServerSocket(0, 64, InetAddress.getByName("127.0.0.1"))
         serverSocket = ss
-        pool = Executors.newFixedThreadPool(24)
+        pool = Executors.newCachedThreadPool()
         running = true
 
         acceptThread = Thread {
@@ -152,23 +152,42 @@ class LocalProxyRelay(
             val upstream = if (gfwRuleManager.isGfwBlockedHost(targetHost)) {
                 connectViaUpstream(targetHost, targetPort)
             } else {
-                Socket().apply {
-                    connect(InetSocketAddress(targetHost, targetPort), 8000)
-                }
+                runCatching {
+                    Socket().apply {
+                        connect(InetSocketAddress(targetHost, targetPort), 8000)
+                    }
+                }.getOrNull()
             }
 
             if (upstream == null) {
                 sendSocks5Reply(cOut, 0x05)
-                client.close()
+                runCatching { client.close() }
                 return
             }
 
-            sendSocks5Reply(cOut, 0x00)
-            upstream.soTimeout = 0
-            client.soTimeout = 0
+            val uIn = upstream.getInputStream()
+            val uOut = upstream.getOutputStream()
 
-            pool?.execute { pipe(cIn, upstream.getOutputStream(), client, upstream) }
-            pool?.execute { pipe(upstream.getInputStream(), cOut, upstream, client) }
+            sendSocks5Reply(cOut, 0x00)
+            upstream.soTimeout = 25000
+            client.soTimeout = 25000
+
+            pool?.execute {
+                try {
+                    pipe(cIn, uOut, client, upstream)
+                } catch (_: Throwable) {
+                    runCatching { client.close() }
+                    runCatching { upstream.close() }
+                }
+            }
+            pool?.execute {
+                try {
+                    pipe(uIn, cOut, upstream, client)
+                } catch (_: Throwable) {
+                    runCatching { upstream.close() }
+                    runCatching { client.close() }
+                }
+            }
         } catch (_: Exception) {
             runCatching { client.close() }
         }

@@ -54,6 +54,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -86,6 +87,7 @@ import com.toolbox.pocket.ui.theme.PocketToolboxTheme
 import com.toolbox.pocket.ui.theme.liquidGlassSurface
 import com.toolbox.pocket.ui.theme.liquidPress
 import androidx.compose.ui.graphics.Color as ComposeColor
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -152,6 +154,7 @@ fun PocketToolboxApp(
     val proxyState by proxyManager.state.collectAsState()
     val gfwRuleState by gfwRuleManager.state.collectAsState()
     val bookmarks by bookmarkManager.bookmarks.collectAsState()
+    val appScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         gfwRuleManager.updateRulesOnStartup()
@@ -344,7 +347,8 @@ fun PocketToolboxApp(
                             onAddProxy = { proxyManager.addNode(it) },
                             onDeleteProxy = { proxyManager.deleteNode(it) },
                             onTestNode = { proxyManager.testNode(it) },
-                            onTestAllNodes = { proxyManager.testAllNodes() }
+                            onTestAllNodes = { proxyManager.testAllNodes() },
+                            onRefreshGfwRules = { appScope.launch { gfwRuleManager.updateRulesOnStartup() } }
                         )
                     }
                 }
@@ -493,7 +497,8 @@ fun PocketToolboxApp(
                             onAddProxy = { proxyManager.addNode(it) },
                             onDeleteProxy = { proxyManager.deleteNode(it) },
                             onTestNode = { proxyManager.testNode(it) },
-                            onTestAllNodes = { proxyManager.testAllNodes() }
+                            onTestAllNodes = { proxyManager.testAllNodes() },
+                            onRefreshGfwRules = { appScope.launch { gfwRuleManager.updateRulesOnStartup() } }
                         )
                     }
                 }
