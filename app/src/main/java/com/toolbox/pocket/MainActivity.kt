@@ -286,6 +286,8 @@ fun PocketToolboxApp(
                     composable("home") {
                         ToolboxHomeScreen(
                             homeColumns = settings.homeColumns,
+                            toolOrder = settings.toolOrder,
+                            onMoveTool = { from, to -> themePreferences.moveTool(from, to) },
                             bottomExtraPadding = floatingDockPadding,
                             onOpenTool = { toolId ->
                                 when (toolId) {
@@ -438,6 +440,8 @@ fun PocketToolboxApp(
                     composable("home") {
                         ToolboxHomeScreen(
                             homeColumns = settings.homeColumns,
+                            toolOrder = settings.toolOrder,
+                            onMoveTool = { from, to -> themePreferences.moveTool(from, to) },
                             onOpenTool = { toolId ->
                                 when (toolId) {
                                     "base64" -> navController.navigate("tool/base64")

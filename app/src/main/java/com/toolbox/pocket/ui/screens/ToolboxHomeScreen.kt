@@ -1,5 +1,9 @@
 package com.toolbox.pocket.ui.screens
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,7 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
@@ -27,17 +31,31 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInParent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.toolbox.pocket.ui.components.SmoothCollapsingHeader
 import com.toolbox.pocket.ui.components.rememberSmoothHeaderScrollState
 import com.toolbox.pocket.ui.theme.LocalAppThemeVisuals
@@ -54,28 +72,48 @@ data class ToolboxModule(
 @Composable
 fun ToolboxHomeScreen(
     homeColumns: Int,
+    toolOrder: List<String>,
     bottomExtraPadding: Dp = 0.dp,
+    onMoveTool: (Int, Int) -> Unit,
     onOpenTool: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val headerState = rememberSmoothHeaderScrollState()
     val visuals = LocalAppThemeVisuals.current
+    val haptic = LocalHapticFeedback.current
     val columns = homeColumns.coerceIn(1, 4)
 
-    val tools = listOf(
-        ToolboxModule(
-            id = "base64",
-            title = "Base64 编解码",
-            subtitle = "长文本分段换行、行号定位与双指缩放",
-            icon = Icons.Rounded.Code
-        ),
-        ToolboxModule(
-            id = "browser",
-            title = "极简浏览器",
-            subtitle = "轻量网页浏览，支持应用内代理",
-            icon = Icons.Rounded.Public
+    val catalog = remember {
+        mapOf(
+            "browser" to ToolboxModule(
+                id = "browser",
+                title = "极简浏览器",
+                subtitle = "轻量网页浏览，支持应用内代理",
+                icon = Icons.Rounded.Public
+            ),
+            "base64" to ToolboxModule(
+                id = "base64",
+                title = "Base64 编解码",
+                subtitle = "长文本分段换行、行号定位与双指缩放",
+                icon = Icons.Rounded.Code
+            )
         )
-    )
+    }
+
+    val orderedTools = remember(toolOrder) {
+        val list = toolOrder.mapNotNull { catalog[it] }.toMutableList()
+        catalog.values.forEach { item ->
+            if (list.none { it.id == item.id }) list.add(item)
+        }
+        list.toList()
+    }
+
+    var draggedId by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    val itemBounds = remember { mutableStateMapOf<String, Rect>() }
+
+    val latestTools by rememberUpdatedState(orderedTools)
+    val latestOnMove by rememberUpdatedState(onMoveTool)
 
     Column(
         modifier = modifier
@@ -89,6 +127,7 @@ fun ToolboxHomeScreen(
 
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
+            userScrollEnabled = draggedId == null,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
@@ -101,12 +140,22 @@ fun ToolboxHomeScreen(
             horizontalArrangement = Arrangement.spacedBy(if (columns >= 3) 10.dp else 12.dp),
             verticalArrangement = Arrangement.spacedBy(if (columns >= 3) 10.dp else 12.dp)
         ) {
-            items(tools, key = { it.id }) { tool ->
+            itemsIndexed(orderedTools, key = { _, item -> item.id }) { _, tool ->
                 val interactionSource = remember { MutableInteractionSource() }
                 val corner = if (columns >= 3) 20.dp else 26.dp
+                val isDragging = draggedId == tool.id
+
+                val floatScale by animateFloatAsState(
+                    targetValue = if (isDragging) 1.04f else 1f,
+                    animationSpec = spring(
+                        dampingRatio = 0.68f,
+                        stiffness = Spring.StiffnessMedium
+                    ),
+                    label = "toolFloatScale"
+                )
 
                 Card(
-                    onClick = { onOpenTool(tool.id) },
+                    onClick = { if (draggedId == null) onOpenTool(tool.id) },
                     interactionSource = interactionSource,
                     shape = RoundedCornerShape(corner),
                     colors = CardDefaults.cardColors(
@@ -115,7 +164,59 @@ fun ToolboxHomeScreen(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .liquidPress(interactionSource, pressedScale = 0.95f)
+                        .zIndex(if (isDragging) 10f else 0f)
+                        .then(if (!isDragging) Modifier.animateItem() else Modifier)
+                        .onGloballyPositioned { coords ->
+                            itemBounds[tool.id] = coords.boundsInParent()
+                        }
+                        .pointerInput(tool.id) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    draggedId = tool.id
+                                    dragOffset = Offset.Zero
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                },
+                                onDragEnd = {
+                                    draggedId = null
+                                    dragOffset = Offset.Zero
+                                },
+                                onDragCancel = {
+                                    draggedId = null
+                                    dragOffset = Offset.Zero
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragOffset += dragAmount
+
+                                    val currentRect = itemBounds[tool.id] ?: return@detectDragGesturesAfterLongPress
+                                    val draggedCenter = currentRect.center + dragOffset
+                                    val currentList = latestTools
+                                    val fromIndex = currentList.indexOfFirst { it.id == tool.id }
+                                    if (fromIndex == -1) return@detectDragGesturesAfterLongPress
+
+                                    val targetEntry = itemBounds.entries.firstOrNull { (otherId, rect) ->
+                                        otherId != tool.id && rect.contains(draggedCenter)
+                                    }
+                                    if (targetEntry != null) {
+                                        val toIndex = currentList.indexOfFirst { it.id == targetEntry.key }
+                                        if (toIndex != -1 && toIndex != fromIndex) {
+                                            latestOnMove(fromIndex, toIndex)
+                                            dragOffset += (currentRect.topLeft - targetEntry.value.topLeft)
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                        .graphicsLayer {
+                            if (isDragging) {
+                                translationX = dragOffset.x
+                                translationY = dragOffset.y
+                            }
+                            scaleX = floatScale
+                            scaleY = floatScale
+                        }
+                        .liquidPress(interactionSource, pressedScale = 0.96f)
                         .clip(RoundedCornerShape(corner))
                         .liquidGlassSurface(corner)
                 ) {

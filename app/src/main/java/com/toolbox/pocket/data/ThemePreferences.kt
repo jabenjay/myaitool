@@ -36,6 +36,7 @@ data class AppSettings(
     val defaultShowLineNumbers: Boolean = true,
     val defaultSoftWrap: Boolean = true,
     val homeColumns: Int = 1,
+    val toolOrder: List<String> = listOf("browser", "base64"),
     val backgroundImagePath: String? = null,
     val backgroundBlurDp: Float = 12f,
     val backgroundVersion: Int = 0,
@@ -86,6 +87,10 @@ class ThemePreferences(private val context: Context) {
             defaultShowLineNumbers = prefs.getBoolean(KEY_LINE_NUMBERS, true),
             defaultSoftWrap = prefs.getBoolean(KEY_SOFT_WRAP, true),
             homeColumns = prefs.getInt(KEY_HOME_COLUMNS, 1).coerceIn(1, 4),
+            toolOrder = (prefs.getString(KEY_TOOL_ORDER, "browser,base64") ?: "browser,base64")
+                .split(",")
+                .filter { it.isNotBlank() }
+                .ifEmpty { listOf("browser", "base64") },
             backgroundImagePath = bgPath,
             backgroundBlurDp = prefs.getFloat(KEY_BG_BLUR, 12f),
             backgroundVersion = prefs.getInt(KEY_BG_VERSION, 0),
@@ -122,6 +127,15 @@ class ThemePreferences(private val context: Context) {
     fun setDefaultSoftWrap(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_SOFT_WRAP, enabled).apply()
         _settings.value = _settings.value.copy(defaultSoftWrap = enabled)
+    }
+
+    fun moveTool(fromIndex: Int, toIndex: Int) {
+        val current = _settings.value.toolOrder.toMutableList()
+        if (fromIndex !in current.indices || toIndex !in current.indices || fromIndex == toIndex) return
+        val item = current.removeAt(fromIndex)
+        current.add(toIndex, item)
+        prefs.edit().putString(KEY_TOOL_ORDER, current.joinToString(",")).apply()
+        _settings.value = _settings.value.copy(toolOrder = current)
     }
 
     fun setHomeColumns(columns: Int) {
@@ -238,6 +252,7 @@ class ThemePreferences(private val context: Context) {
         const val KEY_LINE_NUMBERS = "default_line_numbers"
         const val KEY_SOFT_WRAP = "default_soft_wrap"
         const val KEY_HOME_COLUMNS = "home_columns"
+        const val KEY_TOOL_ORDER = "tool_order"
         const val KEY_HAS_BG = "has_custom_bg"
         const val KEY_BG_BLUR = "custom_bg_blur"
         const val KEY_BG_VERSION = "custom_bg_version"
