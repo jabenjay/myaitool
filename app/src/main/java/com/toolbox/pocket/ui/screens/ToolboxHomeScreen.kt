@@ -1,5 +1,6 @@
 package com.toolbox.pocket.ui.screens
 
+import android.os.SystemClock
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
@@ -33,7 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -42,19 +44,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.boundsInParent
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.toolbox.pocket.ui.components.SmoothCollapsingHeader
@@ -80,6 +80,7 @@ fun ToolboxHomeScreen(
     modifier: Modifier = Modifier
 ) {
     val headerState = rememberSmoothHeaderScrollState()
+    val gridState = rememberLazyGridState()
     val visuals = LocalAppThemeVisuals.current
     val haptic = LocalHapticFeedback.current
     val columns = homeColumns.coerceIn(1, 4)
@@ -111,9 +112,8 @@ fun ToolboxHomeScreen(
 
     var draggedId by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableStateOf(Offset.Zero) }
-    val itemBounds = remember { mutableStateMapOf<String, Rect>() }
+    var lastSwapTimeMs by remember { mutableLongStateOf(0L) }
 
-    val latestTools by rememberUpdatedState(orderedTools)
     val latestOnMove by rememberUpdatedState(onMoveTool)
 
     Column(
@@ -127,6 +127,7 @@ fun ToolboxHomeScreen(
         )
 
         LazyVerticalGrid(
+            state = gridState,
             columns = GridCells.Fixed(columns),
             userScrollEnabled = draggedId == null,
             modifier = Modifier
@@ -159,15 +160,25 @@ fun ToolboxHomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .zIndex(if (isDragging) 10f else 0f)
-                        .then(if (!isDragging) Modifier.animateItem() else Modifier)
-                        .onGloballyPositioned { coords ->
-                            itemBounds[tool.id] = coords.boundsInParent()
-                        }
+                        .then(
+                            if (!isDragging) {
+                                Modifier.animateItem(
+                                    placementSpec = spring(
+                                        dampingRatio = 0.76f,
+                                        stiffness = Spring.StiffnessMediumLow,
+                                        visibilityThreshold = IntOffset(1, 1)
+                                    )
+                                )
+                            } else {
+                                Modifier
+                            }
+                        )
                         .pointerInput(tool.id) {
                             detectDragGesturesAfterLongPress(
                                 onDragStart = {
                                     draggedId = tool.id
                                     dragOffset = Offset.Zero
+                                    lastSwapTimeMs = 0L
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 },
                                 onDragEnd = {
@@ -182,141 +193,154 @@ fun ToolboxHomeScreen(
                                     change.consume()
                                     dragOffset += dragAmount
 
-                                    val currentRect = itemBounds[tool.id] ?: return@detectDragGesturesAfterLongPress
-                                    val draggedCenter = currentRect.center + dragOffset
-                                    val currentList = latestTools
-                                    val fromIndex = currentList.indexOfFirst { it.id == tool.id }
-                                    if (fromIndex == -1) return@detectDragGesturesAfterLongPress
+                                    val visibleItems = gridState.layoutInfo.visibleItemsInfo
+                                    val draggedInfo = visibleItems.firstOrNull { it.key == tool.id }
+                                        ?: return@detectDragGesturesAfterLongPress
 
-                                    val targetEntry = itemBounds.entries.firstOrNull { (otherId, rect) ->
-                                        otherId != tool.id && rect.contains(draggedCenter)
+                                    val draggedCenter = Offset(
+                                        x = draggedInfo.offset.x + draggedInfo.size.width / 2f + dragOffset.x,
+                                        y = draggedInfo.offset.y + draggedInfo.size.height / 2f + dragOffset.y
+                                    )
+
+                                    val targetInfo = visibleItems.firstOrNull { info ->
+                                        info.key != tool.id &&
+                                            draggedCenter.x >= info.offset.x &&
+                                            draggedCenter.x <= info.offset.x + info.size.width &&
+                                            draggedCenter.y >= info.offset.y &&
+                                            draggedCenter.y <= info.offset.y + info.size.height
                                     }
-                                    if (targetEntry != null) {
-                                        val toIndex = currentList.indexOfFirst { it.id == targetEntry.key }
-                                        if (toIndex != -1 && toIndex != fromIndex) {
-                                            latestOnMove(fromIndex, toIndex)
-                                            dragOffset += (currentRect.topLeft - targetEntry.value.topLeft)
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        }
+
+                                    val now = SystemClock.elapsedRealtime()
+                                    if (targetInfo != null &&
+                                        targetInfo.index != draggedInfo.index &&
+                                        now - lastSwapTimeMs > 200L
+                                    ) {
+                                        lastSwapTimeMs = now
+                                        latestOnMove(draggedInfo.index, targetInfo.index)
+                                        dragOffset += Offset(
+                                            x = (draggedInfo.offset.x - targetInfo.offset.x).toFloat(),
+                                            y = (draggedInfo.offset.y - targetInfo.offset.y).toFloat()
+                                        )
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     }
                                 }
                             )
                         }
                 ) {
-                Card(
-                    onClick = { if (draggedId == null) onOpenTool(tool.id) },
-                    interactionSource = interactionSource,
-                    shape = RoundedCornerShape(corner),
-                    colors = CardDefaults.cardColors(
-                        containerColor = visuals.cardContainerColor,
-                        contentColor = visuals.cardContentColor
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .graphicsLayer {
-                            if (isDragging) {
-                                translationX = dragOffset.x
-                                translationY = dragOffset.y
+                    Card(
+                        onClick = { if (draggedId == null) onOpenTool(tool.id) },
+                        interactionSource = interactionSource,
+                        shape = RoundedCornerShape(corner),
+                        colors = CardDefaults.cardColors(
+                            containerColor = visuals.cardContainerColor,
+                            contentColor = visuals.cardContentColor
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer {
+                                if (isDragging) {
+                                    translationX = dragOffset.x
+                                    translationY = dragOffset.y
+                                }
+                                scaleX = floatScale
+                                scaleY = floatScale
                             }
-                            scaleX = floatScale
-                            scaleY = floatScale
-                        }
-                        .liquidPress(interactionSource, pressedScale = 0.96f)
-                        .clip(RoundedCornerShape(corner))
-                        .liquidGlassSurface(corner)
-                ) {
-                    if (columns == 1) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(18.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(52.dp)
+                            .liquidPress(interactionSource, pressedScale = 0.96f)
+                            .clip(RoundedCornerShape(corner))
+                            .liquidGlassSurface(corner)
+                    ) {
+                        if (columns == 1) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(18.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(52.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = tool.icon,
+                                        contentDescription = tool.title,
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(13.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(16.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = tool.title,
+                                        style = MaterialTheme.typography.titleLarge,
+                                        color = visuals.cardContentColor
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = tool.subtitle,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Icon(
-                                    imageVector = tool.icon,
-                                    contentDescription = tool.title,
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(13.dp)
+                                    imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
                                 )
                             }
+                        } else {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(
+                                        horizontal = if (columns == 4) 8.dp else 14.dp,
+                                        vertical = if (columns == 4) 14.dp else 16.dp
+                                    ),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(if (columns >= 3) 14.dp else 16.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(if (columns == 4) 42.dp else 48.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = tool.icon,
+                                        contentDescription = tool.title,
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(if (columns == 4) 10.dp else 12.dp)
+                                    )
+                                }
 
-                            Spacer(modifier = Modifier.width(16.dp))
+                                Spacer(modifier = Modifier.height(if (columns == 4) 8.dp else 10.dp))
 
-                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = tool.title,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    color = visuals.cardContentColor
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = tool.subtitle,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    } else {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(
-                                    horizontal = if (columns == 4) 8.dp else 14.dp,
-                                    vertical = if (columns == 4) 14.dp else 16.dp
-                                ),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(if (columns >= 3) 14.dp else 16.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(if (columns == 4) 42.dp else 48.dp)
-                            ) {
-                                Icon(
-                                    imageVector = tool.icon,
-                                    contentDescription = tool.title,
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(if (columns == 4) 10.dp else 12.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(if (columns == 4) 8.dp else 10.dp))
-
-                            Text(
-                                text = tool.title,
-                                style = if (columns >= 3) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = visuals.cardContentColor,
-                                textAlign = TextAlign.Center,
-                                maxLines = if (columns >= 3) 2 else 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-
-                            if (columns == 2) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = tool.subtitle,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = if (columns >= 3) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = visuals.cardContentColor,
                                     textAlign = TextAlign.Center,
-                                    maxLines = 2,
+                                    maxLines = if (columns >= 3) 2 else 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+
+                                if (columns == 2) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = tool.subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                     }
-                }
                 }
             }
         }
