@@ -18,7 +18,7 @@ class BookmarkManager(context: Context) {
     private val prefs = context.getSharedPreferences("toolbox_bookmarks", Context.MODE_PRIVATE)
 
     init {
-        migrateV2DefaultsIfNeeded()
+        migrateV3DefaultsIfNeeded()
     }
 
     private val _bookmarks = MutableStateFlow(loadBookmarks())
@@ -29,23 +29,25 @@ class BookmarkManager(context: Context) {
     )
     val homeUrl: StateFlow<String> = _homeUrl.asStateFlow()
 
-    private fun migrateV2DefaultsIfNeeded() {
-        if (prefs.getBoolean(KEY_BOOKMARKS_V2_MIGRATED, false)) return
-        val oldHome = prefs.getString(KEY_HOME_URL, null)
-        if (oldHome == null || oldHome == "https://cn.pornhub.com/") {
-            prefs.edit().putString(KEY_HOME_URL, DEFAULT_HOME_URL).apply()
-        }
+    private fun migrateV3DefaultsIfNeeded() {
+        if (prefs.getBoolean(KEY_BOOKMARKS_V3_MIGRATED, false)) return
+        prefs.edit().putString(KEY_HOME_URL, DEFAULT_HOME_URL).apply()
         val raw = prefs.getString(KEY_BOOKMARKS, null)
         if (raw != null) {
             val parsed = parseJson(raw)
-            val isOldDefaults = parsed.size == 2 &&
-                parsed.any { it.url.contains("baidu.com") } &&
-                parsed.any { it.url.contains("google.com") }
-            if (isOldDefaults) {
-                persist(defaultBookmarks())
-            }
+            val preStoredUrls = setOf(
+                "https://www.baidu.com",
+                "https://www.google.com",
+                "https://52crdh.com/",
+                "https://cn.pornhub.com/"
+            )
+            val customOnly = parsed.filterNot { it.url in preStoredUrls }
+            val merged = (defaultBookmarks() + customOnly).distinctBy { it.url.trim().removeSuffix("/") }
+            persist(merged)
+        } else {
+            persist(defaultBookmarks())
         }
-        prefs.edit().putBoolean(KEY_BOOKMARKS_V2_MIGRATED, true).apply()
+        prefs.edit().putBoolean(KEY_BOOKMARKS_V3_MIGRATED, true).apply()
     }
 
     fun setHomeUrl(url: String) {
@@ -55,8 +57,7 @@ class BookmarkManager(context: Context) {
     }
 
     private fun defaultBookmarks(): List<BookmarkItem> = listOf(
-        BookmarkItem(name = "52导航", url = "https://52crdh.com/"),
-        BookmarkItem(name = "Pornhub", url = "https://cn.pornhub.com/")
+        BookmarkItem(name = "四虎", url = "https://4h.tv/")
     )
 
     private fun loadBookmarks(): List<BookmarkItem> {
@@ -141,7 +142,7 @@ class BookmarkManager(context: Context) {
     private companion object {
         const val KEY_BOOKMARKS = "bookmarks_json"
         const val KEY_HOME_URL = "browser_home_url"
-        const val KEY_BOOKMARKS_V2_MIGRATED = "bookmarks_v2_migrated"
-        const val DEFAULT_HOME_URL = "https://52crdh.com/"
+        const val KEY_BOOKMARKS_V3_MIGRATED = "bookmarks_v3_migrated"
+        const val DEFAULT_HOME_URL = "https://4h.tv/"
     }
 }

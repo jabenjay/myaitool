@@ -88,6 +88,7 @@ import com.jaben.tools.data.GfwRuleManager
 import com.jaben.tools.data.ProxyManager
 import com.jaben.tools.data.ThemeMode
 import com.jaben.tools.data.ThemePreferences
+import com.jaben.tools.ui.screens.AboutScreen
 import com.jaben.tools.ui.screens.Base64Screen
 import com.jaben.tools.ui.screens.BrowserScreen
 import com.jaben.tools.ui.screens.FileCompressorScreen
@@ -360,7 +361,10 @@ fun PocketToolboxApp(
                                 onOpenLayoutSettings = { navController.navigate("settings/layout") },
                                 onOpenProxySettings = { navController.navigate("settings/proxy") },
                                 onOpenStorageSettings = { navController.navigate("settings/storage") },
-                                onOpenLogs = { navController.navigate("settings/logs") }
+                                onOpenLogs = { navController.navigate("settings/logs") },
+                                onOpenAbout = { navController.navigate("settings/about") },
+                                onOpenUpdateUrl = { url -> navController.navigate("tool/browser?url=${Uri.encode(url)}") },
+                                activeJavaProxy = { proxyManager.activeJavaProxy() }
                             )
                         }
                     }
@@ -485,6 +489,12 @@ fun PocketToolboxApp(
                         onBack = { navController.popBackStack() },
                         onSelectOutputRoot = { uri, label -> themePreferences.setOutputRoot(uri, label) },
                         onResetOutputRoot = { themePreferences.resetOutputRoot() }
+                    )
+                }
+                composable("settings/about") {
+                    AboutScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenRepoInBrowser = { url -> navController.navigate("tool/browser?url=${Uri.encode(url)}") }
                     )
                 }
                 composable("settings/logs") {

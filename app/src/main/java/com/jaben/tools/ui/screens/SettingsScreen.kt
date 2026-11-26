@@ -17,7 +17,22 @@ import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.VpnKey
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import com.jaben.tools.data.AppUpdateChecker
+import com.jaben.tools.data.UpdateCheckResult
+import kotlinx.coroutines.launch
+import java.net.Proxy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -50,9 +65,17 @@ fun SettingsScreen(
     onOpenProxySettings: () -> Unit,
     onOpenStorageSettings: () -> Unit,
     onOpenLogs: () -> Unit,
+    onOpenAbout: () -> Unit,
+    onOpenUpdateUrl: (String) -> Unit,
+    activeJavaProxy: () -> Proxy? = { null },
     modifier: Modifier = Modifier
 ) {
     val headerState = rememberSmoothHeaderScrollState()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val currentVersion = remember { AppUpdateChecker.getCurrentVersionName(context) }
+    var isCheckingUpdate by remember { mutableStateOf(false) }
+    var updateResult by remember { mutableStateOf<UpdateCheckResult?>(null) }
 
     Column(
         modifier = modifier
@@ -120,8 +143,102 @@ fun SettingsScreen(
                     onClick = onOpenLogs
                 )
             }
+
+            item {
+                SettingsEntryCard(
+                    icon = Icons.Rounded.SystemUpdate,
+                    title = "检查更新",
+                    subtitle = if (isCheckingUpdate) "正在检查 GitHub Release..." else "当前版本 v$currentVersion",
+                    onClick = {
+                        if (!isCheckingUpdate) {
+                            isCheckingUpdate = true
+                            scope.launch {
+                                updateResult = AppUpdateChecker.checkLatestRelease(context, activeJavaProxy())
+                                isCheckingUpdate = false
+                            }
+                        }
+                    }
+                )
+            }
+
+            item {
+                SettingsEntryCard(
+                    icon = Icons.Rounded.Info,
+                    title = "关于",
+                    subtitle = "开源地址与捐赠支持",
+                    onClick = onOpenAbout
+                )
+            }
         }
     }
+
+    if (isCheckingUpdate) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("检查更新") },
+            text = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.width(24.dp))
+                    Text("正在连接 GitHub 获取最新版本...")
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    updateResult?.let { res ->
+        AlertDialog(
+            onDismissRequest = { updateResult = null },
+            title = {
+                Text(
+                    when (res) {
+                        is UpdateCheckResult.UpdateAvailable -> "发现新版本 ${res.latestVersion}"
+                        is UpdateCheckResult.UpToDate -> "已是最新版本"
+                        is UpdateCheckResult.Error -> "检查更新失败"
+                    }
+                )
+            },
+            text = {
+                Text(
+                    when (res) {
+                        is UpdateCheckResult.UpdateAvailable ->
+                            "当前版本: v${res.currentVersion}\n最新版本: ${res.latestVersion}" +
+                                if (res.releaseNotes.isNotBlank()) "\n\n${res.releaseNotes}" else ""
+                        is UpdateCheckResult.UpToDate -> "当前版本 v${res.currentVersion} 已是最新。"
+                        is UpdateCheckResult.Error -> res.message
+                    }
+                )
+            },
+            confirmButton = {
+                if (res is UpdateCheckResult.UpdateAvailable) {
+                    TextButton(
+                        onClick = {
+                            val url = res.downloadUrl
+                            updateResult = null
+                            onOpenUpdateUrl(url)
+                        }
+                    ) {
+                        Text("前往下载")
+                    }
+                } else {
+                    TextButton(onClick = { updateResult = null }) {
+                        Text("确定")
+                    }
+                }
+            },
+            dismissButton = {
+                if (res is UpdateCheckResult.UpdateAvailable) {
+                    TextButton(onClick = { updateResult = null }) {
+                        Text("稍后再说")
+                    }
+                }
+            }
+        )
+    }
+
 }
 
 @Composable
