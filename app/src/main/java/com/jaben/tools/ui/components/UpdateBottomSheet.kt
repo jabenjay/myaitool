@@ -121,7 +121,7 @@ fun UpdateBottomSheet(
                         )
                         onDismiss()
                         if (ok) {
-                            Toast.makeText(context, "已调用系统下载器开始下载，请在通知栏查看进度", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "开始下载", Toast.LENGTH_SHORT).show()
                         } else {
                             Toast.makeText(context, "启动系统下载器失败", Toast.LENGTH_SHORT).show()
                         }
