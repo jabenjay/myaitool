@@ -70,6 +70,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.toolbox.pocket.data.GfwRuleManager
 import com.toolbox.pocket.data.ProxyManager
 import com.toolbox.pocket.data.ThemeMode
 import com.toolbox.pocket.data.ThemePreferences
@@ -90,6 +91,7 @@ class MainActivity : ComponentActivity() {
 
         val themePreferences = ThemePreferences(applicationContext)
         val proxyManager = ProxyManager(applicationContext)
+        val gfwRuleManager = GfwRuleManager(applicationContext)
 
         setContent {
             val settings by themePreferences.settings.collectAsState()
@@ -125,7 +127,8 @@ class MainActivity : ComponentActivity() {
             ) {
                 PocketToolboxApp(
                     themePreferences = themePreferences,
-                    proxyManager = proxyManager
+                    proxyManager = proxyManager,
+                    gfwRuleManager = gfwRuleManager
                 )
             }
         }
@@ -135,11 +138,17 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun PocketToolboxApp(
     themePreferences: ThemePreferences,
-    proxyManager: ProxyManager
+    proxyManager: ProxyManager,
+    gfwRuleManager: GfwRuleManager
 ) {
     val navController = rememberNavController()
     val settings by themePreferences.settings.collectAsState()
     val proxyState by proxyManager.state.collectAsState()
+    val gfwRuleState by gfwRuleManager.state.collectAsState()
+
+    LaunchedEffect(Unit) {
+        gfwRuleManager.updateRulesOnStartup()
+    }
     val visuals = LocalAppThemeVisuals.current
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
@@ -291,6 +300,7 @@ fun PocketToolboxApp(
                         SettingsScreen(
                             settings = settings,
                             proxyState = proxyState,
+                            gfwRuleState = gfwRuleState,
                             bottomExtraPadding = floatingDockPadding,
                             onThemeModeChange = { themePreferences.setThemeMode(it) },
                             onUiStyleChange = { themePreferences.setUiStyle(it) },
@@ -305,6 +315,7 @@ fun PocketToolboxApp(
                             onProxyToggle = { proxyManager.setEnabled(it) },
                             onSelectProxy = { proxyManager.selectNode(it) },
                             onAddProxy = { proxyManager.addNode(it) },
+                            onImportProxyLink = { proxyManager.importShareLink(it) != null },
                             onDeleteProxy = { proxyManager.deleteNode(it) }
                         )
                     }
@@ -418,6 +429,7 @@ fun PocketToolboxApp(
                         SettingsScreen(
                             settings = settings,
                             proxyState = proxyState,
+                            gfwRuleState = gfwRuleState,
                             onThemeModeChange = { themePreferences.setThemeMode(it) },
                             onUiStyleChange = { themePreferences.setUiStyle(it) },
                             onM3ColorSourceChange = { themePreferences.setM3ColorSource(it) },
@@ -431,6 +443,7 @@ fun PocketToolboxApp(
                             onProxyToggle = { proxyManager.setEnabled(it) },
                             onSelectProxy = { proxyManager.selectNode(it) },
                             onAddProxy = { proxyManager.addNode(it) },
+                            onImportProxyLink = { proxyManager.importShareLink(it) != null },
                             onDeleteProxy = { proxyManager.deleteNode(it) }
                         )
                     }
@@ -458,6 +471,7 @@ private fun LiquidGlassFloatingOvalDock(
         Surface(
             shape = RoundedCornerShape(50),
             color = visuals.dockContainerColor,
+            contentColor = visuals.cardContentColor,
             modifier = Modifier
                 .width(236.dp)
                 .height(58.dp)

@@ -76,6 +76,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.toolbox.pocket.data.AppSettings
+import com.toolbox.pocket.data.GfwRuleState
 import com.toolbox.pocket.data.M3ColorSource
 import com.toolbox.pocket.data.ProxyNode
 import com.toolbox.pocket.data.ProxyProtocol
@@ -92,6 +93,7 @@ import kotlin.math.roundToInt
 fun SettingsScreen(
     settings: AppSettings,
     proxyState: ProxyState,
+    gfwRuleState: GfwRuleState,
     bottomExtraPadding: Dp = 0.dp,
     onThemeModeChange: (ThemeMode) -> Unit,
     onUiStyleChange: (UiStyle) -> Unit,
@@ -106,6 +108,7 @@ fun SettingsScreen(
     onProxyToggle: (Boolean) -> Unit,
     onSelectProxy: (String) -> Unit,
     onAddProxy: (ProxyNode) -> Unit,
+    onImportProxyLink: (String) -> Boolean,
     onDeleteProxy: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -345,7 +348,7 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = proxyState.statusMessage,
+                                text = "${proxyState.statusMessage}\n${gfwRuleState.lastStatus}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.weight(1f)
@@ -498,6 +501,11 @@ fun SettingsScreen(
     if (showAddProxyDialog) {
         AddProxyDialog(
             onDismiss = { showAddProxyDialog = false },
+            onImportLink = {
+                val ok = onImportProxyLink(it)
+                if (ok) showAddProxyDialog = false
+                ok
+            },
             onSave = { node ->
                 onAddProxy(node)
                 showAddProxyDialog = false
@@ -512,6 +520,7 @@ private fun GlassCard(content: @Composable () -> Unit) {
     Surface(
         shape = MaterialTheme.shapes.large,
         color = visuals.cardContainerColor,
+        contentColor = visuals.cardContentColor,
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.large)
@@ -524,10 +533,12 @@ private fun GlassCard(content: @Composable () -> Unit) {
 @Composable
 private fun AddProxyDialog(
     onDismiss: () -> Unit,
+    onImportLink: (String) -> Boolean,
     onSave: (ProxyNode) -> Unit
 ) {
+    var shareLink by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
-    var protocol by remember { mutableStateOf(ProxyProtocol.SOCKS5) }
+    var protocol by remember { mutableStateOf(ProxyProtocol.VLESS) }
     var host by remember { mutableStateOf("127.0.0.1") }
     var portText by remember { mutableStateOf("1080") }
     var username by remember { mutableStateOf("") }
@@ -538,6 +549,25 @@ private fun AddProxyDialog(
         title = { Text("添加代理节点") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedTextField(
+                        value = shareLink,
+                        onValueChange = { shareLink = it },
+                        label = { Text("粘贴 vless:// 或 vmess:// 链接") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(
+                        onClick = { onImportLink(shareLink) },
+                        enabled = shareLink.isNotBlank()
+                    ) {
+                        Text("导入")
+                    }
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

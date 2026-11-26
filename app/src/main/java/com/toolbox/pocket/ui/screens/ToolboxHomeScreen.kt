@@ -129,7 +129,8 @@ fun ToolboxHomeScreen(
                     interactionSource = interactionSource,
                     shape = RoundedCornerShape(corner),
                     colors = CardDefaults.cardColors(
-                        containerColor = visuals.cardContainerColor
+                        containerColor = visuals.cardContainerColor,
+                        contentColor = visuals.cardContentColor
                     ),
                     modifier = Modifier
                         .fillMaxWidth()

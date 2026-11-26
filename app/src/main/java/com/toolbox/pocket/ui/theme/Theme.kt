@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -50,6 +51,7 @@ data class AppThemeVisuals(
     val glassOpacity: Float = 0.55f,
     val hasCustomBackground: Boolean = false,
     val cardContainerColor: Color = Color.Unspecified,
+    val cardContentColor: Color = Color.Unspecified,
     val innerFieldColor: Color = Color.Unspecified,
     val dockContainerColor: Color = Color.Unspecified,
     val dockIndicatorColor: Color = Color.Unspecified
@@ -78,11 +80,6 @@ fun Modifier.liquidPress(
     }
 }
 
-/**
- * Authentic iOS 26 Liquid Glass crystal surface:
- * - Pure translucent crystal fill with subtle depth shadow
- * - Diagonal specular light-refraction rim (no solid white outer box)
- */
 fun Modifier.liquidGlassSurface(
     cornerRadius: Dp = 26.dp
 ): Modifier = composed {
@@ -117,7 +114,6 @@ fun Modifier.liquidGlassSurface(
         )
         .drawWithContent {
             drawContent()
-            // Subtle top-edge inner glass refraction highlight
             drawRoundRect(
                 brush = Brush.verticalGradient(
                     colors = listOf(
@@ -129,7 +125,6 @@ fun Modifier.liquidGlassSurface(
                 ),
                 cornerRadius = CornerRadius(cornerRadius.toPx(), cornerRadius.toPx())
             )
-            // Hairline specular crystal edge (1px-style optical rim)
             drawRoundRect(
                 brush = rimBrush,
                 cornerRadius = CornerRadius(cornerRadius.toPx(), cornerRadius.toPx()),
@@ -172,7 +167,6 @@ private val FallbackDarkColorScheme = darkColorScheme(
     surfaceContainerHighest = Color(0xFF33343A)
 )
 
-// Pure iOS Liquid Glass palettes (no system color picking)
 private val IosGlassLightColorScheme = lightColorScheme(
     primary = Color(0xFF007AFF),
     onPrimary = Color(0xFFFFFFFF),
@@ -189,7 +183,7 @@ private val IosGlassLightColorScheme = lightColorScheme(
     surfaceContainerHigh = Color(0xCCFFFFFF),
     surfaceContainerHighest = Color(0xE0FFFFFF),
     onSurface = Color(0xFF1C1C1E),
-    onSurfaceVariant = Color(0xFF5C5C62),
+    onSurfaceVariant = Color(0xFF48484E),
     outline = Color(0x33000000),
     outlineVariant = Color(0x22000000)
 )
@@ -210,7 +204,7 @@ private val IosGlassDarkColorScheme = darkColorScheme(
     surfaceContainerHigh = Color(0xBF26262E),
     surfaceContainerHighest = Color(0xD92E2E38),
     onSurface = Color(0xFFF5F5F7),
-    onSurfaceVariant = Color(0xFFA8A8B0),
+    onSurfaceVariant = Color(0xFFC2C2CA),
     outline = Color(0x38FFFFFF),
     outlineVariant = Color(0x24FFFFFF)
 )
@@ -240,7 +234,9 @@ private fun buildWallpaperColorScheme(seedColorInt: Int, darkTheme: Boolean): Co
             surfaceContainerLow = hsvColor(hue, 0.14f, 0.12f),
             surfaceContainer = hsvColor(hue, 0.14f, 0.15f),
             surfaceContainerHigh = hsvColor(hue, 0.14f, 0.20f),
-            surfaceContainerHighest = hsvColor(hue, 0.14f, 0.25f)
+            surfaceContainerHighest = hsvColor(hue, 0.14f, 0.25f),
+            onSurface = Color(0xFFF5F5F7),
+            onSurfaceVariant = Color(0xFFC5C7D0)
         )
     } else {
         lightColorScheme(
@@ -257,7 +253,9 @@ private fun buildWallpaperColorScheme(seedColorInt: Int, darkTheme: Boolean): Co
             surfaceContainerLow = hsvColor(hue, 0.08f, 0.95f),
             surfaceContainer = hsvColor(hue, 0.10f, 0.93f),
             surfaceContainerHigh = hsvColor(hue, 0.10f, 0.90f),
-            surfaceContainerHighest = hsvColor(hue, 0.10f, 0.87f)
+            surfaceContainerHighest = hsvColor(hue, 0.10f, 0.87f),
+            onSurface = Color(0xFF1A1B20),
+            onSurfaceVariant = Color(0xFF494B54)
         )
     }
 }
@@ -368,19 +366,26 @@ fun PocketToolboxTheme(
     val cardContainerColor = when {
         isLiquidGlass && darkTheme -> Color(0xFF1C1C22).copy(alpha = glassOpacity)
         isLiquidGlass && !darkTheme -> Color.White.copy(alpha = glassOpacity)
-        hasCustomBackground -> colorScheme.surfaceContainerLow.copy(alpha = 0.84f)
+        hasCustomBackground -> colorScheme.surfaceContainerLow.copy(alpha = 0.86f)
         else -> colorScheme.surfaceContainerLow
     }
 
+    // Automatically derive high-contrast text color from the card background luminance
+    val cardContentColor = if (cardContainerColor.luminance() < 0.45f || darkTheme) {
+        if (!darkTheme && cardContainerColor.luminance() > 0.5f) Color(0xFF1C1C1E) else Color(0xFFF5F5F7)
+    } else {
+        Color(0xFF1C1C1E)
+    }
+
     val innerFieldColor = when {
-        isLiquidGlass && darkTheme -> Color(0xFF101014).copy(alpha = (glassOpacity + 0.1f).coerceAtMost(0.92f))
+        isLiquidGlass && darkTheme -> Color(0xFF101014).copy(alpha = (glassOpacity + 0.12f).coerceAtMost(0.92f))
         isLiquidGlass && !darkTheme -> Color.White.copy(alpha = (glassOpacity + 0.18f).coerceAtMost(0.95f))
-        hasCustomBackground -> colorScheme.surfaceContainerLowest.copy(alpha = 0.86f)
+        hasCustomBackground -> colorScheme.surfaceContainerLowest.copy(alpha = 0.90f)
         else -> colorScheme.surfaceContainerLowest
     }
 
     val dockContainerColor = when {
-        isLiquidGlass && darkTheme -> Color(0xFF1E1E24).copy(alpha = (glassOpacity + 0.12f).coerceAtMost(0.92f))
+        isLiquidGlass && darkTheme -> Color(0xFF1E1E24).copy(alpha = (glassOpacity + 0.14f).coerceAtMost(0.92f))
         isLiquidGlass && !darkTheme -> Color.White.copy(alpha = (glassOpacity + 0.18f).coerceAtMost(0.95f))
         else -> colorScheme.surfaceContainer
     }
@@ -397,6 +402,7 @@ fun PocketToolboxTheme(
         glassOpacity = glassOpacity,
         hasCustomBackground = hasCustomBackground,
         cardContainerColor = cardContainerColor,
+        cardContentColor = cardContentColor,
         innerFieldColor = innerFieldColor,
         dockContainerColor = dockContainerColor,
         dockIndicatorColor = dockIndicatorColor

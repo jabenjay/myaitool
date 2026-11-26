@@ -224,6 +224,7 @@ fun Base64Screen(
             Surface(
                 shape = MaterialTheme.shapes.large,
                 color = visuals.cardContainerColor,
+                contentColor = visuals.cardContentColor,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(topBoxHeightDp.dp)
@@ -380,6 +381,7 @@ fun Base64Screen(
             Surface(
                 shape = MaterialTheme.shapes.large,
                 color = visuals.cardContainerColor,
+                contentColor = visuals.cardContentColor,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(bottomBoxHeightDp.dp)
@@ -468,6 +470,7 @@ fun Base64Screen(
                         Surface(
                             shape = RoundedCornerShape(18.dp),
                             color = visuals.innerFieldColor,
+                            contentColor = visuals.cardContentColor,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(start = 10.dp, end = 10.dp, bottom = 12.dp)
