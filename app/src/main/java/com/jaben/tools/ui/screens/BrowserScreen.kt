@@ -1,6 +1,23 @@
 package com.jaben.tools.ui.screens
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
+import android.view.View
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
+import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.ScreenRotation
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import com.jaben.tools.data.AdBlockManager
 import android.graphics.Bitmap
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
@@ -142,7 +159,7 @@ import com.jaben.tools.ui.theme.liquidPress
 
 private const val DEFAULT_HOME_URL = "https://cn.pornhub.com/"
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun BrowserScreen(
@@ -208,6 +225,42 @@ fun BrowserScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var showProxyDialog by remember { mutableStateOf(false) }
     var showDownloadsDialog by remember { mutableStateOf(false) }
+    var showMenuSheet by remember { mutableStateOf(false) }
+    var showAdBlockRulesDialog by remember { mutableStateOf(false) }
+    var newRuleInput by remember { mutableStateOf("") }
+
+    val adBlockManager = remember(context) { AdBlockManager(context) }
+    var adBlockEnabled by remember { mutableStateOf(adBlockManager.isEnabled()) }
+    var adBlockRules by remember { mutableStateOf(adBlockManager.getRules()) }
+    val currentAdBlockEnabled by rememberUpdatedState(adBlockEnabled)
+    val currentAdBlockRules by rememberUpdatedState(adBlockRules)
+
+    var customVideoView by remember { mutableStateOf<View?>(null) }
+    var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+    var isLandscapeFullscreen by remember { mutableStateOf(true) }
+
+    val hostActivity = remember(context) { context.findActivity() }
+
+    fun setSystemBarsVisible(visible: Boolean) {
+        val act = hostActivity ?: return
+        val window = act.window ?: return
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        if (visible) {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    fun exitVideoFullscreen() {
+        runCatching { customViewCallback?.onCustomViewHidden() }
+        customVideoView = null
+        customViewCallback = null
+        isLandscapeFullscreen = true
+        setSystemBarsVisible(true)
+        hostActivity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
 
     fun navigateTo(raw: String) {
         val trimmed = raw.trim()
@@ -229,6 +282,9 @@ fun BrowserScreen(
 
     DisposableEffect(Unit) {
         onDispose {
+            if (customVideoView != null) {
+                exitVideoFullscreen()
+            }
             runCatching {
                 webViewRef?.stopLoading()
                 webViewRef?.destroy()
@@ -237,17 +293,21 @@ fun BrowserScreen(
         }
     }
 
-    BackHandler(enabled = showBookmarks || canGoBack) {
-        if (showBookmarks) {
-            showBookmarks = false
-            focusManager.clearFocus()
-        } else {
-            runCatching { webViewRef?.goBack() }
+    BackHandler(enabled = customVideoView != null || showMenuSheet || showBookmarks || canGoBack) {
+        when {
+            customVideoView != null -> exitVideoFullscreen()
+            showMenuSheet -> showMenuSheet = false
+            showBookmarks -> {
+                showBookmarks = false
+                focusManager.clearFocus()
+            }
+            else -> runCatching { webViewRef?.goBack() }
         }
     }
 
+    Box(modifier = modifier.fillMaxSize()) {
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
             .background(barBg)
             .statusBarsPadding()
@@ -465,7 +525,9 @@ fun BrowserScreen(
                         settings.builtInZoomControls = true
                         settings.displayZoomControls = false
                         settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                        settings.mediaPlaybackRequiresUserGesture = true
+                        settings.mediaPlaybackRequiresUserGesture = false
+                        settings.javaScriptCanOpenWindowsAutomatically = false
+                        settings.setSupportMultipleWindows(false)
                         clipToOutline = true
                         setBackgroundColor(barBg.toArgb())
                         setDownloadListener { url, userAgent, contentDisposition, mimetype, contentLength ->
@@ -476,6 +538,19 @@ fun BrowserScreen(
                         }
 
                         webViewClient = object : WebViewClient() {
+                            override fun shouldInterceptRequest(
+                                view: WebView?,
+                                request: WebResourceRequest?
+                            ): android.webkit.WebResourceResponse? {
+                                if (currentAdBlockEnabled && request != null && !request.isForMainFrame) {
+                                    val reqUrl = request.url?.toString().orEmpty()
+                                    if (adBlockManager.shouldBlock(reqUrl, currentAdBlockRules)) {
+                                        return AdBlockManager.emptyResponse()
+                                    }
+                                }
+                                return super.shouldInterceptRequest(view, request)
+                            }
+
                             override fun shouldOverrideUrlLoading(
                                 view: WebView?,
                                 request: WebResourceRequest?
@@ -491,6 +566,9 @@ fun BrowserScreen(
                                 }
                                 canGoBack = view?.canGoBack() == true
                                 canGoForward = view?.canGoForward() == true
+                                if (currentAdBlockEnabled) {
+                                    view?.evaluateJavascript(AdBlockManager.COSMETIC_JS, null)
+                                }
                             }
 
                             override fun onPageCommitVisible(view: WebView?, url: String?) {
@@ -530,7 +608,24 @@ fun BrowserScreen(
                             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                                 progress = newProgress
                                 if (newProgress >= 75) showLoadingOverlay = false
-                            if (newProgress >= 100) isLoading = false
+                                if (newProgress >= 100) isLoading = false
+                            }
+
+                            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                if (view == null) return
+                                if (customVideoView != null) {
+                                    callback?.onCustomViewHidden()
+                                    return
+                                }
+                                customVideoView = view
+                                customViewCallback = callback
+                                isLandscapeFullscreen = true
+                                hostActivity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                                setSystemBarsVisible(false)
+                            }
+
+                            override fun onHideCustomView() {
+                                exitVideoFullscreen()
                             }
                         }
 
@@ -703,12 +798,12 @@ fun BrowserScreen(
                 val activeDownloadCount = downloadItems.count { it.status == DownloadStatus.DOWNLOADING }
                 Box(contentAlignment = Alignment.Center) {
                     IconButton(
-                        onClick = { showDownloadsDialog = true },
+                        onClick = { showMenuSheet = true },
                         modifier = Modifier.liquidPress()
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.Download,
-                            contentDescription = "下载管理",
+                            imageVector = Icons.Rounded.Menu,
+                            contentDescription = "菜单",
                             tint = if (activeDownloadCount > 0) MaterialTheme.colorScheme.primary else barFg,
                             modifier = Modifier.size(21.dp)
                         )
@@ -1374,7 +1469,344 @@ private fun BookmarkEditDialog(
             }
         }
     )
+
+    if (showMenuSheet) {
+        val activeDownloadCount = downloadItems.count { it.status == DownloadStatus.DOWNLOADING }
+        ModalBottomSheet(
+            onDismissRequest = { showMenuSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "浏览器菜单",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+
+                // 1. 下载管理
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            showMenuSheet = false
+                            showDownloadsDialog = true
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Download,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("下载管理", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = if (activeDownloadCount > 0) "正在下载 $activeDownloadCount 个任务" else "查看与管理下载文件",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // 2. 屏蔽广告（点击开关，长按编辑规则）
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .combinedClickable(
+                            onClick = {
+                                val next = !adBlockEnabled
+                                adBlockEnabled = next
+                                adBlockManager.setEnabled(next)
+                                Toast.makeText(
+                                    context,
+                                    if (next) "已开启广告屏蔽" else "已关闭广告屏蔽",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                runCatching { webViewRef?.reload() }
+                            },
+                            onLongClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                showMenuSheet = false
+                                showAdBlockRulesDialog = true
+                            }
+                        )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Block,
+                            contentDescription = null,
+                            tint = if (adBlockEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("屏蔽广告", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = "点击开关 · 长按编辑规则 (${adBlockRules.size} 条)",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = adBlockEnabled,
+                            onCheckedChange = { next ->
+                                adBlockEnabled = next
+                                adBlockManager.setEnabled(next)
+                                Toast.makeText(
+                                    context,
+                                    if (next) "已开启广告屏蔽" else "已关闭广告屏蔽",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                runCatching { webViewRef?.reload() }
+                            }
+                        )
+                    }
+                }
+
+                // 3. 网页视频全屏辅助
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            showMenuSheet = false
+                            webViewRef?.evaluateJavascript(AdBlockManager.FORCE_VIDEO_FULLSCREEN_JS) { res ->
+                                val cleaned = res?.trim('"') ?: ""
+                                if (cleaned == "NO_VIDEO") {
+                                    Toast.makeText(context, "当前页面未检测到视频", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Fullscreen,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("视频全屏播放", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = "将当前网页视频切换为横屏全屏",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+        }
+    }
+
+    if (showAdBlockRulesDialog) {
+        AlertDialog(
+            onDismissRequest = { showAdBlockRulesDialog = false },
+            title = { Text("编辑广告屏蔽规则", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = newRuleInput,
+                            onValueChange = { newRuleInput = it },
+                            placeholder = { Text("输入域名或关键词，如 doubleclick.net", fontSize = 12.sp) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilledTonalButton(
+                            onClick = {
+                                val trimmed = newRuleInput.trim()
+                                if (trimmed.isNotEmpty()) {
+                                    adBlockRules = adBlockManager.addRule(trimmed)
+                                    newRuleInput = ""
+                                }
+                            }
+                        ) {
+                            Text("添加")
+                        }
+                    }
+
+                    Text(
+                        text = "当前规则 (${adBlockRules.size} 条)",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 260.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        itemsIndexed(adBlockRules, key = { idx, item -> "${idx}_$item" }) { _, rule ->
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = rule,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            adBlockRules = adBlockManager.removeRule(rule)
+                                        },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.DeleteOutline,
+                                            contentDescription = "删除规则",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showAdBlockRulesDialog = false
+                        if (adBlockEnabled) {
+                            runCatching { webViewRef?.reload() }
+                        }
+                    }
+                ) {
+                    Text("完成")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        adBlockRules = adBlockManager.resetToDefault()
+                        Toast.makeText(context, "已恢复默认规则", Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Text("恢复默认")
+                }
+            }
+        )
+    }
+
+    if (customVideoView != null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .zIndex(20f)
+        ) {
+            AndroidView(
+                factory = { customVideoView!! },
+                modifier = Modifier.fillMaxSize()
+            )
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(12.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = {
+                        val nextLandscape = !isLandscapeFullscreen
+                        isLandscapeFullscreen = nextLandscape
+                        hostActivity?.requestedOrientation = if (nextLandscape) {
+                            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                        } else {
+                            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        }
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ScreenRotation,
+                        contentDescription = "旋转屏幕",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                IconButton(
+                    onClick = { exitVideoFullscreen() },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.FullscreenExit,
+                        contentDescription = "退出全屏",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
+    }
+    }
 }
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
 
 private fun formatDlBytes(bytes: Long): String {
     if (bytes <= 0L) return "0 B"
