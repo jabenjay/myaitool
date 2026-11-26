@@ -47,15 +47,15 @@ jobs:
             RAW="${INPUT_VERSION#v}"
             RAW="${RAW#V}"
             TAG="v${RAW}"
-            echo "is_release=true" >> $GITHUB_OUTPUT
-            echo "tag=${TAG}" >> $GITHUB_OUTPUT
-            echo "version_name=${RAW}" >> $GITHUB_OUTPUT
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "version_name=${RAW}" >> "$GITHUB_OUTPUT"
           else
-            echo "is_release=false" >> $GITHUB_OUTPUT
-            echo "tag=" >> $GITHUB_OUTPUT
-            echo "version_name=1.0.0" >> $GITHUB_OUTPUT
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "version_name=1.0.0" >> "$GITHUB_OUTPUT"
           fi
-          echo "version_code=${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "version_code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
           if [ -n "$INPUT_CHANGELOG" ]; then
             FORMATTED=$(printf '%s' "$INPUT_CHANGELOG" | sed 's/；/;/g; s/;/\n- /g')
@@ -65,14 +65,13 @@ jobs:
             esac
             {
               echo "changelog<<EOF_CHANGELOG"
-              printf '%b
-' "$FORMATTED"
+              printf '%b\n' "$FORMATTED"
               echo "EOF_CHANGELOG"
-            } >> $GITHUB_OUTPUT
-            echo "has_changelog=true" >> $GITHUB_OUTPUT
+            } >> "$GITHUB_OUTPUT"
+            echo "has_changelog=true" >> "$GITHUB_OUTPUT"
           else
-            echo "changelog=" >> $GITHUB_OUTPUT
-            echo "has_changelog=false" >> $GITHUB_OUTPUT
+            echo "changelog=" >> "$GITHUB_OUTPUT"
+            echo "has_changelog=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Prepare CI Signing Key
