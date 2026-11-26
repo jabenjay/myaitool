@@ -636,7 +636,7 @@ private fun AddProxyDialog(
                             protocol = protocol,
                             host = cleanHost,
                             port = port,
-                            username = username.trim(),
+                            uuidOrUser = username.trim(),
                             passwordOrSecret = secret.trim()
                         )
                     )

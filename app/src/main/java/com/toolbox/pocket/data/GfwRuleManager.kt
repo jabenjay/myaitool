@@ -97,7 +97,7 @@ class GfwRuleManager(context: Context) {
         return try {
             if (conn.responseCode != HttpURLConnection.HTTP_OK) return emptySet()
             val b64 = conn.inputStream.bufferedReader(StandardCharsets.UTF_8).readText()
-                .replace("\s+".toRegex(), "")
+                .replace("\\s+".toRegex(), "")
             val decoded = String(Base64.decode(b64, Base64.DEFAULT), StandardCharsets.UTF_8)
             val result = HashSet<String>(8192)
             decoded.lineSequence().forEach { rawLine ->
