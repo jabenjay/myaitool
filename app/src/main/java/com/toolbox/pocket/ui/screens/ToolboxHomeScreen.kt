@@ -21,8 +21,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -33,7 +33,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
+import androidx.compose.ui.unit.sp
 import com.toolbox.pocket.ui.theme.LocalAppThemeVisuals
 
 data class ToolboxModule(
@@ -51,6 +54,7 @@ fun ToolboxHomeScreen(
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val visuals = LocalAppThemeVisuals.current
+    val titleFontSize = lerp(24.sp, 18.sp, scrollBehavior.state.collapsedFraction)
 
     val tools = listOf(
         ToolboxModule(
@@ -65,18 +69,19 @@ fun ToolboxHomeScreen(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = Color.Transparent,
         topBar = {
-            LargeTopAppBar(
+            MediumTopAppBar(
                 title = {
                     Text(
                         text = "工具箱",
-                        style = MaterialTheme.typography.headlineLarge
+                        fontSize = titleFontSize,
+                        fontWeight = FontWeight.Bold
                     )
                 },
                 scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.largeTopAppBarColors(
+                colors = TopAppBarDefaults.mediumTopAppBarColors(
                     containerColor = Color.Transparent,
                     scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer.copy(
-                        alpha = if (visuals.isLiquidGlass || visuals.hasCustomBackground) 0.78f else 1f
+                        alpha = if (visuals.isLiquidGlass || visuals.hasCustomBackground) 0.85f else 1f
                     )
                 )
             )
@@ -86,7 +91,7 @@ fun ToolboxHomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(tools, key = { it.id }) { tool ->

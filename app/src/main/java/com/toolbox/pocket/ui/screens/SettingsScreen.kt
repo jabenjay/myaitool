@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,8 +31,8 @@ import androidx.compose.material.icons.rounded.WrapText
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -48,7 +47,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
+import androidx.compose.ui.unit.sp
 import com.toolbox.pocket.data.AppSettings
 import com.toolbox.pocket.data.ThemeMode
 import com.toolbox.pocket.data.UiStyle
@@ -72,6 +74,7 @@ fun SettingsScreen(
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val visuals = LocalAppThemeVisuals.current
     val supportsDynamicColor = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val titleFontSize = lerp(24.sp, 18.sp, scrollBehavior.state.collapsedFraction)
 
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -85,18 +88,19 @@ fun SettingsScreen(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = Color.Transparent,
         topBar = {
-            LargeTopAppBar(
+            MediumTopAppBar(
                 title = {
                     Text(
                         text = "设置",
-                        style = MaterialTheme.typography.headlineLarge
+                        fontSize = titleFontSize,
+                        fontWeight = FontWeight.Bold
                     )
                 },
                 scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.largeTopAppBarColors(
+                colors = TopAppBarDefaults.mediumTopAppBarColors(
                     containerColor = Color.Transparent,
                     scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer.copy(
-                        alpha = if (visuals.isLiquidGlass || visuals.hasCustomBackground) 0.78f else 1f
+                        alpha = if (visuals.isLiquidGlass || visuals.hasCustomBackground) 0.85f else 1f
                     )
                 )
             )
@@ -106,7 +110,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
@@ -156,15 +160,13 @@ fun SettingsScreen(
                                 onClick = { onUiStyleChange(style) }
                             )
                         }
-                        if (settings.uiStyle == UiStyle.MATERIAL) {
-                            SwitchSettingRow(
-                                icon = Icons.Rounded.Palette,
-                                title = "系统动态取色",
-                                checked = settings.useDynamicColor && supportsDynamicColor,
-                                enabled = supportsDynamicColor,
-                                onCheckedChange = onDynamicColorChange
-                            )
-                        }
+                        SwitchSettingRow(
+                            icon = Icons.Rounded.Palette,
+                            title = "系统动态取色",
+                            checked = settings.useDynamicColor && supportsDynamicColor,
+                            enabled = supportsDynamicColor,
+                            onCheckedChange = onDynamicColorChange
+                        )
                     }
                 }
             }

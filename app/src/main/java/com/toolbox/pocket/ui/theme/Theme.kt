@@ -34,7 +34,9 @@ data class AppThemeVisuals(
     val hasCustomBackground: Boolean = false,
     val cardBorder: BorderStroke? = null,
     val cardContainerColor: Color = Color.Unspecified,
-    val innerFieldColor: Color = Color.Unspecified
+    val innerFieldColor: Color = Color.Unspecified,
+    val dockContainerColor: Color = Color.Unspecified,
+    val dockIndicatorColor: Color = Color.Unspecified
 )
 
 val LocalAppThemeVisuals = staticCompositionLocalOf { AppThemeVisuals() }
@@ -74,37 +76,37 @@ private val FallbackDarkColorScheme = darkColorScheme(
 )
 
 private val LiquidGlassLightColorScheme = lightColorScheme(
-    primary = Color(0xFF0A84FF),
+    primary = Color(0xFF007AFF),
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFD8ECFF),
-    onPrimaryContainer = Color(0xFF002B5B),
-    secondary = Color(0xFF4E6178),
+    primaryContainer = Color(0xB3D0E7FF),
+    onPrimaryContainer = Color(0xFF002A5C),
+    secondary = Color(0xFF475C75),
     onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFE2EEFA),
-    onSecondaryContainer = Color(0xFF10253A),
-    surface = Color(0xFFF2F6FC),
-    surfaceContainerLowest = Color(0xCCFFFFFF),
-    surfaceContainerLow = Color(0xB8FFFFFF),
-    surfaceContainer = Color(0xCCEAF1FB),
-    surfaceContainerHigh = Color(0xFFE1EAF6),
-    surfaceContainerHighest = Color(0xFFD7E2F2)
+    secondaryContainer = Color(0x99FFFFFF),
+    onSecondaryContainer = Color(0xFF0A223D),
+    surface = Color(0xFFCDE2FF),
+    surfaceContainerLowest = Color(0x9EFFFFFF),
+    surfaceContainerLow = Color(0x7AFFFFFF),
+    surfaceContainer = Color(0x99F4F9FF),
+    surfaceContainerHigh = Color(0xB3EAF2FF),
+    surfaceContainerHighest = Color(0xCCE0ECFF)
 )
 
 private val LiquidGlassDarkColorScheme = darkColorScheme(
     primary = Color(0xFF5AC8FA),
     onPrimary = Color(0xFF002E44),
-    primaryContainer = Color(0xFF0D4E73),
-    onPrimaryContainer = Color(0xFFD1F2FF),
+    primaryContainer = Color(0x99125A85),
+    onPrimaryContainer = Color(0xFFD6F3FF),
     secondary = Color(0xFF9BB4CC),
     onSecondary = Color(0xFF172B3D),
-    secondaryContainer = Color(0xFF263B4F),
-    onSecondaryContainer = Color(0xFFD5E9FA),
-    surface = Color(0xFF0B111A),
-    surfaceContainerLowest = Color(0x99121B28),
-    surfaceContainerLow = Color(0xAD182334),
-    surfaceContainer = Color(0xCC141E2C),
-    surfaceContainerHigh = Color(0xFF223044),
-    surfaceContainerHighest = Color(0xFF2C3B52)
+    secondaryContainer = Color(0x40FFFFFF),
+    onSecondaryContainer = Color(0xFFFFFFFF),
+    surface = Color(0xFF071120),
+    surfaceContainerLowest = Color(0x5E070F1C),
+    surfaceContainerLow = Color(0x52FFFFFF),
+    surfaceContainer = Color(0x4D132238),
+    surfaceContainerHigh = Color(0x661C2E47),
+    surfaceContainerHighest = Color(0x80263B59)
 )
 
 val ExpressiveShapes = Shapes(
@@ -194,11 +196,28 @@ fun PocketToolboxTheme(
     val isLiquidGlass = uiStyle == UiStyle.LIQUID_GLASS
     val context = LocalContext.current
 
+    val dynamicScheme = if (useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    } else {
+        null
+    }
+
     val rawColorScheme = when {
-        isLiquidGlass -> if (darkTheme) LiquidGlassDarkColorScheme else LiquidGlassLightColorScheme
-        useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        isLiquidGlass -> {
+            val baseGlass = if (darkTheme) LiquidGlassDarkColorScheme else LiquidGlassLightColorScheme
+            if (dynamicScheme != null) {
+                baseGlass.copy(
+                    primary = dynamicScheme.primary,
+                    onPrimary = dynamicScheme.onPrimary,
+                    primaryContainer = dynamicScheme.primaryContainer.copy(alpha = 0.72f),
+                    onPrimaryContainer = dynamicScheme.onPrimaryContainer,
+                    tertiary = dynamicScheme.tertiary
+                )
+            } else {
+                baseGlass
+            }
         }
+        dynamicScheme != null -> dynamicScheme
         darkTheme -> FallbackDarkColorScheme
         else -> FallbackLightColorScheme
     }
@@ -207,12 +226,20 @@ fun PocketToolboxTheme(
 
     val cardBorder = if (isLiquidGlass) {
         BorderStroke(
-            width = 1.dp,
-            brush = Brush.verticalGradient(
+            width = 1.4.dp,
+            brush = Brush.linearGradient(
                 colors = if (darkTheme) {
-                    listOf(Color.White.copy(alpha = 0.28f), Color.White.copy(alpha = 0.06f))
+                    listOf(
+                        Color.White.copy(alpha = 0.50f),
+                        Color.White.copy(alpha = 0.14f),
+                        Color.White.copy(alpha = 0.28f)
+                    )
                 } else {
-                    listOf(Color.White.copy(alpha = 0.92f), Color.White.copy(alpha = 0.35f))
+                    listOf(
+                        Color.White.copy(alpha = 0.98f),
+                        Color.White.copy(alpha = 0.42f),
+                        Color.White.copy(alpha = 0.80f)
+                    )
                 }
             )
         )
@@ -220,19 +247,32 @@ fun PocketToolboxTheme(
         null
     }
 
+    // Translucent frosted glass surfaces that contrast sharply against vibrant/photo backdrops
     val cardContainerColor = when {
-        isLiquidGlass && darkTheme -> Color(0x9E192434)
-        isLiquidGlass && !darkTheme -> Color(0xBAFFFFFF)
-        hasCustomBackground && darkTheme -> colorScheme.surfaceContainerLow.copy(alpha = 0.84f)
-        hasCustomBackground && !darkTheme -> colorScheme.surfaceContainerLow.copy(alpha = 0.86f)
+        isLiquidGlass && darkTheme -> Color(0x47122238)
+        isLiquidGlass && !darkTheme -> Color(0x78FFFFFF)
+        hasCustomBackground && darkTheme -> colorScheme.surfaceContainerLow.copy(alpha = 0.82f)
+        hasCustomBackground && !darkTheme -> colorScheme.surfaceContainerLow.copy(alpha = 0.84f)
         else -> colorScheme.surfaceContainerLow
     }
 
     val innerFieldColor = when {
-        isLiquidGlass && darkTheme -> Color(0x8A0D1520)
-        isLiquidGlass && !darkTheme -> Color(0xCCFFFFFF)
-        hasCustomBackground -> colorScheme.surfaceContainerLowest.copy(alpha = 0.88f)
+        isLiquidGlass && darkTheme -> Color(0x5207101E)
+        isLiquidGlass && !darkTheme -> Color(0xA6FFFFFF)
+        hasCustomBackground -> colorScheme.surfaceContainerLowest.copy(alpha = 0.86f)
         else -> colorScheme.surfaceContainerLowest
+    }
+
+    val dockContainerColor = when {
+        isLiquidGlass && darkTheme -> Color(0x66111F33)
+        isLiquidGlass && !darkTheme -> Color(0x8FFFFFFF)
+        else -> colorScheme.surfaceContainer
+    }
+
+    val dockIndicatorColor = when {
+        isLiquidGlass && darkTheme -> Color(0x38FFFFFF)
+        isLiquidGlass && !darkTheme -> Color(0xD9FFFFFF)
+        else -> colorScheme.secondaryContainer
     }
 
     val visuals = AppThemeVisuals(
@@ -241,7 +281,9 @@ fun PocketToolboxTheme(
         hasCustomBackground = hasCustomBackground,
         cardBorder = cardBorder,
         cardContainerColor = cardContainerColor,
-        innerFieldColor = innerFieldColor
+        innerFieldColor = innerFieldColor,
+        dockContainerColor = dockContainerColor,
+        dockIndicatorColor = dockIndicatorColor
     )
 
     CompositionLocalProvider(LocalAppThemeVisuals provides visuals) {
