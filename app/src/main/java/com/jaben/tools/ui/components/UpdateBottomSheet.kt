@@ -138,6 +138,14 @@ fun UpdateBottomSheet(
     }
 }
 
+private fun cleanChangelogLine(raw: String): String {
+    return raw
+        .replace(Regex("\\*\\*"), "")
+        .replace(Regex("(?i)what'?s\\s+changed"), "更新日志")
+        .replace(Regex("(?i)\\bchangelog\\b"), "更新日志")
+        .trim()
+}
+
 @Composable
 fun FormattedChangelogText(notes: String) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -147,7 +155,7 @@ fun FormattedChangelogText(notes: String) {
                 line.isBlank() -> Spacer(modifier = Modifier.height(2.dp))
                 line.startsWith("# ") -> {
                     Text(
-                        text = line.removePrefix("# ").trim(),
+                        text = cleanChangelogLine(line.removePrefix("# ")),
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -156,7 +164,7 @@ fun FormattedChangelogText(notes: String) {
                 }
                 line.startsWith("## ") -> {
                     Text(
-                        text = line.removePrefix("## ").trim(),
+                        text = cleanChangelogLine(line.removePrefix("## ")),
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary,
@@ -165,7 +173,7 @@ fun FormattedChangelogText(notes: String) {
                 }
                 line.startsWith("### ") -> {
                     Text(
-                        text = line.removePrefix("### ").trim(),
+                        text = cleanChangelogLine(line.removePrefix("### ")),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -180,7 +188,7 @@ fun FormattedChangelogText(notes: String) {
                             modifier = Modifier.width(14.dp)
                         )
                         Text(
-                            text = line.drop(2).trim(),
+                            text = cleanChangelogLine(line.drop(2)),
                             fontSize = 13.5.sp,
                             lineHeight = 19.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -188,11 +196,18 @@ fun FormattedChangelogText(notes: String) {
                     }
                 }
                 else -> {
+                    val cleaned = cleanChangelogLine(line)
+                    val isStandaloneHeading = cleaned == "更新日志"
                     Text(
-                        text = line,
-                        fontSize = 13.5.sp,
+                        text = cleaned,
+                        fontSize = if (isStandaloneHeading) 15.5.sp else 13.5.sp,
+                        fontWeight = if (isStandaloneHeading) FontWeight.Bold else FontWeight.Normal,
                         lineHeight = 19.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (isStandaloneHeading) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
                     )
                 }
             }
