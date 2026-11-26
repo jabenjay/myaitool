@@ -76,6 +76,7 @@ import com.toolbox.pocket.data.ThemeMode
 import com.toolbox.pocket.data.ThemePreferences
 import com.toolbox.pocket.ui.screens.Base64Screen
 import com.toolbox.pocket.ui.screens.BrowserScreen
+import com.toolbox.pocket.ui.screens.ProxySettingsScreen
 import com.toolbox.pocket.ui.screens.SettingsScreen
 import com.toolbox.pocket.ui.screens.ToolboxHomeScreen
 import com.toolbox.pocket.ui.theme.LocalAppThemeVisuals
@@ -300,8 +301,8 @@ fun PocketToolboxApp(
                         SettingsScreen(
                             settings = settings,
                             proxyState = proxyState,
-                            gfwRuleState = gfwRuleState,
                             bottomExtraPadding = floatingDockPadding,
+                            onOpenProxySettings = { navController.navigate("settings/proxy") },
                             onThemeModeChange = { themePreferences.setThemeMode(it) },
                             onUiStyleChange = { themePreferences.setUiStyle(it) },
                             onM3ColorSourceChange = { themePreferences.setM3ColorSource(it) },
@@ -311,11 +312,17 @@ fun PocketToolboxApp(
                             onClearBackground = { themePreferences.clearBackgroundImage() },
                             onBackgroundBlurChange = { blur -> themePreferences.setBackgroundBlur(blur) },
                             onDefaultLineNumbersChange = { themePreferences.setDefaultLineNumbers(it) },
-                            onDefaultSoftWrapChange = { themePreferences.setDefaultSoftWrap(it) },
+                            onDefaultSoftWrapChange = { themePreferences.setDefaultSoftWrap(it) }
+                        )
+                    }
+                    composable("settings/proxy") {
+                        ProxySettingsScreen(
+                            proxyState = proxyState,
+                            gfwRuleState = gfwRuleState,
+                            onBack = { navController.popBackStack() },
                             onProxyToggle = { proxyManager.setEnabled(it) },
                             onSelectProxy = { proxyManager.selectNode(it) },
                             onAddProxy = { proxyManager.addNode(it) },
-                            onImportProxyLink = { proxyManager.importShareLink(it) != null },
                             onDeleteProxy = { proxyManager.deleteNode(it) }
                         )
                     }
@@ -429,7 +436,7 @@ fun PocketToolboxApp(
                         SettingsScreen(
                             settings = settings,
                             proxyState = proxyState,
-                            gfwRuleState = gfwRuleState,
+                            onOpenProxySettings = { navController.navigate("settings/proxy") },
                             onThemeModeChange = { themePreferences.setThemeMode(it) },
                             onUiStyleChange = { themePreferences.setUiStyle(it) },
                             onM3ColorSourceChange = { themePreferences.setM3ColorSource(it) },
@@ -439,11 +446,17 @@ fun PocketToolboxApp(
                             onClearBackground = { themePreferences.clearBackgroundImage() },
                             onBackgroundBlurChange = { blur -> themePreferences.setBackgroundBlur(blur) },
                             onDefaultLineNumbersChange = { themePreferences.setDefaultLineNumbers(it) },
-                            onDefaultSoftWrapChange = { themePreferences.setDefaultSoftWrap(it) },
+                            onDefaultSoftWrapChange = { themePreferences.setDefaultSoftWrap(it) }
+                        )
+                    }
+                    composable("settings/proxy") {
+                        ProxySettingsScreen(
+                            proxyState = proxyState,
+                            gfwRuleState = gfwRuleState,
+                            onBack = { navController.popBackStack() },
                             onProxyToggle = { proxyManager.setEnabled(it) },
                             onSelectProxy = { proxyManager.selectNode(it) },
                             onAddProxy = { proxyManager.addNode(it) },
-                            onImportProxyLink = { proxyManager.importShareLink(it) != null },
                             onDeleteProxy = { proxyManager.deleteNode(it) }
                         )
                     }

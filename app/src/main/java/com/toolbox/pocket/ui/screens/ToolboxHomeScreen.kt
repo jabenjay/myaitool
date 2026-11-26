@@ -99,9 +99,7 @@ fun ToolboxHomeScreen(
                 scrollBehavior = scrollBehavior,
                 colors = TopAppBarDefaults.mediumTopAppBarColors(
                     containerColor = Color.Transparent,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer.copy(
-                        alpha = if (visuals.isLiquidGlass || visuals.hasCustomBackground) 0.85f else 1f
-                    )
+                    scrolledContainerColor = Color.Transparent
                 )
             )
         }

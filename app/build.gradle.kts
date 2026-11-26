@@ -20,10 +20,25 @@ android {
         }
     }
 
+    signingConfigs {
+        create("ciRelease") {
+            val ks = file("ci-release.jks")
+            if (ks.exists()) {
+                storeFile = ks
+                storePassword = "toolbox_ci_password"
+                keyAlias = "toolbox"
+                keyPassword = "toolbox_ci_password"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            if (file("ci-release.jks").exists()) {
+                signingConfig = signingConfigs.getByName("ciRelease")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

@@ -106,12 +106,6 @@ fun Modifier.liquidGlassSurface(
     }
 
     this
-        .shadow(
-            elevation = if (visuals.isDark) 10.dp else 12.dp,
-            shape = shape,
-            ambientColor = Color.Black.copy(alpha = if (visuals.isDark) 0.35f else 0.10f),
-            spotColor = Color.Black.copy(alpha = if (visuals.isDark) 0.40f else 0.12f)
-        )
         .drawWithContent {
             drawContent()
             drawRoundRect(
