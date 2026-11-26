@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,8 +30,10 @@ import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.FormatListNumbered
+import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Opacity
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Style
 import androidx.compose.material.icons.rounded.VpnKey
@@ -48,6 +49,9 @@ import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -67,10 +71,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.toolbox.pocket.data.AppSettings
+import com.toolbox.pocket.data.M3ColorSource
 import com.toolbox.pocket.data.ProxyNode
 import com.toolbox.pocket.data.ProxyProtocol
 import com.toolbox.pocket.data.ProxyState
@@ -86,9 +92,12 @@ import kotlin.math.roundToInt
 fun SettingsScreen(
     settings: AppSettings,
     proxyState: ProxyState,
+    bottomExtraPadding: Dp = 0.dp,
     onThemeModeChange: (ThemeMode) -> Unit,
     onUiStyleChange: (UiStyle) -> Unit,
-    onDynamicColorChange: (Boolean) -> Unit,
+    onM3ColorSourceChange: (M3ColorSource) -> Unit,
+    onGlassOpacityChange: (Float) -> Unit,
+    onHomeColumnsChange: (Int) -> Unit,
     onBackgroundPicked: (Uri) -> Unit,
     onClearBackground: () -> Unit,
     onBackgroundBlurChange: (Float) -> Unit,
@@ -102,7 +111,7 @@ fun SettingsScreen(
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val visuals = LocalAppThemeVisuals.current
-    val supportsDynamicColor = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val supportsSystemDynamic = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val titleFontSize = lerp(24.sp, 18.sp, scrollBehavior.state.collapsedFraction)
 
     var showAddProxyDialog by remember { mutableStateOf(false) }
@@ -140,8 +149,13 @@ fun SettingsScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                .padding(top = innerPadding.calculateTopPadding()),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = 10.dp,
+                bottom = 16.dp + bottomExtraPadding
+            ),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
@@ -181,13 +195,133 @@ fun SettingsScreen(
                                 onClick = { onUiStyleChange(style) }
                             )
                         }
-                        SwitchSettingRow(
-                            icon = Icons.Rounded.Palette,
-                            title = "系统动态取色",
-                            checked = settings.useDynamicColor && supportsDynamicColor,
-                            enabled = supportsDynamicColor,
-                            onCheckedChange = onDynamicColorChange
-                        )
+
+                        // Material 3: 3-option single-row selector (默认 / 系统取色 / 壁纸取色)
+                        AnimatedVisibility(visible = settings.uiStyle == UiStyle.MATERIAL) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Palette,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = "配色来源",
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                }
+                                SingleChoiceSegmentedButtonRow(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 10.dp)
+                                ) {
+                                    M3ColorSource.entries.forEachIndexed { index, source ->
+                                        val enabled = when (source) {
+                                            M3ColorSource.DEFAULT -> true
+                                            M3ColorSource.SYSTEM -> supportsSystemDynamic
+                                            M3ColorSource.WALLPAPER -> settings.backgroundImagePath != null
+                                        }
+                                        SegmentedButton(
+                                            selected = settings.m3ColorSource == source,
+                                            enabled = enabled,
+                                            onClick = { onM3ColorSourceChange(source) },
+                                            shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
+                                            modifier = Modifier.liquidPress(pressedScale = 0.96f)
+                                        ) {
+                                            Text(source.label, maxLines = 1)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Liquid Glass: Opacity / Visibility slider
+                        AnimatedVisibility(visible = settings.uiStyle == UiStyle.LIQUID_GLASS) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Opacity,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "液态玻璃可视度",
+                                            style = MaterialTheme.typography.bodyLarge
+                                        )
+                                    }
+                                    Text(
+                                        text = "${(settings.glassOpacity * 100f).roundToInt()}%",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Slider(
+                                    value = settings.glassOpacity,
+                                    onValueChange = onGlassOpacityChange,
+                                    valueRange = 0.15f..0.90f
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                SectionLabel("主页布局")
+                GlassCard {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.GridView,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "每行工具数量",
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "${settings.homeColumns} 个/行",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        SingleChoiceSegmentedButtonRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 12.dp)
+                        ) {
+                            (1..4).forEachIndexed { index, count ->
+                                SegmentedButton(
+                                    selected = settings.homeColumns == count,
+                                    onClick = { onHomeColumnsChange(count) },
+                                    shape = SegmentedButtonDefaults.itemShape(index = index, count = 4),
+                                    modifier = Modifier.liquidPress(pressedScale = 0.96f)
+                                ) {
+                                    Text("$count")
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -29,8 +29,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.calculateEndPadding
-import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -60,14 +58,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
@@ -122,7 +118,9 @@ class MainActivity : ComponentActivity() {
             PocketToolboxTheme(
                 themeMode = settings.themeMode,
                 uiStyle = settings.uiStyle,
-                useDynamicColor = settings.useDynamicColor,
+                m3ColorSource = settings.m3ColorSource,
+                glassOpacity = settings.glassOpacity,
+                wallpaperSeedColor = settings.wallpaperSeedColor,
                 hasCustomBackground = settings.backgroundImagePath != null
             ) {
                 PocketToolboxApp(
@@ -154,11 +152,8 @@ fun PocketToolboxApp(
         }
     }
 
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val tertiaryColor = MaterialTheme.colorScheme.tertiary
-    val layoutDirection = LocalLayoutDirection.current
-
     Box(modifier = Modifier.fillMaxSize()) {
+        // Layer 1: Custom wallpaper OR clean iOS-style ambient backdrop OR solid M3 surface
         if (bgBitmap != null) {
             Image(
                 bitmap = bgBitmap,
@@ -179,25 +174,26 @@ fun PocketToolboxApp(
                     .fillMaxSize()
                     .background(
                         MaterialTheme.colorScheme.surface.copy(
-                            alpha = if (visuals.isDark) 0.36f else 0.22f
+                            alpha = if (visuals.isDark) 0.30f else 0.18f
                         )
                     )
             )
         } else if (visuals.isLiquidGlass) {
+            // Crisp iOS-like neutral sky/aurora backdrop so crystal white/dark glass stands out
             Canvas(modifier = Modifier.fillMaxSize()) {
                 drawRect(
                     brush = Brush.verticalGradient(
                         colors = if (visuals.isDark) {
                             listOf(
-                                ComposeColor(0xFF040B18),
-                                ComposeColor(0xFF091B36),
-                                ComposeColor(0xFF050F22)
+                                ComposeColor(0xFF0A0D14),
+                                ComposeColor(0xFF101828),
+                                ComposeColor(0xFF090B10)
                             )
                         } else {
                             listOf(
-                                ComposeColor(0xFF9EC9FF),
-                                ComposeColor(0xFFCDE2FF),
-                                ComposeColor(0xFFB5D6FF)
+                                ComposeColor(0xFFD6E6FA),
+                                ComposeColor(0xFFE7EFFA),
+                                ComposeColor(0xFFDCE6F4)
                             )
                         }
                     )
@@ -205,26 +201,26 @@ fun PocketToolboxApp(
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            primaryColor.copy(alpha = if (visuals.isDark) 0.55f else 0.45f),
+                            if (visuals.isDark) ComposeColor(0x552E5CFF) else ComposeColor(0x557BB2FF),
                             ComposeColor.Transparent
                         ),
-                        center = Offset(size.width * 0.15f, size.height * 0.18f),
-                        radius = size.width * 0.78f
+                        center = Offset(size.width * 0.2f, size.height * 0.22f),
+                        radius = size.width * 0.72f
                     ),
-                    center = Offset(size.width * 0.15f, size.height * 0.18f),
-                    radius = size.width * 0.78f
+                    center = Offset(size.width * 0.2f, size.height * 0.22f),
+                    radius = size.width * 0.72f
                 )
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            tertiaryColor.copy(alpha = if (visuals.isDark) 0.45f else 0.38f),
+                            if (visuals.isDark) ComposeColor(0x448B5CF6) else ComposeColor(0x44A5B4FC),
                             ComposeColor.Transparent
                         ),
-                        center = Offset(size.width * 0.88f, size.height * 0.55f),
-                        radius = size.width * 0.82f
+                        center = Offset(size.width * 0.85f, size.height * 0.75f),
+                        radius = size.width * 0.75f
                     ),
-                    center = Offset(size.width * 0.88f, size.height * 0.55f),
-                    radius = size.width * 0.82f
+                    center = Offset(size.width * 0.85f, size.height * 0.75f),
+                    radius = size.width * 0.75f
                 )
             }
         } else {
@@ -235,32 +231,114 @@ fun PocketToolboxApp(
             )
         }
 
-        Scaffold(
-            containerColor = ComposeColor.Transparent,
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            bottomBar = {
-                if (showBottomBar) {
-                    if (visuals.isLiquidGlass) {
-                        LiquidGlassFloatingDock(
-                            currentRoute = currentRoute,
-                            onSelectRoute = { route ->
-                                if (route == "home") {
-                                    navController.navigate("home") {
-                                        popUpTo("home") { inclusive = true }
-                                        launchSingleTop = true
-                                    }
-                                } else {
-                                    navController.navigate("settings") {
-                                        popUpTo("home")
-                                        launchSingleTop = true
-                                    }
+        // Layer 2: Full-bleed NavHost + overlaid floating oval dock when in Liquid Glass mode
+        if (visuals.isLiquidGlass) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                val floatingDockPadding = if (showBottomBar) 92.dp else 0.dp
+                NavHost(
+                    navController = navController,
+                    startDestination = "home",
+                    modifier = Modifier.fillMaxSize(),
+                    enterTransition = {
+                        slideIntoContainer(
+                            towards = AnimatedContentTransitionScope.SlideDirection.Left,
+                            animationSpec = spring(dampingRatio = 0.74f, stiffness = Spring.StiffnessMediumLow)
+                        ) + scaleIn(
+                            initialScale = 0.94f,
+                            animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
+                        ) + fadeIn(animationSpec = tween(220))
+                    },
+                    exitTransition = {
+                        scaleOut(targetScale = 0.96f, animationSpec = tween(180)) + fadeOut(animationSpec = tween(180))
+                    },
+                    popEnterTransition = {
+                        scaleIn(
+                            initialScale = 0.96f,
+                            animationSpec = spring(dampingRatio = 0.74f, stiffness = Spring.StiffnessMediumLow)
+                        ) + fadeIn(animationSpec = tween(220))
+                    },
+                    popExitTransition = {
+                        slideOutOfContainer(
+                            towards = AnimatedContentTransitionScope.SlideDirection.Right,
+                            animationSpec = spring(dampingRatio = 0.74f, stiffness = Spring.StiffnessMediumLow)
+                        ) + scaleOut(targetScale = 0.94f, animationSpec = tween(200)) + fadeOut(animationSpec = tween(200))
+                    }
+                ) {
+                    composable("home") {
+                        ToolboxHomeScreen(
+                            homeColumns = settings.homeColumns,
+                            bottomExtraPadding = floatingDockPadding,
+                            onOpenTool = { toolId ->
+                                when (toolId) {
+                                    "base64" -> navController.navigate("tool/base64")
+                                    "browser" -> navController.navigate("tool/browser")
                                 }
                             }
                         )
-                    } else {
+                    }
+                    composable("tool/base64") {
+                        Base64Screen(
+                            appSettings = settings,
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("tool/browser") {
+                        BrowserScreen(
+                            onExit = { navController.popBackStack() }
+                        )
+                    }
+                    composable("settings") {
+                        SettingsScreen(
+                            settings = settings,
+                            proxyState = proxyState,
+                            bottomExtraPadding = floatingDockPadding,
+                            onThemeModeChange = { themePreferences.setThemeMode(it) },
+                            onUiStyleChange = { themePreferences.setUiStyle(it) },
+                            onM3ColorSourceChange = { themePreferences.setM3ColorSource(it) },
+                            onGlassOpacityChange = { themePreferences.setGlassOpacity(it) },
+                            onHomeColumnsChange = { themePreferences.setHomeColumns(it) },
+                            onBackgroundPicked = { uri -> themePreferences.saveBackgroundImage(uri) },
+                            onClearBackground = { themePreferences.clearBackgroundImage() },
+                            onBackgroundBlurChange = { blur -> themePreferences.setBackgroundBlur(blur) },
+                            onDefaultLineNumbersChange = { themePreferences.setDefaultLineNumbers(it) },
+                            onDefaultSoftWrapChange = { themePreferences.setDefaultSoftWrap(it) },
+                            onProxyToggle = { proxyManager.setEnabled(it) },
+                            onSelectProxy = { proxyManager.selectNode(it) },
+                            onAddProxy = { proxyManager.addNode(it) },
+                            onDeleteProxy = { proxyManager.deleteNode(it) }
+                        )
+                    }
+                }
+
+                if (showBottomBar) {
+                    LiquidGlassFloatingOvalDock(
+                        currentRoute = currentRoute,
+                        onSelectRoute = { route ->
+                            if (route == "home") {
+                                navController.navigate("home") {
+                                    popUpTo("home") { inclusive = true }
+                                    launchSingleTop = true
+                                }
+                            } else {
+                                navController.navigate("settings") {
+                                    popUpTo("home")
+                                    launchSingleTop = true
+                                }
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    )
+                }
+            }
+        } else {
+            Scaffold(
+                containerColor = ComposeColor.Transparent,
+                contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                bottomBar = {
+                    if (showBottomBar) {
                         NavigationBar(
                             containerColor = if (bgBitmap != null) {
-                                MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.82f)
+                                MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.85f)
                             } else {
                                 MaterialTheme.colorScheme.surfaceContainer
                             }
@@ -290,85 +368,72 @@ fun PocketToolboxApp(
                         }
                     }
                 }
-            }
-        ) { innerPadding ->
-            NavHost(
-                navController = navController,
-                startDestination = "home",
-                modifier = Modifier.padding(
-                    start = innerPadding.calculateStartPadding(layoutDirection),
-                    end = innerPadding.calculateEndPadding(layoutDirection),
-                    bottom = innerPadding.calculateBottomPadding()
-                ),
-                enterTransition = {
-                    slideIntoContainer(
-                        towards = AnimatedContentTransitionScope.SlideDirection.Left,
-                        animationSpec = spring(dampingRatio = 0.74f, stiffness = Spring.StiffnessMediumLow)
-                    ) + scaleIn(
-                        initialScale = 0.94f,
-                        animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
-                    ) + fadeIn(animationSpec = tween(220))
-                },
-                exitTransition = {
-                    scaleOut(
-                        targetScale = 0.96f,
-                        animationSpec = tween(180)
-                    ) + fadeOut(animationSpec = tween(180))
-                },
-                popEnterTransition = {
-                    scaleIn(
-                        initialScale = 0.96f,
-                        animationSpec = spring(dampingRatio = 0.74f, stiffness = Spring.StiffnessMediumLow)
-                    ) + fadeIn(animationSpec = tween(220))
-                },
-                popExitTransition = {
-                    slideOutOfContainer(
-                        towards = AnimatedContentTransitionScope.SlideDirection.Right,
-                        animationSpec = spring(dampingRatio = 0.74f, stiffness = Spring.StiffnessMediumLow)
-                    ) + scaleOut(
-                        targetScale = 0.94f,
-                        animationSpec = tween(200)
-                    ) + fadeOut(animationSpec = tween(200))
-                }
-            ) {
-                composable("home") {
-                    ToolboxHomeScreen(
-                        onOpenTool = { toolId ->
-                            when (toolId) {
-                                "base64" -> navController.navigate("tool/base64")
-                                "browser" -> navController.navigate("tool/browser")
+            ) { innerPadding ->
+                NavHost(
+                    navController = navController,
+                    startDestination = "home",
+                    modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding()),
+                    enterTransition = {
+                        slideIntoContainer(
+                            towards = AnimatedContentTransitionScope.SlideDirection.Left,
+                            animationSpec = tween(220)
+                        ) + fadeIn(animationSpec = tween(220))
+                    },
+                    exitTransition = {
+                        fadeOut(animationSpec = tween(160))
+                    },
+                    popEnterTransition = {
+                        fadeIn(animationSpec = tween(200))
+                    },
+                    popExitTransition = {
+                        slideOutOfContainer(
+                            towards = AnimatedContentTransitionScope.SlideDirection.Right,
+                            animationSpec = tween(220)
+                        ) + fadeOut(animationSpec = tween(200))
+                    }
+                ) {
+                    composable("home") {
+                        ToolboxHomeScreen(
+                            homeColumns = settings.homeColumns,
+                            onOpenTool = { toolId ->
+                                when (toolId) {
+                                    "base64" -> navController.navigate("tool/base64")
+                                    "browser" -> navController.navigate("tool/browser")
+                                }
                             }
-                        }
-                    )
-                }
-                composable("tool/base64") {
-                    Base64Screen(
-                        appSettings = settings,
-                        onBack = { navController.popBackStack() }
-                    )
-                }
-                composable("tool/browser") {
-                    BrowserScreen(
-                        onExit = { navController.popBackStack() }
-                    )
-                }
-                composable("settings") {
-                    SettingsScreen(
-                        settings = settings,
-                        proxyState = proxyState,
-                        onThemeModeChange = { themePreferences.setThemeMode(it) },
-                        onUiStyleChange = { themePreferences.setUiStyle(it) },
-                        onDynamicColorChange = { themePreferences.setDynamicColor(it) },
-                        onBackgroundPicked = { uri -> themePreferences.saveBackgroundImage(uri) },
-                        onClearBackground = { themePreferences.clearBackgroundImage() },
-                        onBackgroundBlurChange = { blur -> themePreferences.setBackgroundBlur(blur) },
-                        onDefaultLineNumbersChange = { themePreferences.setDefaultLineNumbers(it) },
-                        onDefaultSoftWrapChange = { themePreferences.setDefaultSoftWrap(it) },
-                        onProxyToggle = { proxyManager.setEnabled(it) },
-                        onSelectProxy = { proxyManager.selectNode(it) },
-                        onAddProxy = { proxyManager.addNode(it) },
-                        onDeleteProxy = { proxyManager.deleteNode(it) }
-                    )
+                        )
+                    }
+                    composable("tool/base64") {
+                        Base64Screen(
+                            appSettings = settings,
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("tool/browser") {
+                        BrowserScreen(
+                            onExit = { navController.popBackStack() }
+                        )
+                    }
+                    composable("settings") {
+                        SettingsScreen(
+                            settings = settings,
+                            proxyState = proxyState,
+                            onThemeModeChange = { themePreferences.setThemeMode(it) },
+                            onUiStyleChange = { themePreferences.setUiStyle(it) },
+                            onM3ColorSourceChange = { themePreferences.setM3ColorSource(it) },
+                            onGlassOpacityChange = { themePreferences.setGlassOpacity(it) },
+                            onHomeColumnsChange = { themePreferences.setHomeColumns(it) },
+                            onBackgroundPicked = { uri -> themePreferences.saveBackgroundImage(uri) },
+                            onClearBackground = { themePreferences.clearBackgroundImage() },
+                            onBackgroundBlurChange = { blur -> themePreferences.setBackgroundBlur(blur) },
+                            onDefaultLineNumbersChange = { themePreferences.setDefaultLineNumbers(it) },
+                            onDefaultSoftWrapChange = { themePreferences.setDefaultSoftWrap(it) },
+                            onProxyToggle = { proxyManager.setEnabled(it) },
+                            onSelectProxy = { proxyManager.selectNode(it) },
+                            onAddProxy = { proxyManager.addNode(it) },
+                            onDeleteProxy = { proxyManager.deleteNode(it) }
+                        )
+                    }
                 }
             }
         }
@@ -376,46 +441,39 @@ fun PocketToolboxApp(
 }
 
 @Composable
-private fun LiquidGlassFloatingDock(
+private fun LiquidGlassFloatingOvalDock(
     currentRoute: String?,
-    onSelectRoute: (String) -> Unit
+    onSelectRoute: (String) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val visuals = LocalAppThemeVisuals.current
     val selectedIndex = if (currentRoute == "settings") 1 else 0
 
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .navigationBarsPadding()
-            .padding(horizontal = 36.dp, vertical = 14.dp),
+            .padding(bottom = 14.dp),
         contentAlignment = Alignment.Center
     ) {
         Surface(
-            shape = RoundedCornerShape(36.dp),
+            shape = RoundedCornerShape(50),
             color = visuals.dockContainerColor,
             modifier = Modifier
-                .fillMaxWidth()
-                .height(62.dp)
-                .shadow(
-                    elevation = 18.dp,
-                    shape = RoundedCornerShape(36.dp),
-                    ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
-                    spotColor = ComposeColor.Black.copy(alpha = 0.22f)
-                )
-                .clip(RoundedCornerShape(36.dp))
-                .liquidGlassSurface(36.dp)
+                .width(236.dp)
+                .height(58.dp)
+                .clip(RoundedCornerShape(50))
+                .liquidGlassSurface(30.dp)
         ) {
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(5.dp)
+                    .padding(4.dp)
             ) {
                 val pillWidth = maxWidth / 2
-                // Viscous liquid-spring sliding pill indicator
                 val indicatorOffset by animateDpAsState(
                     targetValue = if (selectedIndex == 0) 0.dp else pillWidth,
                     animationSpec = spring(
-                        dampingRatio = 0.58f,
+                        dampingRatio = 0.56f,
                         stiffness = Spring.StiffnessMediumLow
                     ),
                     label = "liquidDockOffset"
@@ -426,9 +484,8 @@ private fun LiquidGlassFloatingDock(
                         .offset(x = indicatorOffset)
                         .width(pillWidth)
                         .fillMaxHeight()
-                        .clip(RoundedCornerShape(30.dp))
+                        .clip(RoundedCornerShape(50))
                         .background(visuals.dockIndicatorColor)
-                        .liquidGlassSurface(30.dp)
                 )
 
                 Row(
@@ -472,7 +529,7 @@ private fun LiquidGlassDockItem(
     val contentScale by animateFloatAsState(
         targetValue = if (selected) 1.04f else 0.95f,
         animationSpec = spring(
-            dampingRatio = 0.52f,
+            dampingRatio = 0.50f,
             stiffness = Spring.StiffnessMediumLow
         ),
         label = "dockItemScale"
@@ -505,9 +562,9 @@ private fun LiquidGlassDockItem(
                 imageVector = icon,
                 contentDescription = label,
                 tint = tint,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(19.dp)
             )
-            Spacer(modifier = Modifier.width(7.dp))
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelLarge,
