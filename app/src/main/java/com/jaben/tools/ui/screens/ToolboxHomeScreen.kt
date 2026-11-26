@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.QrCodeScanner
+import androidx.compose.material.icons.rounded.Transform
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -109,6 +110,12 @@ fun ToolboxHomeScreen(
                 title = "二维码工具",
                 subtitle = "生成美化、保存相册与相册识别",
                 icon = Icons.Rounded.QrCode2
+            ),
+            "format_factory" to ToolboxModule(
+                id = "format_factory",
+                title = "格式工厂",
+                subtitle = "图片、视频、音频全能格式转换",
+                icon = Icons.Rounded.Transform
             )
         )
     }
