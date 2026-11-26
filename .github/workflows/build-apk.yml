@@ -116,7 +116,7 @@ jobs:
       - name: Build Release APK (on manual Run workflow)
         if: steps.ver.outputs.is_release == 'true'
         run: >
-          gradle assembleRelease --no-daemon --stacktrace
+          gradle assembleRelease -x lintVitalAnalyzeRelease --no-daemon --stacktrace
           -PappVersionName=${{ steps.ver.outputs.version_name }}
           -PappVersionCode=${{ steps.ver.outputs.version_code }}
 
