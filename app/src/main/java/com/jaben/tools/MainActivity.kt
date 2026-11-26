@@ -105,6 +105,16 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color as ComposeColor
 
 class MainActivity : ComponentActivity() {
+    private val pendingShortcutState = mutableStateOf<String?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        AppShortcutHelper.extractRoute(intent)?.let { route ->
+            pendingShortcutState.value = route
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -113,10 +123,10 @@ class MainActivity : ComponentActivity() {
         val gfwRuleManager = GfwRuleManager(applicationContext)
         val proxyManager = ProxyManager(applicationContext, gfwRuleManager)
         val bookmarkManager = BookmarkManager(applicationContext)
-        val initialShortcutRoute = intent?.getStringExtra(AppShortcutHelper.EXTRA_SHORTCUT_ROUTE)
+        pendingShortcutState.value = AppShortcutHelper.extractRoute(intent)
 
         setContent {
-            var pendingShortcut by remember { mutableStateOf(initialShortcutRoute) }
+            var pendingShortcut by pendingShortcutState
             val settings by themePreferences.settings.collectAsState()
             val systemDark = isSystemInDarkTheme()
             val isDark = when (settings.themeMode) {
@@ -199,6 +209,7 @@ fun PocketToolboxApp(
     LaunchedEffect(pendingShortcutRoute) {
         if (!pendingShortcutRoute.isNullOrBlank()) {
             navController.navigate(pendingShortcutRoute) {
+                popUpTo("main") { inclusive = false }
                 launchSingleTop = true
             }
             onShortcutHandled()

@@ -1,4 +1,4 @@
-# AI的产物
+# 口袋工具箱 (Pocket Toolbox) - Android 原生源码
 
 基于 **Kotlin + Jetpack Compose + Material 3 (2026 Material You 动态取色)** 构建的模块化安卓工具箱工程。
 

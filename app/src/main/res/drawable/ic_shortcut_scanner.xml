@@ -1,0 +1,45 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- Top-left corner -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#2B6CF6"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M13,19 V15 C13,13.9 13.9,13 15,13 H19" />
+    <!-- Top-right corner -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#2B6CF6"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M29,13 H33 C34.1,13 35,13.9 35,15 V19" />
+    <!-- Bottom-left corner -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#2B6CF6"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M13,29 V33 C13,34.1 13.9,35 15,35 H19" />
+    <!-- Bottom-right corner -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#2B6CF6"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M29,35 H33 C34.1,35 35,34.1 35,33 V29" />
+    <!-- Scan laser line -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#2B6CF6"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:pathData="M12,24 H36" />
+</vector>
