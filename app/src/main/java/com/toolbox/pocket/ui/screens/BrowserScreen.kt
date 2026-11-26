@@ -9,6 +9,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
@@ -61,6 +62,8 @@ import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -94,6 +97,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
@@ -125,6 +129,7 @@ fun BrowserScreen(
     modifier: Modifier = Modifier
 ) {
     val visuals = LocalAppThemeVisuals.current
+    val context = LocalContext.current
     val focusManager = LocalFocusManager.current
 
     val barBg = if (visuals.isDark) Color(0xFF14161C) else Color(0xFFFFFFFF)
@@ -145,6 +150,7 @@ fun BrowserScreen(
     var urlInput by remember { mutableStateOf(startUrl) }
     var showBookmarks by remember { mutableStateOf(false) }
     var progress by remember { mutableIntStateOf(0) }
+    var pageTitle by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
     var showLoadingOverlay by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) { kotlinx.coroutines.delay(6000); showLoadingOverlay = false }
@@ -291,12 +297,12 @@ fun BrowserScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
 
                     IconButton(
                         onClick = { runCatching { webViewRef?.reload() } },
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(36.dp)
                             .liquidPress()
                     ) {
                         Icon(
@@ -304,6 +310,37 @@ fun BrowserScreen(
                             contentDescription = "刷新",
                             tint = barFg,
                             modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    val normalizedCurrent = urlInput.trim().removeSuffix("/")
+                    val existingBookmark = bookmarks.firstOrNull {
+                        it.url.trim().removeSuffix("/").equals(normalizedCurrent, ignoreCase = true)
+                    }
+                    val isBookmarked = existingBookmark != null
+
+                    IconButton(
+                        onClick = {
+                            if (existingBookmark != null) {
+                                onDeleteBookmark(existingBookmark.id)
+                                Toast.makeText(context, "已取消收藏", Toast.LENGTH_SHORT).show()
+                            } else if (urlInput.isNotBlank()) {
+                                val title = pageTitle.ifBlank {
+                                    urlInput.removePrefix("https://").removePrefix("http://").substringBefore("/")
+                                }
+                                onAddBookmark(title, urlInput)
+                                Toast.makeText(context, "已收藏到书签", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .liquidPress()
+                    ) {
+                        Icon(
+                            imageVector = if (isBookmarked) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                            contentDescription = "收藏为书签",
+                            tint = if (isBookmarked) MaterialTheme.colorScheme.primary else barFg,
+                            modifier = Modifier.size(21.dp)
                         )
                     }
                 }

@@ -18,6 +18,14 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // Keep only Chinese & English resources to shrink APK size
+        resourceConfigurations += listOf("zh", "en")
+
+        // Keep only modern 64-bit ARM ABI to cut native library size
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     signingConfigs {
@@ -57,6 +65,18 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    packaging {
+        resources {
+            excludes += setOf(
+                "/META-INF/{AL2.0,LGPL2.1}",
+                "META-INF/*.version",
+                "META-INF/*.kotlin_module",
+                "DebugProbesKt.bin",
+                "kotlin-tooling-metadata.json"
+            )
+        }
     }
 }
 
