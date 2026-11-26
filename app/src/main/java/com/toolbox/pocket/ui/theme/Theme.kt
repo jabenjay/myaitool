@@ -2,8 +2,13 @@ package com.toolbox.pocket.ui.theme
 
 import android.os.Build
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
@@ -17,12 +22,19 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.toolbox.pocket.data.ThemeMode
@@ -32,7 +44,6 @@ data class AppThemeVisuals(
     val isDark: Boolean = false,
     val isLiquidGlass: Boolean = false,
     val hasCustomBackground: Boolean = false,
-    val cardBorder: BorderStroke? = null,
     val cardContainerColor: Color = Color.Unspecified,
     val innerFieldColor: Color = Color.Unspecified,
     val dockContainerColor: Color = Color.Unspecified,
@@ -40,6 +51,67 @@ data class AppThemeVisuals(
 )
 
 val LocalAppThemeVisuals = staticCompositionLocalOf { AppThemeVisuals() }
+
+/**
+ * Viscous liquid-spring press animation for buttons, cards, and interactive items.
+ */
+fun Modifier.liquidPress(
+    interactionSource: MutableInteractionSource? = null,
+    pressedScale: Float = 0.965f
+): Modifier = composed {
+    val visuals = LocalAppThemeVisuals.current
+    val source = interactionSource ?: remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) pressedScale else 1f,
+        animationSpec = spring(
+            dampingRatio = if (visuals.isLiquidGlass) 0.52f else 0.72f,
+            stiffness = if (visuals.isLiquidGlass) Spring.StiffnessMediumLow else Spring.StiffnessMedium
+        ),
+        label = "liquidPressScale"
+    )
+    this.graphicsLayer {
+        scaleX = scale
+        scaleY = scale
+    }
+}
+
+/**
+ * Soft internal glass specular highlight sheen (NO hard white outer border).
+ */
+fun Modifier.liquidGlassSurface(
+    cornerRadius: Dp = 26.dp
+): Modifier = composed {
+    val visuals = LocalAppThemeVisuals.current
+    if (!visuals.isLiquidGlass) return@composed this
+
+    val topGlow = if (visuals.isDark) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.75f)
+    val midGlow = if (visuals.isDark) Color.White.copy(alpha = 0.04f) else Color.White.copy(alpha = 0.12f)
+    val bottomGlow = if (visuals.isDark) Color.Black.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.28f)
+
+    this
+        .background(
+            brush = Brush.verticalGradient(
+                colors = listOf(topGlow, midGlow, bottomGlow)
+            ),
+            shape = RoundedCornerShape(cornerRadius)
+        )
+        .drawWithContent {
+            drawContent()
+            // Ultra-soft top-edge specular sheen only (no outer white box)
+            drawRoundRect(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = if (visuals.isDark) 0.26f else 0.72f),
+                        Color.Transparent
+                    ),
+                    startY = 0f,
+                    endY = size.height * 0.35f
+                ),
+                cornerRadius = CornerRadius(cornerRadius.toPx(), cornerRadius.toPx())
+            )
+        }
+}
 
 private val FallbackLightColorScheme = lightColorScheme(
     primary = Color(0xFF395BA9),
@@ -86,10 +158,10 @@ private val LiquidGlassLightColorScheme = lightColorScheme(
     onSecondaryContainer = Color(0xFF0A223D),
     surface = Color(0xFFCDE2FF),
     surfaceContainerLowest = Color(0x9EFFFFFF),
-    surfaceContainerLow = Color(0x7AFFFFFF),
-    surfaceContainer = Color(0x99F4F9FF),
-    surfaceContainerHigh = Color(0xB3EAF2FF),
-    surfaceContainerHighest = Color(0xCCE0ECFF)
+    surfaceContainerLow = Color(0x6BFFFFFF),
+    surfaceContainer = Color(0x94F4F9FF),
+    surfaceContainerHigh = Color(0xADEAF2FF),
+    surfaceContainerHighest = Color(0xC4E0ECFF)
 )
 
 private val LiquidGlassDarkColorScheme = darkColorScheme(
@@ -99,14 +171,14 @@ private val LiquidGlassDarkColorScheme = darkColorScheme(
     onPrimaryContainer = Color(0xFFD6F3FF),
     secondary = Color(0xFF9BB4CC),
     onSecondary = Color(0xFF172B3D),
-    secondaryContainer = Color(0x40FFFFFF),
+    secondaryContainer = Color(0x38FFFFFF),
     onSecondaryContainer = Color(0xFFFFFFFF),
     surface = Color(0xFF071120),
-    surfaceContainerLowest = Color(0x5E070F1C),
-    surfaceContainerLow = Color(0x52FFFFFF),
-    surfaceContainer = Color(0x4D132238),
-    surfaceContainerHigh = Color(0x661C2E47),
-    surfaceContainerHighest = Color(0x80263B59)
+    surfaceContainerLowest = Color(0x52070F1C),
+    surfaceContainerLow = Color(0x47182940),
+    surfaceContainer = Color(0x6B132238),
+    surfaceContainerHigh = Color(0x801C2E47),
+    surfaceContainerHighest = Color(0x99263B59)
 )
 
 val ExpressiveShapes = Shapes(
@@ -148,7 +220,7 @@ val ExpressiveTypography = Typography(
 
 @Composable
 private fun animatedColorScheme(target: ColorScheme): ColorScheme {
-    val anim = tween<Color>(durationMillis = 260)
+    val anim = tween<Color>(durationMillis = 300)
     val primary by animateColorAsState(target.primary, anim, label = "primary")
     val onPrimary by animateColorAsState(target.onPrimary, anim, label = "onPrimary")
     val primaryContainer by animateColorAsState(target.primaryContainer, anim, label = "primaryContainer")
@@ -224,53 +296,29 @@ fun PocketToolboxTheme(
 
     val colorScheme = animatedColorScheme(rawColorScheme)
 
-    val cardBorder = if (isLiquidGlass) {
-        BorderStroke(
-            width = 1.4.dp,
-            brush = Brush.linearGradient(
-                colors = if (darkTheme) {
-                    listOf(
-                        Color.White.copy(alpha = 0.50f),
-                        Color.White.copy(alpha = 0.14f),
-                        Color.White.copy(alpha = 0.28f)
-                    )
-                } else {
-                    listOf(
-                        Color.White.copy(alpha = 0.98f),
-                        Color.White.copy(alpha = 0.42f),
-                        Color.White.copy(alpha = 0.80f)
-                    )
-                }
-            )
-        )
-    } else {
-        null
-    }
-
-    // Translucent frosted glass surfaces that contrast sharply against vibrant/photo backdrops
     val cardContainerColor = when {
-        isLiquidGlass && darkTheme -> Color(0x47122238)
-        isLiquidGlass && !darkTheme -> Color(0x78FFFFFF)
+        isLiquidGlass && darkTheme -> Color(0x42142640)
+        isLiquidGlass && !darkTheme -> Color(0x6EFFFFFF)
         hasCustomBackground && darkTheme -> colorScheme.surfaceContainerLow.copy(alpha = 0.82f)
         hasCustomBackground && !darkTheme -> colorScheme.surfaceContainerLow.copy(alpha = 0.84f)
         else -> colorScheme.surfaceContainerLow
     }
 
     val innerFieldColor = when {
-        isLiquidGlass && darkTheme -> Color(0x5207101E)
-        isLiquidGlass && !darkTheme -> Color(0xA6FFFFFF)
+        isLiquidGlass && darkTheme -> Color(0x4D060E1A)
+        isLiquidGlass && !darkTheme -> Color(0x9EFFFFFF)
         hasCustomBackground -> colorScheme.surfaceContainerLowest.copy(alpha = 0.86f)
         else -> colorScheme.surfaceContainerLowest
     }
 
     val dockContainerColor = when {
-        isLiquidGlass && darkTheme -> Color(0x66111F33)
-        isLiquidGlass && !darkTheme -> Color(0x8FFFFFFF)
+        isLiquidGlass && darkTheme -> Color(0x5E12223A)
+        isLiquidGlass && !darkTheme -> Color(0x88FFFFFF)
         else -> colorScheme.surfaceContainer
     }
 
     val dockIndicatorColor = when {
-        isLiquidGlass && darkTheme -> Color(0x38FFFFFF)
+        isLiquidGlass && darkTheme -> Color(0x36FFFFFF)
         isLiquidGlass && !darkTheme -> Color(0xD9FFFFFF)
         else -> colorScheme.secondaryContainer
     }
@@ -279,7 +327,6 @@ fun PocketToolboxTheme(
         isDark = darkTheme,
         isLiquidGlass = isLiquidGlass,
         hasCustomBackground = hasCustomBackground,
-        cardBorder = cardBorder,
         cardContainerColor = cardContainerColor,
         innerFieldColor = innerFieldColor,
         dockContainerColor = dockContainerColor,

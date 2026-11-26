@@ -1,5 +1,6 @@
 package com.toolbox.pocket.ui.screens
 
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -17,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -28,8 +30,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -38,6 +42,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.toolbox.pocket.ui.theme.LocalAppThemeVisuals
+import com.toolbox.pocket.ui.theme.liquidGlassSurface
+import com.toolbox.pocket.ui.theme.liquidPress
 
 data class ToolboxModule(
     val id: String,
@@ -62,6 +68,12 @@ fun ToolboxHomeScreen(
             title = "Base64 编解码",
             subtitle = "长文本分段换行、行号定位与双指缩放",
             icon = Icons.Rounded.Code
+        ),
+        ToolboxModule(
+            id = "browser",
+            title = "极简浏览器",
+            subtitle = "轻量网页浏览，支持应用内代理",
+            icon = Icons.Rounded.Public
         )
     )
 
@@ -95,14 +107,19 @@ fun ToolboxHomeScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(tools, key = { it.id }) { tool ->
+                val interactionSource = remember { MutableInteractionSource() }
                 Card(
                     onClick = { onOpenTool(tool.id) },
+                    interactionSource = interactionSource,
                     shape = MaterialTheme.shapes.large,
-                    border = visuals.cardBorder,
                     colors = CardDefaults.cardColors(
                         containerColor = visuals.cardContainerColor
                     ),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .liquidPress(interactionSource, pressedScale = 0.96f)
+                        .clip(MaterialTheme.shapes.large)
+                        .liquidGlassSurface(26.dp)
                 ) {
                     Row(
                         modifier = Modifier

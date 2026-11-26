@@ -8,23 +8,24 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -35,6 +36,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -72,13 +74,17 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.toolbox.pocket.data.ProxyManager
 import com.toolbox.pocket.data.ThemeMode
 import com.toolbox.pocket.data.ThemePreferences
 import com.toolbox.pocket.ui.screens.Base64Screen
+import com.toolbox.pocket.ui.screens.BrowserScreen
 import com.toolbox.pocket.ui.screens.SettingsScreen
 import com.toolbox.pocket.ui.screens.ToolboxHomeScreen
 import com.toolbox.pocket.ui.theme.LocalAppThemeVisuals
 import com.toolbox.pocket.ui.theme.PocketToolboxTheme
+import com.toolbox.pocket.ui.theme.liquidGlassSurface
+import com.toolbox.pocket.ui.theme.liquidPress
 import androidx.compose.ui.graphics.Color as ComposeColor
 
 class MainActivity : ComponentActivity() {
@@ -87,6 +93,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val themePreferences = ThemePreferences(applicationContext)
+        val proxyManager = ProxyManager(applicationContext)
 
         setContent {
             val settings by themePreferences.settings.collectAsState()
@@ -118,7 +125,10 @@ class MainActivity : ComponentActivity() {
                 useDynamicColor = settings.useDynamicColor,
                 hasCustomBackground = settings.backgroundImagePath != null
             ) {
-                PocketToolboxApp(themePreferences = themePreferences)
+                PocketToolboxApp(
+                    themePreferences = themePreferences,
+                    proxyManager = proxyManager
+                )
             }
         }
     }
@@ -126,10 +136,12 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun PocketToolboxApp(
-    themePreferences: ThemePreferences
+    themePreferences: ThemePreferences,
+    proxyManager: ProxyManager
 ) {
     val navController = rememberNavController()
     val settings by themePreferences.settings.collectAsState()
+    val proxyState by proxyManager.state.collectAsState()
     val visuals = LocalAppThemeVisuals.current
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
@@ -147,7 +159,6 @@ fun PocketToolboxApp(
     val layoutDirection = LocalLayoutDirection.current
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Layer 1: Custom background image OR rich high-contrast Liquid Glass backdrop OR solid surface
         if (bgBitmap != null) {
             Image(
                 bitmap = bgBitmap,
@@ -215,18 +226,6 @@ fun PocketToolboxApp(
                     center = Offset(size.width * 0.88f, size.height * 0.55f),
                     radius = size.width * 0.82f
                 )
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            if (visuals.isDark) ComposeColor(0x6622D3EE) else ComposeColor(0x705EEAD4),
-                            ComposeColor.Transparent
-                        ),
-                        center = Offset(size.width * 0.25f, size.height * 0.88f),
-                        radius = size.width * 0.7f
-                    ),
-                    center = Offset(size.width * 0.25f, size.height * 0.88f),
-                    radius = size.width * 0.7f
-                )
             }
         } else {
             Box(
@@ -236,7 +235,6 @@ fun PocketToolboxApp(
             )
         }
 
-        // Layer 2: Outer Scaffold with WindowInsets(0) so inner TopAppBars own status bar background seamlessly
         Scaffold(
             containerColor = ComposeColor.Transparent,
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -305,27 +303,40 @@ fun PocketToolboxApp(
                 enterTransition = {
                     slideIntoContainer(
                         towards = AnimatedContentTransitionScope.SlideDirection.Left,
-                        animationSpec = tween(220)
+                        animationSpec = spring(dampingRatio = 0.74f, stiffness = Spring.StiffnessMediumLow)
+                    ) + scaleIn(
+                        initialScale = 0.94f,
+                        animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
                     ) + fadeIn(animationSpec = tween(220))
                 },
                 exitTransition = {
-                    fadeOut(animationSpec = tween(160))
+                    scaleOut(
+                        targetScale = 0.96f,
+                        animationSpec = tween(180)
+                    ) + fadeOut(animationSpec = tween(180))
                 },
                 popEnterTransition = {
-                    fadeIn(animationSpec = tween(200))
+                    scaleIn(
+                        initialScale = 0.96f,
+                        animationSpec = spring(dampingRatio = 0.74f, stiffness = Spring.StiffnessMediumLow)
+                    ) + fadeIn(animationSpec = tween(220))
                 },
                 popExitTransition = {
                     slideOutOfContainer(
                         towards = AnimatedContentTransitionScope.SlideDirection.Right,
-                        animationSpec = tween(220)
+                        animationSpec = spring(dampingRatio = 0.74f, stiffness = Spring.StiffnessMediumLow)
+                    ) + scaleOut(
+                        targetScale = 0.94f,
+                        animationSpec = tween(200)
                     ) + fadeOut(animationSpec = tween(200))
                 }
             ) {
                 composable("home") {
                     ToolboxHomeScreen(
                         onOpenTool = { toolId ->
-                            if (toolId == "base64") {
-                                navController.navigate("tool/base64")
+                            when (toolId) {
+                                "base64" -> navController.navigate("tool/base64")
+                                "browser" -> navController.navigate("tool/browser")
                             }
                         }
                     )
@@ -336,9 +347,15 @@ fun PocketToolboxApp(
                         onBack = { navController.popBackStack() }
                     )
                 }
+                composable("tool/browser") {
+                    BrowserScreen(
+                        onExit = { navController.popBackStack() }
+                    )
+                }
                 composable("settings") {
                     SettingsScreen(
                         settings = settings,
+                        proxyState = proxyState,
                         onThemeModeChange = { themePreferences.setThemeMode(it) },
                         onUiStyleChange = { themePreferences.setUiStyle(it) },
                         onDynamicColorChange = { themePreferences.setDynamicColor(it) },
@@ -346,7 +363,11 @@ fun PocketToolboxApp(
                         onClearBackground = { themePreferences.clearBackgroundImage() },
                         onBackgroundBlurChange = { blur -> themePreferences.setBackgroundBlur(blur) },
                         onDefaultLineNumbersChange = { themePreferences.setDefaultLineNumbers(it) },
-                        onDefaultSoftWrapChange = { themePreferences.setDefaultSoftWrap(it) }
+                        onDefaultSoftWrapChange = { themePreferences.setDefaultSoftWrap(it) },
+                        onProxyToggle = { proxyManager.setEnabled(it) },
+                        onSelectProxy = { proxyManager.selectNode(it) },
+                        onAddProxy = { proxyManager.addNode(it) },
+                        onDeleteProxy = { proxyManager.deleteNode(it) }
                     )
                 }
             }
@@ -360,6 +381,7 @@ private fun LiquidGlassFloatingDock(
     onSelectRoute: (String) -> Unit
 ) {
     val visuals = LocalAppThemeVisuals.current
+    val selectedIndex = if (currentRoute == "settings") 1 else 0
 
     Box(
         modifier = Modifier
@@ -371,42 +393,68 @@ private fun LiquidGlassFloatingDock(
         Surface(
             shape = RoundedCornerShape(36.dp),
             color = visuals.dockContainerColor,
-            border = visuals.cardBorder,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(62.dp)
                 .shadow(
-                    elevation = 16.dp,
+                    elevation = 18.dp,
                     shape = RoundedCornerShape(36.dp),
                     ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
-                    spotColor = ComposeColor.Black.copy(alpha = 0.25f)
+                    spotColor = ComposeColor.Black.copy(alpha = 0.22f)
                 )
+                .clip(RoundedCornerShape(36.dp))
+                .liquidGlassSurface(36.dp)
         ) {
-            Row(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(5.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(5.dp)
             ) {
-                LiquidGlassDockItem(
-                    label = "工具箱",
-                    icon = Icons.Rounded.Build,
-                    selected = currentRoute == "home",
-                    onClick = { onSelectRoute("home") },
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
+                val pillWidth = maxWidth / 2
+                // Viscous liquid-spring sliding pill indicator
+                val indicatorOffset by animateDpAsState(
+                    targetValue = if (selectedIndex == 0) 0.dp else pillWidth,
+                    animationSpec = spring(
+                        dampingRatio = 0.58f,
+                        stiffness = Spring.StiffnessMediumLow
+                    ),
+                    label = "liquidDockOffset"
                 )
-                LiquidGlassDockItem(
-                    label = "设置",
-                    icon = Icons.Rounded.Settings,
-                    selected = currentRoute == "settings",
-                    onClick = { onSelectRoute("settings") },
+
+                Box(
                     modifier = Modifier
-                        .weight(1f)
+                        .offset(x = indicatorOffset)
+                        .width(pillWidth)
                         .fillMaxHeight()
+                        .clip(RoundedCornerShape(30.dp))
+                        .background(visuals.dockIndicatorColor)
+                        .liquidGlassSurface(30.dp)
                 )
+
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    LiquidGlassDockItem(
+                        label = "工具箱",
+                        icon = Icons.Rounded.Build,
+                        selected = selectedIndex == 0,
+                        onClick = { onSelectRoute("home") },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    )
+                    LiquidGlassDockItem(
+                        label = "设置",
+                        icon = Icons.Rounded.Settings,
+                        selected = selectedIndex == 1,
+                        onClick = { onSelectRoute("settings") },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    )
+                }
             }
         }
     }
@@ -420,17 +468,12 @@ private fun LiquidGlassDockItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val visuals = LocalAppThemeVisuals.current
-    val pillColor by animateColorAsState(
-        targetValue = if (selected) visuals.dockIndicatorColor else ComposeColor.Transparent,
-        animationSpec = tween(220),
-        label = "dockPillColor"
-    )
+    val interactionSource = remember { MutableInteractionSource() }
     val contentScale by animateFloatAsState(
-        targetValue = if (selected) 1.03f else 0.96f,
+        targetValue = if (selected) 1.04f else 0.95f,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
+            dampingRatio = 0.52f,
+            stiffness = Spring.StiffnessMediumLow
         ),
         label = "dockItemScale"
     )
@@ -440,26 +483,11 @@ private fun LiquidGlassDockItem(
         MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    val selectedBorder = if (selected) {
-        BorderStroke(
-            width = 1.dp,
-            color = if (visuals.isDark) {
-                ComposeColor.White.copy(alpha = 0.28f)
-            } else {
-                ComposeColor.White.copy(alpha = 0.95f)
-            }
-        )
-    } else {
-        null
-    }
-
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(30.dp))
-            .background(pillColor)
-            .let { mod -> if (selectedBorder != null) mod.border(selectedBorder, RoundedCornerShape(30.dp)) else mod }
+            .liquidPress(interactionSource, pressedScale = 0.92f)
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
             )
