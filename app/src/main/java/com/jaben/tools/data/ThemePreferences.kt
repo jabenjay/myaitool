@@ -89,10 +89,11 @@ class ThemePreferences(private val context: Context) {
             defaultShowLineNumbers = prefs.getBoolean(KEY_LINE_NUMBERS, true),
             defaultSoftWrap = prefs.getBoolean(KEY_SOFT_WRAP, true),
             homeColumns = prefs.getInt(KEY_HOME_COLUMNS, 1).coerceIn(1, 4),
-            toolOrder = (prefs.getString(KEY_TOOL_ORDER, "browser,base64,qr,format_factory,compressor") ?: "browser,base64,qr,format_factory,compressor")
-                .split(",")
-                .filter { it.isNotBlank() }
-                .ifEmpty { listOf("browser", "base64", "qr", "format_factory", "compressor") },
+            toolOrder = (
+                (prefs.getString(KEY_TOOL_ORDER, ALL_TOOL_IDS.joinToString(",")) ?: "")
+                    .split(",")
+                    .filter { it in ALL_TOOL_IDS } + ALL_TOOL_IDS
+                ).distinct(),
             backgroundImagePath = bgPath,
             backgroundBlurDp = prefs.getFloat(KEY_BG_BLUR, 12f),
             backgroundVersion = prefs.getInt(KEY_BG_VERSION, 0),
@@ -134,7 +135,9 @@ class ThemePreferences(private val context: Context) {
     }
 
     fun moveTool(fromIndex: Int, toIndex: Int) {
-        val current = _settings.value.toolOrder.toMutableList()
+        val current = (_settings.value.toolOrder.filter { it in ALL_TOOL_IDS } + ALL_TOOL_IDS)
+            .distinct()
+            .toMutableList()
         if (fromIndex !in current.indices || toIndex !in current.indices || fromIndex == toIndex) return
         val item = current.removeAt(fromIndex)
         current.add(toIndex, item)
@@ -272,6 +275,7 @@ class ThemePreferences(private val context: Context) {
         const val KEY_LINE_NUMBERS = "default_line_numbers"
         const val KEY_SOFT_WRAP = "default_soft_wrap"
         const val KEY_HOME_COLUMNS = "home_columns"
+        val ALL_TOOL_IDS = listOf("browser", "base64", "qr", "format_factory", "compressor")
         const val KEY_TOOL_ORDER = "tool_order"
         const val KEY_OUTPUT_ROOT_URI = "output_root_uri"
         const val KEY_OUTPUT_ROOT_LABEL = "output_root_label"

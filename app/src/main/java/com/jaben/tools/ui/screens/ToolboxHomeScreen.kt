@@ -4,7 +4,9 @@ import android.os.SystemClock
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,7 +57,9 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -354,14 +358,11 @@ fun ToolboxHomeScreen(
 
                                 Spacer(modifier = Modifier.height(if (columns == 4) 8.dp else 10.dp))
 
-                                Text(
+                                SingleLineAutoScaleMarqueeText(
                                     text = tool.title,
-                                    style = if (columns >= 3) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
+                                    baseStyle = if (columns >= 3) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
                                     color = visuals.cardContentColor,
-                                    textAlign = TextAlign.Center,
-                                    maxLines = if (columns >= 3) 2 else 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    modifier = Modifier.fillMaxWidth()
                                 )
 
                                 if (columns == 2) {
@@ -381,5 +382,71 @@ fun ToolboxHomeScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SingleLineAutoScaleMarqueeText(
+    text: String,
+    baseStyle: TextStyle,
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier
+) {
+    val textMeasurer = rememberTextMeasurer()
+    BoxWithConstraints(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        val maxWidthPx = constraints.maxWidth
+        val styledBase = baseStyle.copy(fontWeight = FontWeight.SemiBold)
+
+        val (fittedStyle, needsMarquee) = remember(text, styledBase, maxWidthPx) {
+            if (maxWidthPx <= 0) {
+                styledBase to false
+            } else {
+                var chosenScale = 1.0f
+                var fits = false
+                var s = 1.0f
+                while (s >= 0.799f) {
+                    val candidate = styledBase.copy(fontSize = styledBase.fontSize * s)
+                    val measured = textMeasurer.measure(
+                        text = text,
+                        style = candidate,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                    if (measured.size.width <= maxWidthPx) {
+                        chosenScale = s
+                        fits = true
+                        break
+                    }
+                    s -= 0.02f
+                }
+                if (fits) {
+                    styledBase.copy(fontSize = styledBase.fontSize * chosenScale) to false
+                } else {
+                    styledBase.copy(fontSize = styledBase.fontSize * 0.80f) to true
+                }
+            }
+        }
+
+        Text(
+            text = text,
+            style = fittedStyle,
+            color = color,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            softWrap = false,
+            modifier = if (needsMarquee) {
+                Modifier.basicMarquee(
+                    iterations = Int.MAX_VALUE,
+                    repeatDelayMillis = 1500,
+                    initialDelayMillis = 1000,
+                    velocity = 22.dp
+                )
+            } else {
+                Modifier
+            }
+        )
     }
 }
