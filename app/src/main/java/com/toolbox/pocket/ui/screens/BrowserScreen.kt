@@ -2,7 +2,6 @@ package com.toolbox.pocket.ui.screens
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
-import android.os.Build
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -10,7 +9,20 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,12 +31,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -32,35 +47,55 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DragHandle
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
+import com.toolbox.pocket.data.BookmarkItem
 import com.toolbox.pocket.ui.theme.LocalAppThemeVisuals
 import com.toolbox.pocket.ui.theme.liquidPress
 
@@ -69,6 +104,11 @@ private const val DEFAULT_HOME_URL = "https://cn.pornhub.com/"
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun BrowserScreen(
+    bookmarks: List<BookmarkItem>,
+    onAddBookmark: (String, String) -> Unit,
+    onUpdateBookmark: (String, String, String) -> Unit,
+    onDeleteBookmark: (String) -> Unit,
+    onMoveBookmark: (Int, Int) -> Unit,
     onExit: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -78,13 +118,18 @@ fun BrowserScreen(
     val barBg = if (visuals.isDark) Color(0xFF14161C) else Color(0xFFFFFFFF)
     val pillBg = if (visuals.isDark) Color(0xFF232732) else Color(0xFFEEF1F6)
     val barFg = if (visuals.isDark) Color(0xFFF5F5F7) else Color(0xFF1C1C1E)
+    val menuBg = if (visuals.isDark) Color(0xFF1C1F28) else Color(0xFFFFFFFF)
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var urlInput by remember { mutableStateOf(DEFAULT_HOME_URL) }
+    var showBookmarks by remember { mutableStateOf(false) }
     var progress by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
+
+    var editingBookmark by remember { mutableStateOf<BookmarkItem?>(null) }
+    var showAddDialog by remember { mutableStateOf(false) }
 
     fun navigateTo(raw: String) {
         val trimmed = raw.trim()
@@ -95,6 +140,7 @@ fun BrowserScreen(
             else -> "https://www.bing.com/search?q=${android.net.Uri.encode(trimmed)}"
         }
         urlInput = target
+        showBookmarks = false
         runCatching {
             webViewRef?.stopLoading()
             webViewRef?.loadUrl(target)
@@ -112,8 +158,13 @@ fun BrowserScreen(
         }
     }
 
-    BackHandler(enabled = canGoBack) {
-        runCatching { webViewRef?.goBack() }
+    BackHandler(enabled = showBookmarks || canGoBack) {
+        if (showBookmarks) {
+            showBookmarks = false
+            focusManager.clearFocus()
+        } else {
+            runCatching { webViewRef?.goBack() }
+        }
     }
 
     Column(
@@ -188,7 +239,13 @@ fun BrowserScreen(
                                     keyboardActions = KeyboardActions(
                                         onGo = { navigateTo(urlInput) }
                                     ),
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onFocusChanged { focusState ->
+                                            if (focusState.isFocused) {
+                                                showBookmarks = true
+                                            }
+                                        }
                                 )
                             }
                             if (urlInput.isNotEmpty()) {
@@ -235,71 +292,120 @@ fun BrowserScreen(
             }
         }
 
-        // Crash-hardened WebView
-        AndroidView(
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.useWideViewPort = true
-                    settings.loadWithOverviewMode = true
-                    settings.builtInZoomControls = true
-                    settings.displayZoomControls = false
-                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                    settings.mediaPlaybackRequiresUserGesture = true
-
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(
-                            view: WebView?,
-                            request: WebResourceRequest?
-                        ): Boolean {
-                            val scheme = request?.url?.scheme?.lowercase() ?: return true
-                            // Only allow http/https inside WebView; ignore intent:// etc. so it never crashes
-                            return scheme != "http" && scheme != "https"
-                        }
-
-                        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                            isLoading = true
-                            if (!url.isNullOrEmpty() && (url.startsWith("http://") || url.startsWith("https://"))) {
-                                urlInput = url
-                            }
-                            canGoBack = view?.canGoBack() == true
-                            canGoForward = view?.canGoForward() == true
-                        }
-
-                        override fun onPageFinished(view: WebView?, url: String?) {
-                            isLoading = false
-                            if (!url.isNullOrEmpty() && (url.startsWith("http://") || url.startsWith("https://"))) {
-                                urlInput = url
-                            }
-                            canGoBack = view?.canGoBack() == true
-                            canGoForward = view?.canGoForward() == true
-                        }
-
-                        override fun onRenderProcessGone(
-                            view: WebView?,
-                            detail: RenderProcessGoneDetail?
-                        ): Boolean {
-                            // Prevent WebView renderer crash from taking down the entire app
-                            return true
-                        }
-                    }
-
-                    webChromeClient = object : WebChromeClient() {
-                        override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                            progress = newProgress
-                            if (newProgress >= 100) isLoading = false
-                        }
-                    }
-
-                    loadUrl(DEFAULT_HOME_URL)
-                    webViewRef = this
-                }
-            },
+        // Main content area: WebView + overlaid bookmark dropdown menu
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-        )
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.useWideViewPort = true
+                        settings.loadWithOverviewMode = true
+                        settings.builtInZoomControls = true
+                        settings.displayZoomControls = false
+                        settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                        settings.mediaPlaybackRequiresUserGesture = true
+
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(
+                                view: WebView?,
+                                request: WebResourceRequest?
+                            ): Boolean {
+                                val scheme = request?.url?.scheme?.lowercase() ?: return true
+                                return scheme != "http" && scheme != "https"
+                            }
+
+                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                isLoading = true
+                                if (!url.isNullOrEmpty() && (url.startsWith("http://") || url.startsWith("https://"))) {
+                                    urlInput = url
+                                }
+                                canGoBack = view?.canGoBack() == true
+                                canGoForward = view?.canGoForward() == true
+                            }
+
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                isLoading = false
+                                if (!url.isNullOrEmpty() && (url.startsWith("http://") || url.startsWith("https://"))) {
+                                    urlInput = url
+                                }
+                                canGoBack = view?.canGoBack() == true
+                                canGoForward = view?.canGoForward() == true
+                            }
+
+                            override fun onRenderProcessGone(
+                                view: WebView?,
+                                detail: RenderProcessGoneDetail?
+                            ): Boolean = true
+                        }
+
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                progress = newProgress
+                                if (newProgress >= 100) isLoading = false
+                            }
+                        }
+
+                        loadUrl(DEFAULT_HOME_URL)
+                        webViewRef = this
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Scrim to dismiss bookmark menu when tapping outside
+            AnimatedVisibility(
+                visible = showBookmarks,
+                enter = fadeIn(tween(180)),
+                exit = fadeOut(tween(150))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.28f))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            showBookmarks = false
+                            focusManager.clearFocus()
+                        }
+                )
+            }
+
+            // Smooth Bookmark Dropdown Menu right below the address bar
+            AnimatedVisibility(
+                visible = showBookmarks,
+                enter = fadeIn(tween(180)) + expandVertically(
+                    animationSpec = spring(
+                        dampingRatio = 0.78f,
+                        stiffness = Spring.StiffnessMedium
+                    ),
+                    expandFrom = Alignment.Top
+                ),
+                exit = fadeOut(tween(140)) + shrinkVertically(
+                    animationSpec = tween(160),
+                    shrinkTowards = Alignment.Top
+                )
+            ) {
+                BookmarkDropdownPanel(
+                    bookmarks = bookmarks,
+                    panelBg = menuBg,
+                    panelFg = barFg,
+                    onSelectBookmark = { navigateTo(it.url) },
+                    onEditBookmark = { editingBookmark = it },
+                    onMoveBookmark = onMoveBookmark,
+                    onAddClick = { showAddDialog = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+        }
 
         // Minimal Via-style bottom toolbar
         Surface(
@@ -363,4 +469,295 @@ fun BrowserScreen(
             }
         }
     }
+
+    if (showAddDialog) {
+        BookmarkEditDialog(
+            title = "添加书签",
+            initialName = "",
+            initialUrl = "",
+            onDismiss = { showAddDialog = false },
+            onDelete = null,
+            onSave = { name, url ->
+                onAddBookmark(name, url)
+                showAddDialog = false
+            }
+        )
+    }
+
+    editingBookmark?.let { target ->
+        BookmarkEditDialog(
+            title = "编辑书签",
+            initialName = target.name,
+            initialUrl = target.url,
+            onDismiss = { editingBookmark = null },
+            onDelete = {
+                onDeleteBookmark(target.id)
+                editingBookmark = null
+            },
+            onSave = { name, url ->
+                onUpdateBookmark(target.id, name, url)
+                editingBookmark = null
+            }
+        )
+    }
+}
+
+@Composable
+private fun BookmarkDropdownPanel(
+    bookmarks: List<BookmarkItem>,
+    panelBg: Color,
+    panelFg: Color,
+    onSelectBookmark: (BookmarkItem) -> Unit,
+    onEditBookmark: (BookmarkItem) -> Unit,
+    onMoveBookmark: (Int, Int) -> Unit,
+    onAddClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+    var draggedId by remember { mutableStateOf<String?>(null) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var rowHeightPx by remember { mutableFloatStateOf(140f) }
+
+    val latestBookmarks by rememberUpdatedState(bookmarks)
+    val latestOnMove by rememberUpdatedState(onMoveBookmark)
+
+    Surface(
+        shape = RoundedCornerShape(22.dp),
+        color = panelBg,
+        contentColor = panelFg,
+        shadowElevation = 10.dp,
+        modifier = modifier
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
+            ) {
+                itemsIndexed(bookmarks, key = { _, item -> item.id }) { index, item ->
+                    val isDragging = draggedId == item.id
+                    val scale by animateFloatAsState(
+                        targetValue = if (isDragging) 1.03f else 1f,
+                        animationSpec = spring(
+                            dampingRatio = 0.72f,
+                            stiffness = Spring.StiffnessMedium
+                        ),
+                        label = "bookmarkFloatScale"
+                    )
+                    val elevation by animateDpAsState(
+                        targetValue = if (isDragging) 8.dp else 0.dp,
+                        label = "bookmarkFloatElevation"
+                    )
+                    val rowBg = if (isDragging) {
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                    } else {
+                        panelBg
+                    }
+
+                    Surface(
+                        color = rowBg,
+                        contentColor = panelFg,
+                        shadowElevation = elevation,
+                        shape = RoundedCornerShape(if (isDragging) 14.dp else 0.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .zIndex(if (isDragging) 10f else 0f)
+                            .then(if (!isDragging) Modifier.animateItem() else Modifier)
+                            .onSizeChanged { size ->
+                                if (size.height > 0) rowHeightPx = size.height.toFloat()
+                            }
+                            .graphicsLayer {
+                                if (isDragging) {
+                                    translationY = dragOffsetY
+                                }
+                                scaleX = scale
+                                scaleY = scale
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelectBookmark(item) }
+                                .padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Public,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.name,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = panelFg,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = item.url.removePrefix("https://").removePrefix("http://"),
+                                    fontSize = 11.5.sp,
+                                    color = panelFg.copy(alpha = 0.6f),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            // Pencil edit button
+                            IconButton(
+                                onClick = { onEditBookmark(item) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Edit,
+                                    contentDescription = "编辑书签",
+                                    tint = panelFg.copy(alpha = 0.72f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            // Drag handle button to the right of edit button
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .pointerInput(item.id) {
+                                        detectDragGestures(
+                                            onDragStart = {
+                                                draggedId = item.id
+                                                dragOffsetY = 0f
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            },
+                                            onDragEnd = {
+                                                draggedId = null
+                                                dragOffsetY = 0f
+                                            },
+                                            onDragCancel = {
+                                                draggedId = null
+                                                dragOffsetY = 0f
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                dragOffsetY += dragAmount.y
+                                                val currentList = latestBookmarks
+                                                val currentIdx = currentList.indexOfFirst { it.id == item.id }
+                                                if (currentIdx != -1) {
+                                                    val threshold = rowHeightPx * 0.55f
+                                                    if (dragOffsetY > threshold && currentIdx < currentList.lastIndex) {
+                                                        latestOnMove(currentIdx, currentIdx + 1)
+                                                        dragOffsetY -= rowHeightPx
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    } else if (dragOffsetY < -threshold && currentIdx > 0) {
+                                                        latestOnMove(currentIdx, currentIdx - 1)
+                                                        dragOffsetY += rowHeightPx
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.DragHandle,
+                                    contentDescription = "拖动排序",
+                                    tint = if (isDragging) MaterialTheme.colorScheme.primary else panelFg.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider(color = panelFg.copy(alpha = 0.1f))
+
+            // Bottom row: Add Bookmark
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onAddClick)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "添加书签",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookmarkEditDialog(
+    title: String,
+    initialName: String,
+    initialUrl: String,
+    onDismiss: () -> Unit,
+    onDelete: (() -> Unit)?,
+    onSave: (String, String) -> Unit
+) {
+    var name by remember { mutableStateOf(initialName) }
+    var url by remember { mutableStateOf(initialUrl) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, maxLines = 1, softWrap = false) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("书签名称", maxLines = 1, softWrap = false) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("网址（例如 www.baidu.com）", maxLines = 1, softWrap = false) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (onDelete != null) {
+                    TextButton(onClick = onDelete) {
+                        Text("删除", color = MaterialTheme.colorScheme.error, maxLines = 1, softWrap = false)
+                    }
+                }
+                FilledTonalButton(
+                    enabled = url.isNotBlank(),
+                    onClick = { onSave(name, url) }
+                ) {
+                    Text("保存", maxLines = 1, softWrap = false)
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消", maxLines = 1, softWrap = false)
+            }
+        }
+    )
 }

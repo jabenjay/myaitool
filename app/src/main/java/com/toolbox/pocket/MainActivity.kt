@@ -70,6 +70,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.toolbox.pocket.data.BookmarkManager
 import com.toolbox.pocket.data.GfwRuleManager
 import com.toolbox.pocket.data.ProxyManager
 import com.toolbox.pocket.data.ThemeMode
@@ -93,6 +94,7 @@ class MainActivity : ComponentActivity() {
         val themePreferences = ThemePreferences(applicationContext)
         val gfwRuleManager = GfwRuleManager(applicationContext)
         val proxyManager = ProxyManager(applicationContext, gfwRuleManager)
+        val bookmarkManager = BookmarkManager(applicationContext)
 
         setContent {
             val settings by themePreferences.settings.collectAsState()
@@ -129,7 +131,8 @@ class MainActivity : ComponentActivity() {
                 PocketToolboxApp(
                     themePreferences = themePreferences,
                     proxyManager = proxyManager,
-                    gfwRuleManager = gfwRuleManager
+                    gfwRuleManager = gfwRuleManager,
+                    bookmarkManager = bookmarkManager
                 )
             }
         }
@@ -140,12 +143,14 @@ class MainActivity : ComponentActivity() {
 fun PocketToolboxApp(
     themePreferences: ThemePreferences,
     proxyManager: ProxyManager,
-    gfwRuleManager: GfwRuleManager
+    gfwRuleManager: GfwRuleManager,
+    bookmarkManager: BookmarkManager
 ) {
     val navController = rememberNavController()
     val settings by themePreferences.settings.collectAsState()
     val proxyState by proxyManager.state.collectAsState()
     val gfwRuleState by gfwRuleManager.state.collectAsState()
+    val bookmarks by bookmarkManager.bookmarks.collectAsState()
 
     LaunchedEffect(Unit) {
         gfwRuleManager.updateRulesOnStartup()
@@ -294,6 +299,11 @@ fun PocketToolboxApp(
                     }
                     composable("tool/browser") {
                         BrowserScreen(
+                            bookmarks = bookmarks,
+                            onAddBookmark = { n, u -> bookmarkManager.addBookmark(n, u) },
+                            onUpdateBookmark = { id, n, u -> bookmarkManager.updateBookmark(id, n, u) },
+                            onDeleteBookmark = { id -> bookmarkManager.deleteBookmark(id) },
+                            onMoveBookmark = { from, to -> bookmarkManager.moveBookmark(from, to) },
                             onExit = { navController.popBackStack() }
                         )
                     }
@@ -431,6 +441,11 @@ fun PocketToolboxApp(
                     }
                     composable("tool/browser") {
                         BrowserScreen(
+                            bookmarks = bookmarks,
+                            onAddBookmark = { n, u -> bookmarkManager.addBookmark(n, u) },
+                            onUpdateBookmark = { id, n, u -> bookmarkManager.updateBookmark(id, n, u) },
+                            onDeleteBookmark = { id -> bookmarkManager.deleteBookmark(id) },
+                            onMoveBookmark = { from, to -> bookmarkManager.moveBookmark(from, to) },
                             onExit = { navController.popBackStack() }
                         )
                     }
