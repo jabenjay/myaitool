@@ -152,26 +152,16 @@ object QrCodeHelper {
     fun saveBitmapToGallery(context: Context, bitmap: Bitmap): Boolean {
         return runCatching {
             val filename = "QR_${System.currentTimeMillis()}.png"
-            val values = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, filename)
-                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/PocketToolbox")
-                    put(MediaStore.Images.Media.IS_PENDING, 1)
-                }
-            }
-            val resolver = context.contentResolver
-            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
-            val out: OutputStream = resolver.openOutputStream(uri) ?: return false
-            out.use {
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                values.clear()
-                values.put(MediaStore.Images.Media.IS_PENDING, 0)
-                resolver.update(uri, values, null, null)
-            }
-            true
+            val baos = java.io.ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+            val uri = com.jaben.tools.data.OutputStorageHelper.saveStream(
+                context = context,
+                subFolder = com.jaben.tools.data.OutputStorageHelper.SUB_PICTURES,
+                fileName = filename,
+                mimeType = "image/png",
+                inputStream = java.io.ByteArrayInputStream(baos.toByteArray())
+            )
+            uri != null
         }.getOrDefault(false)
     }
 }

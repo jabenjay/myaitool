@@ -37,10 +37,11 @@ object AppShortcutHelper {
             "browser" to Triple("轻量浏览器", "tool/browser", R.drawable.ic_shortcut_browser),
             "base64" to Triple("Base64编码", "tool/base64", R.drawable.ic_shortcut_base64),
             "qr" to Triple("二维码工具", "tool/qr", R.drawable.ic_shortcut_qr),
-            "format_factory" to Triple("格式工厂", "tool/format_factory", R.drawable.ic_shortcut_format)
+            "format_factory" to Triple("格式工厂", "tool/format_factory", R.drawable.ic_shortcut_format),
+            "compressor" to Triple("文件压缩", "tool/compressor", R.drawable.ic_shortcut_compress)
         )
 
-        val orderedIds = (toolOrder + listOf("browser", "base64", "qr", "format_factory"))
+        val orderedIds = (toolOrder + listOf("browser", "base64", "qr", "format_factory", "compressor"))
             .distinct()
             .filter { toolMeta.containsKey(it) }
             .take(3)

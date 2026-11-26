@@ -342,7 +342,7 @@ fun QrToolScreen(
                                         val ok = qrBitmap?.let { QrCodeHelper.saveBitmapToGallery(context, it) } == true
                                         scope.launch {
                                             snackbarHostState.showSnackbar(
-                                                if (ok) "已保存到相册 (Pictures/PocketToolbox)" else "保存失败，请检查相册权限"
+                                                if (ok) "已保存到 ${com.jaben.tools.data.OutputStorageHelper.getDisplayPath(context, com.jaben.tools.data.OutputStorageHelper.SUB_PICTURES)}" else "保存失败，请检查存储权限"
                                             )
                                         }
                                     },

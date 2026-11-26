@@ -191,57 +191,18 @@ object FormatFactoryEngine {
     }
 
     fun saveToGalleryOrDownloads(context: Context, result: ConversionResult): Uri? {
-        val resolver = context.contentResolver
-        val isExoticImage = result.format in setOf(
-            TargetFormat.IMG_ICO, TargetFormat.IMG_TIFF, TargetFormat.IMG_TGA, TargetFormat.IMG_PPM
+        val subFolder = when {
+            result.format.mime.startsWith("image/") -> com.jaben.tools.data.OutputStorageHelper.SUB_PICTURES
+            result.format.mime.startsWith("video/") -> com.jaben.tools.data.OutputStorageHelper.SUB_VIDEOS
+            else -> com.jaben.tools.data.OutputStorageHelper.SUB_SOUNDS
+        }
+        return com.jaben.tools.data.OutputStorageHelper.saveFile(
+            context = context,
+            subFolder = subFolder,
+            fileName = result.outputName,
+            mimeType = result.format.mime,
+            sourceFile = result.tempFile
         )
-        val isExoticAudio = result.format in setOf(
-            TargetFormat.AUD_AIFF, TargetFormat.AUD_PCM
-        )
-
-        return runCatching {
-            val (collection, relPath, mime) = when {
-                isExoticImage || isExoticAudio -> {
-                    val col = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                    } else {
-                        MediaStore.Files.getContentUri("external")
-                    }
-                    Triple(col, Environment.DIRECTORY_DOWNLOADS + "/Jools", "application/octet-stream")
-                }
-                result.format.mime.startsWith("image/") -> {
-                    Triple(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, Environment.DIRECTORY_PICTURES + "/Jools", result.format.mime)
-                }
-                result.format.mime.startsWith("video/") -> {
-                    Triple(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, Environment.DIRECTORY_MOVIES + "/Jools", result.format.mime)
-                }
-                else -> {
-                    Triple(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, Environment.DIRECTORY_MUSIC + "/Jools", result.format.mime)
-                }
-            }
-
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, result.outputName)
-                put(MediaStore.MediaColumns.MIME_TYPE, mime)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
-                    put(MediaStore.MediaColumns.IS_PENDING, 1)
-                }
-            }
-
-            val uri = resolver.insert(collection, values) ?: return null
-            resolver.openOutputStream(uri)?.use { out ->
-                result.tempFile.inputStream().use { input -> input.copyTo(out) }
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                values.clear()
-                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                resolver.update(uri, values, null, null)
-            }
-            uri
-        }.onFailure {
-            AppLogManager.log("FORMAT", "保存失败: ${it.message}")
-        }.getOrNull()
     }
 
     // ==================== IMAGE ENGINE ====================

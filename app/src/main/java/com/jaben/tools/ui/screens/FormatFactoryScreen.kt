@@ -69,6 +69,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.jaben.tools.data.OutputStorageHelper
 import com.jaben.tools.tools.format.ConversionResult
 import com.jaben.tools.tools.format.FormatFactoryEngine
 import com.jaben.tools.tools.format.MediaCategory
@@ -113,10 +114,9 @@ fun FormatFactoryScreen(
     var progress by remember { mutableFloatStateOf(0f) }
     var convertJob by remember { mutableStateOf<Job?>(null) }
 
-    // Options
     var imageQuality by rememberSaveable { mutableIntStateOf(90) }
     var imageScalePercent by rememberSaveable { mutableIntStateOf(100) }
-    var videoMaxHeight by rememberSaveable { mutableIntStateOf(0) } // 0=原画
+    var videoMaxHeight by rememberSaveable { mutableIntStateOf(0) }
     var audioBitrateKbps by rememberSaveable { mutableIntStateOf(192) }
 
     val thumbBitmap = remember(sourceInfo?.uri, category) {
@@ -147,7 +147,6 @@ fun FormatFactoryScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Top Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -169,7 +168,6 @@ fun FormatFactoryScreen(
             )
         }
 
-        // Category Switcher
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = visuals.cardContainerColor,
@@ -237,7 +235,6 @@ fun FormatFactoryScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // 1. Source File Picker Card
             Surface(
                 shape = RoundedCornerShape(22.dp),
                 color = visuals.cardContainerColor,
@@ -312,7 +309,6 @@ fun FormatFactoryScreen(
                 }
             }
 
-            // 2. Target Format Selection
             Surface(
                 shape = RoundedCornerShape(22.dp),
                 color = visuals.cardContainerColor,
@@ -350,7 +346,6 @@ fun FormatFactoryScreen(
                 }
             }
 
-            // 3. Contextual Conversion Options
             val showQuality = selectedFormat in setOf(TargetFormat.IMG_JPG, TargetFormat.IMG_WEBP_LOSSY)
             val showImgScale = category == MediaCategory.IMAGE
             val showVideoRes = selectedFormat in setOf(TargetFormat.VID_MP4_H264, TargetFormat.VID_MP4_HEVC, TargetFormat.VID_MOV)
@@ -429,7 +424,6 @@ fun FormatFactoryScreen(
                 }
             }
 
-            // 4. Convert Action & Progress
             if (isConverting) {
                 Surface(
                     shape = RoundedCornerShape(22.dp),
@@ -528,9 +522,14 @@ fun FormatFactoryScreen(
                 }
             }
 
-            // 5. Result Card
             AnimatedVisibility(visible = resultInfo != null) {
                 resultInfo?.let { res ->
+                    val subFolder = when {
+                        res.format.mime.startsWith("image/") -> OutputStorageHelper.SUB_PICTURES
+                        res.format.mime.startsWith("video/") -> OutputStorageHelper.SUB_VIDEOS
+                        else -> OutputStorageHelper.SUB_SOUNDS
+                    }
+                    val saveDirLabel = OutputStorageHelper.getDisplayPath(context, subFolder)
                     Surface(
                         shape = RoundedCornerShape(22.dp),
                         color = visuals.cardContainerColor,
@@ -585,7 +584,7 @@ fun FormatFactoryScreen(
                                         val uri = FormatFactoryEngine.saveToGalleryOrDownloads(context, res)
                                         if (uri != null) {
                                             savedUri = uri
-                                            Toast.makeText(context, "已保存到本地 (Jools 目录)", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "已保存到 $saveDirLabel", Toast.LENGTH_SHORT).show()
                                         } else {
                                             Toast.makeText(context, "保存失败，请检查存储权限", Toast.LENGTH_SHORT).show()
                                         }

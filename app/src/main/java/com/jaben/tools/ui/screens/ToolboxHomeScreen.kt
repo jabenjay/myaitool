@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.QrCodeScanner
+import androidx.compose.material.icons.rounded.Compress
 import androidx.compose.material.icons.rounded.Transform
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
@@ -116,6 +117,12 @@ fun ToolboxHomeScreen(
                 title = "格式工厂",
                 subtitle = "图片、视频、音频全能格式转换",
                 icon = Icons.Rounded.Transform
+            ),
+            "compressor" to ToolboxModule(
+                id = "compressor",
+                title = "文件压缩",
+                subtitle = "GPU加速视频、图片、音频及文件压缩",
+                icon = Icons.Rounded.Compress
             )
         )
     }

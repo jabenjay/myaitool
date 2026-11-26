@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.BugReport
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.VpnKey
@@ -47,6 +48,7 @@ fun SettingsScreen(
     onOpenThemeSettings: () -> Unit,
     onOpenLayoutSettings: () -> Unit,
     onOpenProxySettings: () -> Unit,
+    onOpenStorageSettings: () -> Unit,
     onOpenLogs: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -98,6 +100,15 @@ fun SettingsScreen(
                     title = "网络代理",
                     subtitle = proxyState.statusMessage,
                     onClick = onOpenProxySettings
+                )
+            }
+
+            item {
+                SettingsEntryCard(
+                    icon = Icons.Rounded.FolderOpen,
+                    title = "保存路径",
+                    subtitle = settings.outputRootLabel,
+                    onClick = onOpenStorageSettings
                 )
             }
 

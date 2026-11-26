@@ -36,11 +36,13 @@ data class AppSettings(
     val defaultShowLineNumbers: Boolean = true,
     val defaultSoftWrap: Boolean = true,
     val homeColumns: Int = 1,
-    val toolOrder: List<String> = listOf("browser", "base64", "qr", "format_factory"),
+    val toolOrder: List<String> = listOf("browser", "base64", "qr", "format_factory", "compressor"),
     val backgroundImagePath: String? = null,
     val backgroundBlurDp: Float = 12f,
     val backgroundVersion: Int = 0,
-    val wallpaperSeedColor: Int? = null
+    val wallpaperSeedColor: Int? = null,
+    val outputRootUri: String? = null,
+    val outputRootLabel: String = "Download/Jools"
 )
 
 class ThemePreferences(private val context: Context) {
@@ -87,14 +89,16 @@ class ThemePreferences(private val context: Context) {
             defaultShowLineNumbers = prefs.getBoolean(KEY_LINE_NUMBERS, true),
             defaultSoftWrap = prefs.getBoolean(KEY_SOFT_WRAP, true),
             homeColumns = prefs.getInt(KEY_HOME_COLUMNS, 1).coerceIn(1, 4),
-            toolOrder = (prefs.getString(KEY_TOOL_ORDER, "browser,base64,qr,format_factory") ?: "browser,base64,qr,format_factory")
+            toolOrder = (prefs.getString(KEY_TOOL_ORDER, "browser,base64,qr,format_factory,compressor") ?: "browser,base64,qr,format_factory,compressor")
                 .split(",")
                 .filter { it.isNotBlank() }
-                .ifEmpty { listOf("browser", "base64", "qr", "format_factory") },
+                .ifEmpty { listOf("browser", "base64", "qr", "format_factory", "compressor") },
             backgroundImagePath = bgPath,
             backgroundBlurDp = prefs.getFloat(KEY_BG_BLUR, 12f),
             backgroundVersion = prefs.getInt(KEY_BG_VERSION, 0),
-            wallpaperSeedColor = savedSeed
+            wallpaperSeedColor = savedSeed,
+            outputRootUri = prefs.getString(KEY_OUTPUT_ROOT_URI, null),
+            outputRootLabel = prefs.getString(KEY_OUTPUT_ROOT_LABEL, "Download/Jools") ?: "Download/Jools"
         )
     }
 
