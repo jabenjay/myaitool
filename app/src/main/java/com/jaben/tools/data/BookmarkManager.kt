@@ -18,7 +18,7 @@ class BookmarkManager(context: Context) {
     private val prefs = context.getSharedPreferences("toolbox_bookmarks", Context.MODE_PRIVATE)
 
     init {
-        migrateV3DefaultsIfNeeded()
+        migrateV4DefaultsIfNeeded()
     }
 
     private val _bookmarks = MutableStateFlow(loadBookmarks())
@@ -29,25 +29,19 @@ class BookmarkManager(context: Context) {
     )
     val homeUrl: StateFlow<String> = _homeUrl.asStateFlow()
 
-    private fun migrateV3DefaultsIfNeeded() {
-        if (prefs.getBoolean(KEY_BOOKMARKS_V3_MIGRATED, false)) return
+    private fun migrateV4DefaultsIfNeeded() {
+        if (prefs.getBoolean(KEY_BOOKMARKS_V4_MIGRATED, false)) return
         prefs.edit().putString(KEY_HOME_URL, DEFAULT_HOME_URL).apply()
-        val raw = prefs.getString(KEY_BOOKMARKS, null)
-        if (raw != null) {
-            val parsed = parseJson(raw)
-            val preStoredUrls = setOf(
-                "https://www.baidu.com",
-                "https://www.google.com",
-                "https://52crdh.com/",
-                "https://cn.pornhub.com/"
-            )
-            val customOnly = parsed.filterNot { it.url in preStoredUrls }
-            val merged = (defaultBookmarks() + customOnly).distinctBy { it.url.trim().removeSuffix("/") }
-            persist(merged)
+        val existing = if (prefs.contains(KEY_BOOKMARKS)) {
+            parseJson(prefs.getString(KEY_BOOKMARKS, "[]") ?: "[]")
         } else {
-            persist(defaultBookmarks())
+            emptyList()
         }
-        prefs.edit().putBoolean(KEY_BOOKMARKS_V3_MIGRATED, true).apply()
+        val merged = (existing + defaultBookmarks()).distinctBy {
+            it.url.trim().removeSuffix("/").lowercase()
+        }
+        persist(merged)
+        prefs.edit().putBoolean(KEY_BOOKMARKS_V4_MIGRATED, true).apply()
     }
 
     fun setHomeUrl(url: String) {
@@ -57,7 +51,13 @@ class BookmarkManager(context: Context) {
     }
 
     private fun defaultBookmarks(): List<BookmarkItem> = listOf(
-        BookmarkItem(name = "四虎", url = "https://4h.tv/")
+        BookmarkItem(name = "文尼导航", url = "https://biglist03.xyz/"),
+        BookmarkItem(name = "59导航", url = "https://dh852.cc/?ide=pl2vfit1"),
+        BookmarkItem(name = "海角57", url = "https://hjtv57.top/?lde=3k8pwlo0"),
+        BookmarkItem(name = "萝莉岛", url = "https://loli88.top/?lde=7veeox3p"),
+        BookmarkItem(name = "大门导航", url = "https://vbc04o.csmen1056.cc/%E5%A4%A7%E9%97%A8/1b956a/#shipin"),
+        BookmarkItem(name = "2025秒播", url = "https://52chengrer.zxmbsp6.cc/2025/"),
+        BookmarkItem(name = "搜片网", url = "https://52chengren.insearch10.cc/vip/369/")
     )
 
     private fun loadBookmarks(): List<BookmarkItem> {
@@ -142,7 +142,7 @@ class BookmarkManager(context: Context) {
     private companion object {
         const val KEY_BOOKMARKS = "bookmarks_json"
         const val KEY_HOME_URL = "browser_home_url"
-        const val KEY_BOOKMARKS_V3_MIGRATED = "bookmarks_v3_migrated"
-        const val DEFAULT_HOME_URL = "https://4h.tv/"
+        const val KEY_BOOKMARKS_V4_MIGRATED = "bookmarks_v4_migrated"
+        const val DEFAULT_HOME_URL = "https://biglist03.xyz/"
     }
 }
