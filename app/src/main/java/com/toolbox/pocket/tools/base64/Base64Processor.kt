@@ -105,7 +105,7 @@ object Base64Processor {
         autoFormatJson: Boolean
     ): Base64Result {
         // Strip whitespace/line breaks inside Base64 blocks so multi-line Base64 decodes cleanly
-        val cleaned = input.replace("\s+".toRegex(), "")
+        val cleaned = input.replace("\\s+".toRegex(), "")
         val flags = when (variant) {
             Base64Variant.STANDARD -> Base64.DEFAULT
             Base64Variant.URL_SAFE -> Base64.URL_SAFE
