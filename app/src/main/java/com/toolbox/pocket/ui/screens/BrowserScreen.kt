@@ -58,6 +58,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.outlined.Home as OutlinedHome
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Public
@@ -120,7 +121,9 @@ private const val DEFAULT_HOME_URL = "https://cn.pornhub.com/"
 @Composable
 fun BrowserScreen(
     initialUrl: String = DEFAULT_HOME_URL,
+    homeUrl: String = DEFAULT_HOME_URL,
     bookmarks: List<BookmarkItem>,
+    onSetHomeUrl: (String) -> Unit,
     onAddBookmark: (String, String) -> Unit,
     onUpdateBookmark: (String, String, String) -> Unit,
     onDeleteBookmark: (String) -> Unit,
@@ -141,7 +144,7 @@ fun BrowserScreen(
     val startUrl = remember(initialUrl) {
         val t = initialUrl.trim()
         when {
-            t.isEmpty() -> DEFAULT_HOME_URL
+            t.isEmpty() -> homeUrl
             t.startsWith("http://") || t.startsWith("https://") -> t
             t.contains(".") && !t.contains(" ") -> "https://$t"
             else -> "https://www.bing.com/search?q=${android.net.Uri.encode(t)}"
@@ -533,9 +536,14 @@ fun BrowserScreen(
             ) {
                 BookmarkDropdownPanel(
                     bookmarks = bookmarks,
+                    homeUrl = homeUrl,
                     panelBg = menuBg,
                     panelFg = barFg,
                     onSelectBookmark = { navigateTo(it.url) },
+                    onSetHome = { item ->
+                        onSetHomeUrl(item.url)
+                        Toast.makeText(context, "已设为浏览器主页", Toast.LENGTH_SHORT).show()
+                    },
                     onEditBookmark = { editingBookmark = it },
                     onMoveBookmark = onMoveBookmark,
                     onAddClick = { showAddDialog = true },
@@ -584,7 +592,7 @@ fun BrowserScreen(
                     )
                 }
                 IconButton(
-                    onClick = { navigateTo(DEFAULT_HOME_URL) },
+                    onClick = { navigateTo(homeUrl) },
                     modifier = Modifier.liquidPress()
                 ) {
                     Icon(
@@ -644,9 +652,11 @@ fun BrowserScreen(
 @Composable
 private fun BookmarkDropdownPanel(
     bookmarks: List<BookmarkItem>,
+    homeUrl: String,
     panelBg: Color,
     panelFg: Color,
     onSelectBookmark: (BookmarkItem) -> Unit,
+    onSetHome: (BookmarkItem) -> Unit,
     onEditBookmark: (BookmarkItem) -> Unit,
     onMoveBookmark: (Int, Int) -> Unit,
     onAddClick: () -> Unit,
@@ -752,7 +762,7 @@ private fun BookmarkDropdownPanel(
                             // Pencil edit button
                             IconButton(
                                 onClick = { onEditBookmark(item) },
-                                modifier = Modifier.size(36.dp)
+                                modifier = Modifier.size(34.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.Edit,
@@ -762,7 +772,22 @@ private fun BookmarkDropdownPanel(
                                 )
                             }
 
-                            // Drag handle button to the right of edit button
+                            // Home button between edit and sort buttons (filled if current homepage)
+                            val isCurrentHome = item.url.trim().removeSuffix("/")
+                                .equals(homeUrl.trim().removeSuffix("/"), ignoreCase = true)
+                            IconButton(
+                                onClick = { onSetHome(item) },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isCurrentHome) Icons.Rounded.Home else OutlinedHome,
+                                    contentDescription = "设为主页",
+                                    tint = if (isCurrentHome) MaterialTheme.colorScheme.primary else panelFg.copy(alpha = 0.65f),
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+
+                            // Drag handle button to the right of home button
                             Box(
                                 modifier = Modifier
                                     .size(36.dp)

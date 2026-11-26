@@ -165,6 +165,7 @@ fun PocketToolboxApp(
     val proxyState by proxyManager.state.collectAsState()
     val gfwRuleState by gfwRuleManager.state.collectAsState()
     val bookmarks by bookmarkManager.bookmarks.collectAsState()
+    val browserHomeUrl by bookmarkManager.homeUrl.collectAsState()
     val visuals = LocalAppThemeVisuals.current
     val appScope = rememberCoroutineScope()
 
@@ -339,8 +340,10 @@ fun PocketToolboxApp(
                     val argUrl = entry.arguments?.getString("url").orEmpty()
                     val decodedUrl = if (argUrl.isNotEmpty()) Uri.decode(argUrl) else ""
                     BrowserScreen(
-                        initialUrl = decodedUrl.ifBlank { "https://cn.pornhub.com/" },
+                        initialUrl = decodedUrl.ifBlank { browserHomeUrl },
+                        homeUrl = browserHomeUrl,
                         bookmarks = bookmarks,
+                        onSetHomeUrl = { bookmarkManager.setHomeUrl(it) },
                         onAddBookmark = { n, u -> bookmarkManager.addBookmark(n, u) },
                         onUpdateBookmark = { id, n, u -> bookmarkManager.updateBookmark(id, n, u) },
                         onDeleteBookmark = { id -> bookmarkManager.deleteBookmark(id) },

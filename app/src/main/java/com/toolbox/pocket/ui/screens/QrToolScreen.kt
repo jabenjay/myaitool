@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -271,9 +273,9 @@ fun QrToolScreen(
                         .fillMaxSize()
                         .nestedScroll(nestedScrollConnection)
                 ) {
-                    // Pinned QR Preview Card: shrinks smoothly to 1/2 size (200dp -> 100dp) and stays pinned at top
-                    val qrSize = lerp(200.dp, 100.dp, collapseProgress)
-                    val cardPad = lerp(14.dp, 10.dp, collapseProgress)
+                    // Continuous 1:1 interpolated pinned QR Preview Card (no layout jump!)
+                    val qrSize = lerp(196.dp, 98.dp, collapseProgress)
+                    val boxHeight = lerp(266.dp, 122.dp, collapseProgress)
 
                     Surface(
                         shape = MaterialTheme.shapes.large,
@@ -285,146 +287,92 @@ fun QrToolScreen(
                             .clip(MaterialTheme.shapes.large)
                             .liquidGlassSurface(26.dp)
                     ) {
-                        if (collapseProgress < 0.55f) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(cardPad),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                if (qrBitmap != null) {
-                                    Image(
-                                        bitmap = qrBitmap.asImageBitmap(),
-                                        contentDescription = "二维码预览",
-                                        modifier = Modifier
-                                            .size(qrSize)
-                                            .clip(RoundedCornerShape(14.dp))
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(qrSize)
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(visuals.innerFieldColor),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "输入内容生成",
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
+                        BoxWithConstraints(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(boxHeight)
+                        ) {
+                            val expandedQrX = (maxWidth - qrSize) / 2f
+                            val qrX = lerp(expandedQrX, 12.dp, collapseProgress)
+                            val qrY = lerp(12.dp, (boxHeight - qrSize) / 2f, collapseProgress)
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            val btnX = lerp(14.dp, 122.dp, collapseProgress)
+                            val btnY = lerp(216.dp, (boxHeight - 40.dp) / 2f, collapseProgress)
+                            val btnWidth = lerp(maxWidth - 28.dp, maxWidth - 134.dp, collapseProgress)
+
+                            if (qrBitmap != null) {
+                                Image(
+                                    bitmap = qrBitmap.asImageBitmap(),
+                                    contentDescription = "二维码预览",
+                                    modifier = Modifier
+                                        .offset(x = qrX, y = qrY)
+                                        .size(qrSize)
+                                        .clip(RoundedCornerShape(lerp(14.dp, 10.dp, collapseProgress)))
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .offset(x = qrX, y = qrY)
+                                        .size(qrSize)
+                                        .clip(RoundedCornerShape(lerp(14.dp, 10.dp, collapseProgress)))
+                                        .background(visuals.innerFieldColor),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Button(
-                                        enabled = qrBitmap != null,
-                                        onClick = {
-                                            val ok = qrBitmap?.let { QrCodeHelper.saveBitmapToGallery(context, it) } == true
-                                            scope.launch {
-                                                snackbarHostState.showSnackbar(
-                                                    if (ok) "已保存到相册 (Pictures/PocketToolbox)" else "保存失败，请检查相册权限"
-                                                )
-                                            }
-                                        },
-                                        shape = RoundedCornerShape(50),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .liquidPress()
-                                    ) {
-                                        Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("保存到相册", maxLines = 1, softWrap = false)
-                                    }
-
-                                    FilledTonalButton(
-                                        enabled = qrPayload.isNotBlank(),
-                                        onClick = {
-                                            clipboard.setText(AnnotatedString(qrPayload))
-                                            scope.launch { snackbarHostState.showSnackbar("已复制码内容") }
-                                        },
-                                        shape = RoundedCornerShape(50),
-                                        modifier = Modifier.liquidPress()
-                                    ) {
-                                        Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(17.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("复制", maxLines = 1, softWrap = false)
-                                    }
+                                    Text(
+                                        text = "输入内容生成",
+                                        fontSize = 11.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
                             }
-                        } else {
-                            // Compact pinned 1/2-size row so QR remains always visible while scrolling below
+
                             Row(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(cardPad),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                    .offset(x = btnX, y = btnY)
+                                    .width(btnWidth)
+                                    .height(40.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                if (qrBitmap != null) {
-                                    Image(
-                                        bitmap = qrBitmap.asImageBitmap(),
-                                        contentDescription = "二维码预览",
-                                        modifier = Modifier
-                                            .size(qrSize)
-                                            .clip(RoundedCornerShape(10.dp))
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(qrSize)
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(visuals.innerFieldColor),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text("无内容", fontSize = 11.sp)
-                                    }
+                                Button(
+                                    enabled = qrBitmap != null,
+                                    onClick = {
+                                        val ok = qrBitmap?.let { QrCodeHelper.saveBitmapToGallery(context, it) } == true
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar(
+                                                if (ok) "已保存到相册 (Pictures/PocketToolbox)" else "保存失败，请检查相册权限"
+                                            )
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 10.dp),
+                                    shape = RoundedCornerShape(50),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(40.dp)
+                                        .liquidPress()
+                                ) {
+                                    Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("保存", fontSize = 13.sp, maxLines = 1, softWrap = false)
                                 }
 
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                FilledTonalButton(
+                                    enabled = qrPayload.isNotBlank(),
+                                    onClick = {
+                                        clipboard.setText(AnnotatedString(qrPayload))
+                                        scope.launch { snackbarHostState.showSnackbar("已复制码内容") }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 10.dp),
+                                    shape = RoundedCornerShape(50),
+                                    modifier = Modifier
+                                        .height(40.dp)
+                                        .liquidPress()
                                 ) {
-                                    Button(
-                                        enabled = qrBitmap != null,
-                                        onClick = {
-                                            val ok = qrBitmap?.let { QrCodeHelper.saveBitmapToGallery(context, it) } == true
-                                            scope.launch {
-                                                snackbarHostState.showSnackbar(
-                                                    if (ok) "已保存到相册" else "保存失败"
-                                                )
-                                            }
-                                        },
-                                        shape = RoundedCornerShape(50),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(38.dp)
-                                            .liquidPress()
-                                    ) {
-                                        Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("保存到相册", fontSize = 12.5.sp, maxLines = 1, softWrap = false)
-                                    }
-                                    FilledTonalButton(
-                                        enabled = qrPayload.isNotBlank(),
-                                        onClick = {
-                                            clipboard.setText(AnnotatedString(qrPayload))
-                                            scope.launch { snackbarHostState.showSnackbar("已复制码内容") }
-                                        },
-                                        shape = RoundedCornerShape(50),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(36.dp)
-                                            .liquidPress()
-                                    ) {
-                                        Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(15.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("复制内容", fontSize = 12.5.sp, maxLines = 1, softWrap = false)
-                                    }
+                                    Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("复制", fontSize = 13.sp, maxLines = 1, softWrap = false)
                                 }
                             }
                         }

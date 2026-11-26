@@ -20,6 +20,17 @@ class BookmarkManager(context: Context) {
     private val _bookmarks = MutableStateFlow(loadBookmarks())
     val bookmarks: StateFlow<List<BookmarkItem>> = _bookmarks.asStateFlow()
 
+    private val _homeUrl = MutableStateFlow(
+        prefs.getString(KEY_HOME_URL, DEFAULT_HOME_URL) ?: DEFAULT_HOME_URL
+    )
+    val homeUrl: StateFlow<String> = _homeUrl.asStateFlow()
+
+    fun setHomeUrl(url: String) {
+        val clean = normalizeUrl(url)
+        prefs.edit().putString(KEY_HOME_URL, clean).apply()
+        _homeUrl.value = clean
+    }
+
     private fun loadBookmarks(): List<BookmarkItem> {
         if (!prefs.contains(KEY_BOOKMARKS)) {
             val defaults = listOf(
@@ -102,5 +113,7 @@ class BookmarkManager(context: Context) {
 
     private companion object {
         const val KEY_BOOKMARKS = "bookmarks_json"
+        const val KEY_HOME_URL = "browser_home_url"
+        const val DEFAULT_HOME_URL = "https://cn.pornhub.com/"
     }
 }
