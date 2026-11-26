@@ -91,8 +91,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val themePreferences = ThemePreferences(applicationContext)
-        val proxyManager = ProxyManager(applicationContext)
         val gfwRuleManager = GfwRuleManager(applicationContext)
+        val proxyManager = ProxyManager(applicationContext, gfwRuleManager)
 
         setContent {
             val settings by themePreferences.settings.collectAsState()

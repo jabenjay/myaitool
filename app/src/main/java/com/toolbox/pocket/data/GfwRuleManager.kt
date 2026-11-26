@@ -11,23 +11,24 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 data class GfwRuleState(
     val ruleCount: Int = 0,
     val isUpdating: Boolean = false,
-    val lastStatus: String = "仅代理 GFW 封锁域名与 IP（固定规则）"
+    val lastStatus: String = "代理规则更新时间：尚未更新"
 )
 
-/**
- * Fetches and caches GFW-blocked domain/IP rules automatically on app startup.
- * Routing policy is strictly locked to: Proxy ONLY GFW-blocked targets (no user override).
- */
 class GfwRuleManager(context: Context) {
+    private val prefs = context.getSharedPreferences("toolbox_gfw", Context.MODE_PRIVATE)
     private val cacheFile = File(context.filesDir, "gfw_rules_cache.txt")
 
     private val _state = MutableStateFlow(loadCachedState())
     val state: StateFlow<GfwRuleState> = _state.asStateFlow()
 
+    @Volatile
     private var blockedDomains: Set<String> = loadCachedDomains()
 
     private fun loadCachedDomains(): Set<String> {
@@ -42,10 +43,16 @@ class GfwRuleManager(context: Context) {
         } else {
             DEFAULT_FALLBACK_DOMAINS.size
         }
+        val savedTime = prefs.getString(KEY_LAST_UPDATE, null)
+        val status = if (savedTime != null) {
+            "代理规则更新时间：$savedTime"
+        } else {
+            "代理规则更新时间：尚未更新"
+        }
         return GfwRuleState(
             ruleCount = count,
             isUpdating = false,
-            lastStatus = "固定规则：仅代理 GFW 封锁域名/IP（已缓存 $count 条）"
+            lastStatus = status
         )
     }
 
@@ -64,7 +71,7 @@ class GfwRuleManager(context: Context) {
     suspend fun updateRulesOnStartup() = withContext(Dispatchers.IO) {
         _state.value = _state.value.copy(
             isUpdating = true,
-            lastStatus = "正在自动更新 GFW 规则..."
+            lastStatus = "代理规则更新时间：更新中..."
         )
 
         val fetched = runCatching { fetchGfwListDomains() }.getOrNull()
@@ -73,16 +80,19 @@ class GfwRuleManager(context: Context) {
             runCatching {
                 cacheFile.writeText(fetched.joinToString("\n"), StandardCharsets.UTF_8)
             }
+            val nowStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
+            prefs.edit().putString(KEY_LAST_UPDATE, nowStr).apply()
             _state.value = GfwRuleState(
                 ruleCount = fetched.size,
                 isUpdating = false,
-                lastStatus = "固定规则：仅代理 GFW 封锁域名/IP（已更新 ${fetched.size} 条）"
+                lastStatus = "代理规则更新时间：$nowStr"
             )
         } else {
+            val savedTime = prefs.getString(KEY_LAST_UPDATE, null) ?: "本地缓存"
             _state.value = GfwRuleState(
                 ruleCount = blockedDomains.size,
                 isUpdating = false,
-                lastStatus = "固定规则：仅代理 GFW 封锁域名/IP（本地缓存 ${blockedDomains.size} 条）"
+                lastStatus = "代理规则更新时间：$savedTime"
             )
         }
     }
@@ -124,6 +134,7 @@ class GfwRuleManager(context: Context) {
     }
 
     private companion object {
+        const val KEY_LAST_UPDATE = "gfw_last_update"
         const val GFWLIST_URL = "https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt"
         val DEFAULT_FALLBACK_DOMAINS = setOf(
             "google.com", "youtube.com", "pornhub.com", "twitter.com", "x.com",

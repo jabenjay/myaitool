@@ -22,6 +22,9 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 enum class ProxyProtocol(val label: String, val scheme: String) {
     SOCKS5("SOCKS5", "socks5"),
@@ -36,9 +39,10 @@ data class ProxyNode(
     val host: String,
     val port: Int,
     val username: String = "",
-    val password: String = ""
+    val password: String = "",
+    val isBuiltIn: Boolean = false
 ) {
-    fun summary(): String = "${protocol.label} · $host:$port"
+    fun summary(): String = if (isBuiltIn) "内置加密节点" else "${protocol.label} · $host:$port"
 }
 
 sealed class ProxyLatency {
@@ -56,9 +60,42 @@ data class ProxyState(
     val statusMessage: String = "未启用（直连）"
 )
 
-class ProxyManager(context: Context) {
+private object BuiltInVault {
+    private const val BUILTIN_ID = "builtin_default_proxy"
+    private val MASK = byteArrayOf(-89, -6, 9, 32, 14, 21, -16, 98, 10, -36, -66, 28, 120, -124, 120, 15, -103, -118, -62, -70, 108, 6, -102, 43, -98, 106, -59, 51, -109, 80, -100, -92)
+    private val MKEY = byteArrayOf(103, -44, -65, -45, -27, -5, 97, 79, -117, 68, 89, -54, 105, 28, 56, -15, 94, -73, -104, -24, -38, 83, 5, -74, 78, -30, -71, -23, 114, 91, -120, 75)
+    private val MIV = byteArrayOf(-121, 8, 113, 108, -126, -45, -32, -93, 14, -32, 74, -81, -6, -14, -75, -102)
+    private val CIPHER = byteArrayOf(-106, -2, -72, 68, -50, 62, -94, -51, 103, -85, -23, 8, 5, 61, 48, -83, 3, -113, 40, -112, 119, 119, 92, 122, -24, 23, -74, -17, 27, 86, 75, 1, -85, 66, 117, 18, -92, -33, -83, 89, -121, -60, -94, -47, 101, 90, -13, -75, -32, 48, 95, -117, 89, 16, -85, -102, 12, -39, 85, 10, 75, -102, -98, -18, 17, 118, -66, 94, -49, 47, -84, -114, -116, -104, -31, 1, -109, -5, -4, -40)
+
+    fun resolveDefaultNode(): ProxyNode? {
+        return runCatching {
+            val key = ByteArray(MKEY.size) { i -> (MKEY[i].toInt() xor MASK[i].toInt()).toByte() }
+            val iv = ByteArray(MIV.size) { i -> (MIV[i].toInt() xor MASK[i].toInt()).toByte() }
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
+            val plain = String(cipher.doFinal(CIPHER), StandardCharsets.UTF_8)
+            val obj = JSONObject(plain)
+            ProxyNode(
+                id = BUILTIN_ID,
+                name = "默认代理",
+                protocol = ProxyProtocol.SOCKS5,
+                host = obj.getString("h"),
+                port = obj.getInt("p"),
+                username = obj.getString("u"),
+                password = obj.getString("w"),
+                isBuiltIn = true
+            )
+        }.getOrNull()
+    }
+}
+
+class ProxyManager(
+    context: Context,
+    gfwRuleManager: GfwRuleManager
+) {
     private val prefs = context.getSharedPreferences("toolbox_proxy", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val relay = LocalProxyRelay(gfwRuleManager)
 
     private val _state = MutableStateFlow(loadState())
     val state: StateFlow<ProxyState> = _state.asStateFlow()
@@ -71,7 +108,7 @@ class ProxyManager(context: Context) {
         val enabled = prefs.getBoolean(KEY_ENABLED, false)
         val selectedId = prefs.getString(KEY_SELECTED_ID, null)
         val rawJson = prefs.getString(KEY_NODES, "[]") ?: "[]"
-        val nodes = runCatching {
+        val userNodes = runCatching {
             val arr = JSONArray(rawJson)
             val list = mutableListOf<ProxyNode>()
             for (idx in 0 until arr.length()) {
@@ -87,23 +124,28 @@ class ProxyManager(context: Context) {
                         host = obj.getString("host"),
                         port = obj.getInt("port"),
                         username = obj.optString("username", ""),
-                        password = obj.optString("secret", "")
+                        password = obj.optString("secret", ""),
+                        isBuiltIn = false
                     )
                 )
             }
             list
         }.getOrDefault(emptyList())
 
+        val builtIn = BuiltInVault.resolveDefaultNode()
+        val allNodes = if (builtIn != null) listOf(builtIn) + userNodes else userNodes
+        val effectiveSelected = selectedId ?: allNodes.firstOrNull()?.id
+
         return ProxyState(
             enabled = enabled,
-            selectedId = selectedId,
-            nodes = nodes
+            selectedId = effectiveSelected,
+            nodes = allNodes
         )
     }
 
     private fun persist(state: ProxyState) {
         val arr = JSONArray()
-        state.nodes.forEach { node ->
+        state.nodes.filterNot { it.isBuiltIn }.forEach { node ->
             arr.put(
                 JSONObject().apply {
                     put("id", node.id)
@@ -134,6 +176,8 @@ class ProxyManager(context: Context) {
     }
 
     fun deleteNode(id: String) {
+        val target = _state.value.nodes.find { it.id == id } ?: return
+        if (target.isBuiltIn) return
         val updatedNodes = _state.value.nodes.filterNot { it.id == id }
         val nextSelected = if (_state.value.selectedId == id) {
             updatedNodes.firstOrNull()?.id
@@ -141,12 +185,11 @@ class ProxyManager(context: Context) {
             _state.value.selectedId
         }
         val nextEnabled = _state.value.enabled && nextSelected != null
-        val nextLatencies = _state.value.latencies - id
         val next = _state.value.copy(
             nodes = updatedNodes,
             selectedId = nextSelected,
             enabled = nextEnabled,
-            latencies = nextLatencies
+            latencies = _state.value.latencies - id
         )
         persist(next)
         applyProxyOverride(next)
@@ -218,7 +261,7 @@ class ProxyManager(context: Context) {
                     val elapsed = (SystemClock.elapsedRealtime() - start).coerceAtLeast(1L)
                     ProxyLatency.Success(elapsed)
                 } else {
-                    ProxyLatency.Failed("连接失败")
+                    ProxyLatency.Failed("失败")
                 }
             }
         } catch (_: Exception) {
@@ -255,7 +298,6 @@ class ProxyManager(context: Context) {
             if (authVer != 0x01 || authStatus != 0x00) return false
         }
 
-        // CONNECT www.google.com:80 via SOCKS5
         val target = "www.google.com".toByteArray(StandardCharsets.US_ASCII)
         val req = ByteArray(7 + target.size)
         req[0] = 0x05
@@ -281,13 +323,8 @@ class ProxyManager(context: Context) {
         req[1] = 0x01
         req[2] = 0x00
         req[3] = 80.toByte()
-        req[4] = 0x00
-        req[5] = 0x00
-        req[6] = 0x00
         req[7] = 0x01
-        req[8] = 0x00
         target.copyInto(req, 9)
-        req[9 + target.size] = 0x00
         out.write(req)
         out.flush()
 
@@ -313,6 +350,7 @@ class ProxyManager(context: Context) {
         val supportsOverride = WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)
 
         if (!state.enabled || activeNode == null) {
+            relay.stop()
             if (supportsOverride) {
                 runCatching { ProxyController.getInstance().clearProxyOverride(Runnable::run) {} }
             }
@@ -325,18 +363,15 @@ class ProxyManager(context: Context) {
             return
         }
 
-        val proxyUrl = "${activeNode.protocol.scheme}://${activeNode.host}:${activeNode.port}"
+        val localPort = relay.startOrUpdate(
+            host = activeNode.host,
+            port = activeNode.port,
+            protocol = activeNode.protocol,
+            username = activeNode.username,
+            password = activeNode.password
+        )
         val config = ProxyConfig.Builder()
-            .addProxyRule(proxyUrl)
-            .addBypassRule("*.cn")
-            .addBypassRule("*.baidu.com")
-            .addBypassRule("*.qq.com")
-            .addBypassRule("*.taobao.com")
-            .addBypassRule("*.jd.com")
-            .addBypassRule("*.163.com")
-            .addBypassRule("127.0.0.1")
-            .addBypassRule("192.168.*")
-            .addBypassRule("10.*")
+            .addProxyRule("socks5://127.0.0.1:$localPort")
             .build()
 
         val applied = runCatching {
@@ -346,9 +381,9 @@ class ProxyManager(context: Context) {
 
         _state.value = state.copy(
             statusMessage = if (applied) {
-                "已启用：${activeNode.name} (${activeNode.protocol.label})"
+                "已启用：${activeNode.name}"
             } else {
-                "代理配置失败：请检查地址与端口"
+                "代理配置失败"
             }
         )
     }

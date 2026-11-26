@@ -339,15 +339,17 @@ fun ProxySettingsScreen(
                                 )
                             }
 
-                            IconButton(
-                                onClick = { onDeleteProxy(node.id) },
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.DeleteOutline,
-                                    contentDescription = "删除",
-                                    modifier = Modifier.size(18.dp)
-                                )
+                            if (!node.isBuiltIn) {
+                                IconButton(
+                                    onClick = { onDeleteProxy(node.id) },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.DeleteOutline,
+                                        contentDescription = "删除",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }

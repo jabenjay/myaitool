@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,11 +47,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -98,59 +102,90 @@ fun BrowserScreen(
             .background(MaterialTheme.colorScheme.surface)
             .statusBarsPadding()
             .navigationBarsPadding()
+            .imePadding()
     ) {
-        // Minimal Via-style address bar
+        // Sleek Via-style top address bar
         Surface(
             color = visuals.cardContainerColor,
-            shape = RoundedCornerShape(0.dp),
+            contentColor = visuals.cardContentColor,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Surface(
                         shape = RoundedCornerShape(50),
                         color = visuals.innerFieldColor,
+                        contentColor = visuals.cardContentColor,
                         modifier = Modifier
                             .weight(1f)
-                            .height(38.dp)
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(50))
                             .liquidGlassSurface(20.dp)
                     ) {
-                        Box(
+                        Row(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(horizontal = 14.dp),
-                            contentAlignment = Alignment.CenterStart
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (urlInput.isEmpty()) {
-                                Text(
-                                    text = "输入网址或搜索...",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                            Icon(
+                                imageVector = Icons.Rounded.Lock,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                if (urlInput.isEmpty()) {
+                                    Text(
+                                        text = "输入网址或搜索...",
+                                        fontSize = 13.5.sp,
+                                        color = visuals.cardContentColor.copy(alpha = 0.5f),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                BasicTextField(
+                                    value = urlInput,
+                                    onValueChange = { urlInput = it },
+                                    singleLine = true,
+                                    textStyle = TextStyle(
+                                        color = visuals.cardContentColor,
+                                        fontSize = 13.5.sp
+                                    ),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Uri,
+                                        imeAction = ImeAction.Go
+                                    ),
+                                    keyboardActions = KeyboardActions(
+                                        onGo = { navigateTo(urlInput) }
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
                                 )
                             }
-                            BasicTextField(
-                                value = urlInput,
-                                onValueChange = { urlInput = it },
-                                singleLine = true,
-                                textStyle = TextStyle(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 13.5.sp
-                                ),
-                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                keyboardOptions = KeyboardOptions(
-                                    keyboardType = KeyboardType.Uri,
-                                    imeAction = ImeAction.Go
-                                ),
-                                keyboardActions = KeyboardActions(
-                                    onGo = { navigateTo(urlInput) }
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                            if (urlInput.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { urlInput = "" },
+                                    modifier = Modifier.size(26.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "清空",
+                                        tint = visuals.cardContentColor.copy(alpha = 0.6f),
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -159,12 +194,13 @@ fun BrowserScreen(
                     IconButton(
                         onClick = { webViewRef?.reload() },
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(38.dp)
                             .liquidPress()
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Refresh,
                             contentDescription = "刷新",
+                            tint = visuals.cardContentColor,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -232,10 +268,10 @@ fun BrowserScreen(
         // Minimal Via-style bottom toolbar
         Surface(
             color = visuals.dockContainerColor,
+            contentColor = visuals.cardContentColor,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
-                .liquidGlassSurface(0.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxSize(),
@@ -250,6 +286,7 @@ fun BrowserScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                         contentDescription = "后退",
+                        tint = if (canGoBack) visuals.cardContentColor else visuals.cardContentColor.copy(alpha = 0.3f),
                         modifier = Modifier.size(21.dp)
                     )
                 }
@@ -261,6 +298,7 @@ fun BrowserScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
                         contentDescription = "前进",
+                        tint = if (canGoForward) visuals.cardContentColor else visuals.cardContentColor.copy(alpha = 0.3f),
                         modifier = Modifier.size(21.dp)
                     )
                 }
@@ -271,6 +309,7 @@ fun BrowserScreen(
                     Icon(
                         imageVector = Icons.Rounded.Home,
                         contentDescription = "主页",
+                        tint = visuals.cardContentColor,
                         modifier = Modifier.size(21.dp)
                     )
                 }
@@ -281,6 +320,7 @@ fun BrowserScreen(
                     Icon(
                         imageVector = Icons.Rounded.Close,
                         contentDescription = "退出浏览器",
+                        tint = visuals.cardContentColor,
                         modifier = Modifier.size(21.dp)
                     )
                 }
