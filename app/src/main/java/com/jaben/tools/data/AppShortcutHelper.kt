@@ -36,7 +36,7 @@ object AppShortcutHelper {
         val toolMeta = mapOf(
             "browser" to Triple("轻量浏览器", "tool/browser", R.drawable.ic_shortcut_browser),
             "base64" to Triple("Base64编码", "tool/base64", R.drawable.ic_shortcut_base64),
-            "qr" to Triple("二维码", "tool/qr", R.drawable.ic_shortcut_qr)
+            "qr" to Triple("二维码工具", "tool/qr", R.drawable.ic_shortcut_qr)
         )
 
         val orderedIds = (toolOrder + listOf("browser", "base64", "qr"))

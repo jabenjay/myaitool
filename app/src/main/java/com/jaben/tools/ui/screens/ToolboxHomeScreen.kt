@@ -106,7 +106,7 @@ fun ToolboxHomeScreen(
             ),
             "qr" to ToolboxModule(
                 id = "qr",
-                title = "二维码",
+                title = "二维码工具",
                 subtitle = "生成美化、保存相册与相册识别",
                 icon = Icons.Rounded.QrCode2
             )

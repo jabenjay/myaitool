@@ -88,6 +88,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.onFocusChanged
@@ -212,7 +214,9 @@ fun BrowserScreen(
         Surface(
             color = barBg,
             contentColor = barFg,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .zIndex(2f)
         ) {
             Column {
                 Row(
@@ -364,6 +368,8 @@ fun BrowserScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
+                .zIndex(0f)
+                .clipToBounds()
         ) {
             AndroidView(
                 factory = { ctx ->
@@ -376,7 +382,8 @@ fun BrowserScreen(
                         settings.displayZoomControls = false
                         settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                         settings.mediaPlaybackRequiresUserGesture = true
-                    setBackgroundColor(barBg.toArgb())
+                        clipToOutline = true
+                        setBackgroundColor(barBg.toArgb())
 
                         webViewClient = object : WebViewClient() {
                             override fun shouldOverrideUrlLoading(
@@ -561,6 +568,7 @@ fun BrowserScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
+                .zIndex(2f)
         ) {
             Row(
                 modifier = Modifier.fillMaxSize(),
