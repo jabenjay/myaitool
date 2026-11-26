@@ -358,7 +358,7 @@ fun BrowserScreen(
             )
 
             // Scrim to dismiss bookmark menu when tapping outside
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = showBookmarks,
                 enter = fadeIn(tween(180)),
                 exit = fadeOut(tween(150))
@@ -378,7 +378,7 @@ fun BrowserScreen(
             }
 
             // Smooth Bookmark Dropdown Menu right below the address bar
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = showBookmarks,
                 enter = fadeIn(tween(180)) + expandVertically(
                     animationSpec = spring(
