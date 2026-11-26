@@ -122,6 +122,8 @@ fun Base64Screen(
     var softWrap by rememberSaveable { mutableStateOf(appSettings.defaultSoftWrap) }
     var inputFontSizeSp by rememberSaveable { mutableFloatStateOf(14f) }
     var fontSizeSp by rememberSaveable { mutableFloatStateOf(14f) }
+    var outputLiveScale by remember { mutableFloatStateOf(1f) }
+    val latestOutputFontSize by rememberUpdatedState(fontSizeSp)
     var inputLiveScale by remember { mutableFloatStateOf(1f) }
     val latestInputFontSize by rememberUpdatedState(inputFontSizeSp)
     var isFullScreenReader by rememberSaveable { mutableStateOf(false) }
@@ -572,15 +574,56 @@ fun Base64Screen(
                                 .fillMaxSize()
                                 .padding(start = 10.dp, end = 10.dp, bottom = 12.dp)
                         ) {
-                            PinchZoomTextViewer(
-                                text = bottomText,
-                                fontSizeSp = fontSizeSp,
-                                onFontSizeChange = { fontSizeSp = it },
-                                showLineNumbers = showLineNumbers,
-                                softWrap = softWrap,
-                                placeholder = "点击上方「编码」或「解码」查看结果",
-                                modifier = Modifier.fillMaxSize()
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .pointerInput(Unit) {
+                                        awaitEachGesture {
+                                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                            var pinched = false
+                                            do {
+                                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                                if (event.changes.count { it.pressed } >= 2) {
+                                                    val zoom = event.calculateZoom()
+                                                    if (zoom != 1f) {
+                                                        pinched = true
+                                                        val minR = 1.4f / latestOutputFontSize
+                                                        val maxR = 56f / latestOutputFontSize
+                                                        outputLiveScale = (outputLiveScale * zoom).coerceIn(minR, maxR)
+                                                    }
+                                                    event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                                }
+                                            } while (event.changes.any { it.pressed })
+                                            if (pinched) {
+                                                fontSizeSp = (latestOutputFontSize * outputLiveScale).coerceIn(1.4f, 56f)
+                                                outputLiveScale = 1f
+                                            }
+                                        }
+                                    }
+                            ) {
+                                OutlinedTextField(
+                                    value = bottomText,
+                                    onValueChange = { bottomText = it },
+                                    placeholder = { Text("点击上方「编码」或「解码」查看结果（可直接编辑）") },
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = fontSizeSp.sp,
+                                        lineHeight = (fontSizeSp * 1.46f).sp
+                                    ),
+                                    shape = RoundedCornerShape(18.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = visuals.innerFieldColor,
+                                        unfocusedContainerColor = visuals.innerFieldColor
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            scaleX = outputLiveScale
+                                            scaleY = outputLiveScale
+                                            transformOrigin = TransformOrigin(0f, 0f)
+                                        }
+                                )
+                            }
                         }
                     }
 

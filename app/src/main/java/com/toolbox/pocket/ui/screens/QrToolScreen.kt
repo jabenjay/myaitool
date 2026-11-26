@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,22 +53,31 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.toolbox.pocket.tools.qr.QrCodeHelper
 import com.toolbox.pocket.tools.qr.QrDotStyle
@@ -103,20 +113,19 @@ fun QrToolScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    var currentTab by remember { mutableStateOf(QrTab.GENERATE) }
-    var template by remember { mutableStateOf(QrTemplate.TEXT) }
+    // Use rememberSaveable so returning from Camera/Gallery stays on the active tab!
+    var currentTab by rememberSaveable { mutableStateOf(QrTab.GENERATE) }
+    var template by rememberSaveable { mutableStateOf(QrTemplate.TEXT) }
 
-    // Template inputs
-    var plainInput by remember { mutableStateOf("https://www.baidu.com") }
-    var wifiSsid by remember { mutableStateOf("") }
-    var wifiPass by remember { mutableStateOf("") }
-    var wifiAuth by remember { mutableStateOf("WPA") }
-    var cardName by remember { mutableStateOf("") }
-    var cardPhone by remember { mutableStateOf("") }
-    var cardOrg by remember { mutableStateOf("") }
-    var phoneInput by remember { mutableStateOf("") }
+    var plainInput by rememberSaveable { mutableStateOf("https://www.baidu.com") }
+    var wifiSsid by rememberSaveable { mutableStateOf("") }
+    var wifiPass by rememberSaveable { mutableStateOf("") }
+    var wifiAuth by rememberSaveable { mutableStateOf("WPA") }
+    var cardName by rememberSaveable { mutableStateOf("") }
+    var cardPhone by rememberSaveable { mutableStateOf("") }
+    var cardOrg by rememberSaveable { mutableStateOf("") }
+    var phoneInput by rememberSaveable { mutableStateOf("") }
 
-    // Beautify options
     val fgPalette = listOf(
         Color(0xFF000000),
         Color(0xFF0A4DA6),
@@ -130,14 +139,13 @@ fun QrToolScreen(
         Color(0xFFEEF6FF),
         Color(0xFFF3E8FF)
     )
-    var fgIdx by remember { mutableIntStateOf(0) }
-    var bgIdx by remember { mutableIntStateOf(0) }
-    var dotStyle by remember { mutableStateOf(QrDotStyle.ROUNDED) }
-    var eccLevel by remember { mutableStateOf(QrEccLevel.M) }
-    var caption by remember { mutableStateOf("") }
+    var fgIdx by rememberSaveable { mutableIntStateOf(0) }
+    var bgIdx by rememberSaveable { mutableIntStateOf(0) }
+    var dotStyle by rememberSaveable { mutableStateOf(QrDotStyle.ROUNDED) }
+    var eccLevel by rememberSaveable { mutableStateOf(QrEccLevel.M) }
+    var caption by rememberSaveable { mutableStateOf("") }
 
-    // Decode state
-    var decodedText by remember { mutableStateOf("") }
+    var decodedText by rememberSaveable { mutableStateOf("") }
 
     val galleryPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -173,6 +181,36 @@ fun QrToolScreen(
             eccLevel = eccLevel,
             caption = caption
         )
+    }
+
+    // Smooth 1:1 scroll-driven collapse for pinned QR preview (200dp -> 100dp = 1/2 size)
+    val maxCollapsePx = with(LocalDensity.current) { 120.dp.toPx() }
+    var collapseOffsetPx by remember { mutableFloatStateOf(0f) }
+    val collapseProgress = (if (maxCollapsePx > 0f) (-collapseOffsetPx / maxCollapsePx) else 0f).coerceIn(0f, 1f)
+
+    val listState = rememberLazyListState()
+    val nestedScrollConnection = remember(maxCollapsePx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val delta = available.y
+                if (delta < 0f) {
+                    val prev = collapseOffsetPx
+                    collapseOffsetPx = (collapseOffsetPx + delta).coerceIn(-maxCollapsePx, 0f)
+                    return Offset(0f, collapseOffsetPx - prev)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                val delta = available.y
+                if (delta > 0f) {
+                    val prev = collapseOffsetPx
+                    collapseOffsetPx = (collapseOffsetPx + delta).coerceIn(-maxCollapsePx, 0f)
+                    return Offset(0f, collapseOffsetPx - prev)
+                }
+                return Offset.Zero
+            }
+        }
     }
 
     Scaffold(
@@ -228,48 +266,52 @@ fun QrToolScreen(
             }
 
             if (currentTab == QrTab.GENERATE) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(nestedScrollConnection)
                 ) {
-                    // Preview Card
-                    item {
-                        Surface(
-                            shape = MaterialTheme.shapes.large,
-                            color = visuals.cardContainerColor,
-                            contentColor = visuals.cardContentColor,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(MaterialTheme.shapes.large)
-                                .liquidGlassSurface(26.dp)
-                        ) {
+                    // Pinned QR Preview Card: shrinks smoothly to 1/2 size (200dp -> 100dp) and stays pinned at top
+                    val qrSize = lerp(200.dp, 100.dp, collapseProgress)
+                    val cardPad = lerp(14.dp, 10.dp, collapseProgress)
+
+                    Surface(
+                        shape = MaterialTheme.shapes.large,
+                        color = visuals.cardContainerColor,
+                        contentColor = visuals.cardContentColor,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                            .clip(MaterialTheme.shapes.large)
+                            .liquidGlassSurface(26.dp)
+                    ) {
+                        if (collapseProgress < 0.55f) {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(16.dp),
+                                    .padding(cardPad),
                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 if (qrBitmap != null) {
                                     Image(
                                         bitmap = qrBitmap.asImageBitmap(),
                                         contentDescription = "二维码预览",
                                         modifier = Modifier
-                                            .size(210.dp)
-                                            .clip(RoundedCornerShape(16.dp))
+                                            .size(qrSize)
+                                            .clip(RoundedCornerShape(14.dp))
                                     )
                                 } else {
                                     Box(
                                         modifier = Modifier
-                                            .size(210.dp)
-                                            .clip(RoundedCornerShape(16.dp))
+                                            .size(qrSize)
+                                            .clip(RoundedCornerShape(14.dp))
                                             .background(visuals.innerFieldColor),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            text = "输入内容后生成二维码",
-                                            fontSize = 13.sp,
+                                            text = "输入内容生成",
+                                            fontSize = 12.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
@@ -314,225 +356,305 @@ fun QrToolScreen(
                                     }
                                 }
                             }
-                        }
-                    }
-
-                    // Template & Content Card
-                    item {
-                        Surface(
-                            shape = MaterialTheme.shapes.large,
-                            color = visuals.cardContainerColor,
-                            contentColor = visuals.cardContentColor,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(MaterialTheme.shapes.large)
-                                .liquidGlassSurface(26.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                        } else {
+                            // Compact pinned 1/2-size row so QR remains always visible while scrolling below
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(cardPad),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
-                                Text(
-                                    text = "内容类型",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    QrTemplate.entries.forEach { item ->
-                                        FilterChip(
-                                            selected = template == item,
-                                            onClick = { template = item },
-                                            label = { Text(item.label, maxLines = 1, softWrap = false) }
-                                        )
+                                if (qrBitmap != null) {
+                                    Image(
+                                        bitmap = qrBitmap.asImageBitmap(),
+                                        contentDescription = "二维码预览",
+                                        modifier = Modifier
+                                            .size(qrSize)
+                                            .clip(RoundedCornerShape(10.dp))
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(qrSize)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(visuals.innerFieldColor),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("无内容", fontSize = 11.sp)
                                     }
                                 }
 
-                                when (template) {
-                                    QrTemplate.TEXT -> {
-                                        OutlinedTextField(
-                                            value = plainInput,
-                                            onValueChange = { plainInput = it },
-                                            label = { Text("输入文本或网址") },
-                                            minLines = 2,
-                                            maxLines = 4,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                    }
-                                    QrTemplate.WIFI -> {
-                                        OutlinedTextField(
-                                            value = wifiSsid,
-                                            onValueChange = { wifiSsid = it },
-                                            label = { Text("Wi-Fi 名称 (SSID)") },
-                                            singleLine = true,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                        OutlinedTextField(
-                                            value = wifiPass,
-                                            onValueChange = { wifiPass = it },
-                                            label = { Text("Wi-Fi 密码") },
-                                            singleLine = true,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            listOf("WPA", "WEP", "nopass").forEach { auth ->
-                                                FilterChip(
-                                                    selected = wifiAuth == auth,
-                                                    onClick = { wifiAuth = auth },
-                                                    label = { Text(if (auth == "nopass") "无密码" else auth) }
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        enabled = qrBitmap != null,
+                                        onClick = {
+                                            val ok = qrBitmap?.let { QrCodeHelper.saveBitmapToGallery(context, it) } == true
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar(
+                                                    if (ok) "已保存到相册" else "保存失败"
                                                 )
                                             }
-                                        }
+                                        },
+                                        shape = RoundedCornerShape(50),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(38.dp)
+                                            .liquidPress()
+                                    ) {
+                                        Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("保存到相册", fontSize = 12.5.sp, maxLines = 1, softWrap = false)
                                     }
-                                    QrTemplate.VCARD -> {
-                                        OutlinedTextField(
-                                            value = cardName,
-                                            onValueChange = { cardName = it },
-                                            label = { Text("姓名") },
-                                            singleLine = true,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                        OutlinedTextField(
-                                            value = cardPhone,
-                                            onValueChange = { cardPhone = it },
-                                            label = { Text("电话") },
-                                            singleLine = true,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                        OutlinedTextField(
-                                            value = cardOrg,
-                                            onValueChange = { cardOrg = it },
-                                            label = { Text("公司 / 备注") },
-                                            singleLine = true,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                    }
-                                    QrTemplate.PHONE -> {
-                                        OutlinedTextField(
-                                            value = phoneInput,
-                                            onValueChange = { phoneInput = it },
-                                            label = { Text("电话号码") },
-                                            singleLine = true,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
+                                    FilledTonalButton(
+                                        enabled = qrPayload.isNotBlank(),
+                                        onClick = {
+                                            clipboard.setText(AnnotatedString(qrPayload))
+                                            scope.launch { snackbarHostState.showSnackbar("已复制码内容") }
+                                        },
+                                        shape = RoundedCornerShape(50),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(36.dp)
+                                            .liquidPress()
+                                    ) {
+                                        Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(15.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("复制内容", fontSize = 12.5.sp, maxLines = 1, softWrap = false)
                                     }
                                 }
                             }
                         }
                     }
 
-                    // Beautify Card
-                    item {
-                        Surface(
-                            shape = MaterialTheme.shapes.large,
-                            color = visuals.cardContainerColor,
-                            contentColor = visuals.cardContentColor,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(MaterialTheme.shapes.large)
-                                .liquidGlassSurface(26.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    // Scrollable Content & Beautify cards clipped cleanly beneath the pinned QR preview
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .clipToBounds(),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        item {
+                            Surface(
+                                shape = MaterialTheme.shapes.large,
+                                color = visuals.cardContainerColor,
+                                contentColor = visuals.cardContentColor,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(MaterialTheme.shapes.large)
+                                    .liquidGlassSurface(26.dp)
                             ) {
-                                Text(
-                                    text = "二维码美化",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Text("前景色", fontSize = 13.5.sp)
-                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        fgPalette.forEachIndexed { idx, color ->
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(28.dp)
-                                                    .clip(CircleShape)
-                                                    .background(color)
-                                                    .border(
-                                                        width = if (fgIdx == idx) 2.5.dp else 1.dp,
-                                                        color = if (fgIdx == idx) MaterialTheme.colorScheme.primary else Color.Gray.copy(alpha = 0.4f),
-                                                        shape = CircleShape
+                                    Text(
+                                        text = "内容类型",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        QrTemplate.entries.forEach { item ->
+                                            FilterChip(
+                                                selected = template == item,
+                                                onClick = { template = item },
+                                                label = { Text(item.label, maxLines = 1, softWrap = false) }
+                                            )
+                                        }
+                                    }
+
+                                    when (template) {
+                                        QrTemplate.TEXT -> {
+                                            OutlinedTextField(
+                                                value = plainInput,
+                                                onValueChange = { plainInput = it },
+                                                label = { Text("输入文本或网址") },
+                                                minLines = 2,
+                                                maxLines = 4,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+                                        QrTemplate.WIFI -> {
+                                            OutlinedTextField(
+                                                value = wifiSsid,
+                                                onValueChange = { wifiSsid = it },
+                                                label = { Text("Wi-Fi 名称 (SSID)") },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                            OutlinedTextField(
+                                                value = wifiPass,
+                                                onValueChange = { wifiPass = it },
+                                                label = { Text("Wi-Fi 密码") },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                listOf("WPA", "WEP", "nopass").forEach { auth ->
+                                                    FilterChip(
+                                                        selected = wifiAuth == auth,
+                                                        onClick = { wifiAuth = auth },
+                                                        label = { Text(if (auth == "nopass") "无密码" else auth) }
                                                     )
-                                                    .clickable { fgIdx = idx }
+                                                }
+                                            }
+                                        }
+                                        QrTemplate.VCARD -> {
+                                            OutlinedTextField(
+                                                value = cardName,
+                                                onValueChange = { cardName = it },
+                                                label = { Text("姓名") },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                            OutlinedTextField(
+                                                value = cardPhone,
+                                                onValueChange = { cardPhone = it },
+                                                label = { Text("电话") },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                            OutlinedTextField(
+                                                value = cardOrg,
+                                                onValueChange = { cardOrg = it },
+                                                label = { Text("公司 / 备注") },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+                                        QrTemplate.PHONE -> {
+                                            OutlinedTextField(
+                                                value = phoneInput,
+                                                onValueChange = { phoneInput = it },
+                                                label = { Text("电话号码") },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth()
                                             )
                                         }
                                     }
                                 }
+                            }
+                        }
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                        item {
+                            Surface(
+                                shape = MaterialTheme.shapes.large,
+                                color = visuals.cardContainerColor,
+                                contentColor = visuals.cardContentColor,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(MaterialTheme.shapes.large)
+                                    .liquidGlassSurface(26.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    Text("背景色", fontSize = 13.5.sp)
-                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        bgPalette.forEachIndexed { idx, color ->
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(28.dp)
-                                                    .clip(CircleShape)
-                                                    .background(color)
-                                                    .border(
-                                                        width = if (bgIdx == idx) 2.5.dp else 1.dp,
-                                                        color = if (bgIdx == idx) MaterialTheme.colorScheme.primary else Color.Gray.copy(alpha = 0.4f),
-                                                        shape = CircleShape
-                                                    )
-                                                    .clickable { bgIdx = idx }
+                                    Text(
+                                        text = "二维码美化",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("前景色", fontSize = 13.5.sp)
+                                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            fgPalette.forEachIndexed { idx, color ->
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(28.dp)
+                                                        .clip(CircleShape)
+                                                        .background(color)
+                                                        .border(
+                                                            width = if (fgIdx == idx) 2.5.dp else 1.dp,
+                                                            color = if (fgIdx == idx) MaterialTheme.colorScheme.primary else Color.Gray.copy(alpha = 0.4f),
+                                                            shape = CircleShape
+                                                        )
+                                                        .clickable { fgIdx = idx }
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("背景色", fontSize = 13.5.sp)
+                                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            bgPalette.forEachIndexed { idx, color ->
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(28.dp)
+                                                        .clip(CircleShape)
+                                                        .background(color)
+                                                        .border(
+                                                            width = if (bgIdx == idx) 2.5.dp else 1.dp,
+                                                            color = if (bgIdx == idx) MaterialTheme.colorScheme.primary else Color.Gray.copy(alpha = 0.4f),
+                                                            shape = CircleShape
+                                                        )
+                                                        .clickable { bgIdx = idx }
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        QrDotStyle.entries.forEach { style ->
+                                            FilterChip(
+                                                selected = dotStyle == style,
+                                                onClick = { dotStyle = style },
+                                                label = { Text(style.label, maxLines = 1, softWrap = false) }
                                             )
                                         }
                                     }
-                                }
 
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    QrDotStyle.entries.forEach { style ->
-                                        FilterChip(
-                                            selected = dotStyle == style,
-                                            onClick = { dotStyle = style },
-                                            label = { Text(style.label, maxLines = 1, softWrap = false) }
-                                        )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        QrEccLevel.entries.forEach { ecc ->
+                                            FilterChip(
+                                                selected = eccLevel == ecc,
+                                                onClick = { eccLevel = ecc },
+                                                label = { Text("容错 ${ecc.label}", maxLines = 1, softWrap = false) }
+                                            )
+                                        }
                                     }
-                                }
 
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    QrEccLevel.entries.forEach { ecc ->
-                                        FilterChip(
-                                            selected = eccLevel == ecc,
-                                            onClick = { eccLevel = ecc },
-                                            label = { Text("容错 ${ecc.label}", maxLines = 1, softWrap = false) }
-                                        )
-                                    }
+                                    OutlinedTextField(
+                                        value = caption,
+                                        onValueChange = { caption = it },
+                                        label = { Text("底部标签文字（可选）") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
                                 }
-
-                                OutlinedTextField(
-                                    value = caption,
-                                    onValueChange = { caption = it },
-                                    label = { Text("底部标签文字（可选）") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
                             }
                         }
                     }
