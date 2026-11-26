@@ -1,0 +1,430 @@
+package com.jaben.tools.ui.screens
+
+import android.net.Uri
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.BlurOn
+import androidx.compose.material.icons.rounded.BrightnessAuto
+import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Opacity
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Style
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.jaben.tools.data.AppSettings
+import com.jaben.tools.data.M3ColorSource
+import com.jaben.tools.data.ThemeMode
+import com.jaben.tools.data.UiStyle
+import com.jaben.tools.ui.theme.LocalAppThemeVisuals
+import com.jaben.tools.ui.theme.liquidGlassSurface
+import com.jaben.tools.ui.theme.liquidPress
+import kotlin.math.roundToInt
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ThemeSettingsScreen(
+    settings: AppSettings,
+    onBack: () -> Unit,
+    onThemeModeChange: (ThemeMode) -> Unit,
+    onUiStyleChange: (UiStyle) -> Unit,
+    onM3ColorSourceChange: (M3ColorSource) -> Unit,
+    onGlassOpacityChange: (Float) -> Unit,
+    onBackgroundPicked: (Uri) -> Unit,
+    onClearBackground: () -> Unit,
+    onBackgroundBlurChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val visuals = LocalAppThemeVisuals.current
+    val supportsSystemDynamic = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            onBackgroundPicked(uri)
+        }
+    }
+
+    Scaffold(
+        modifier = modifier,
+        containerColor = Color.Transparent,
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        text = "主题",
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack, modifier = Modifier.liquidPress()) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = Color.Transparent
+                )
+            )
+        }
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = innerPadding.calculateTopPadding()),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Text(
+                    text = "外观",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+                )
+                Surface(
+                    shape = MaterialTheme.shapes.large,
+                    color = visuals.cardContainerColor,
+                    contentColor = visuals.cardContentColor,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.large)
+                        .liquidGlassSurface(26.dp)
+                ) {
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        ThemeMode.entries.forEach { mode ->
+                            val icon = when (mode) {
+                                ThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
+                                ThemeMode.LIGHT -> Icons.Rounded.LightMode
+                                ThemeMode.DARK -> Icons.Rounded.DarkMode
+                            }
+                            ThemeRadioRow(
+                                icon = icon,
+                                title = mode.label,
+                                selected = settings.themeMode == mode,
+                                onClick = { onThemeModeChange(mode) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Text(
+                    text = "主题风格",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+                )
+                Surface(
+                    shape = MaterialTheme.shapes.large,
+                    color = visuals.cardContainerColor,
+                    contentColor = visuals.cardContentColor,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.large)
+                        .liquidGlassSurface(26.dp)
+                ) {
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        UiStyle.entries.forEach { style ->
+                            val icon = when (style) {
+                                UiStyle.MATERIAL -> Icons.Rounded.Style
+                                UiStyle.LIQUID_GLASS -> Icons.Rounded.AutoAwesome
+                            }
+                            ThemeRadioRow(
+                                icon = icon,
+                                title = style.label,
+                                selected = settings.uiStyle == style,
+                                onClick = { onUiStyleChange(style) }
+                            )
+                        }
+
+                        AnimatedVisibility(visible = settings.uiStyle == UiStyle.MATERIAL) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Palette,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = "配色来源",
+                                        fontSize = 14.5.sp,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                                SingleChoiceSegmentedButtonRow(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 10.dp)
+                                ) {
+                                    M3ColorSource.entries.forEachIndexed { index, source ->
+                                        val enabled = when (source) {
+                                            M3ColorSource.DEFAULT -> true
+                                            M3ColorSource.SYSTEM -> supportsSystemDynamic
+                                            M3ColorSource.WALLPAPER -> settings.backgroundImagePath != null
+                                        }
+                                        SegmentedButton(
+                                            selected = settings.m3ColorSource == source,
+                                            enabled = enabled,
+                                            onClick = { onM3ColorSourceChange(source) },
+                                            shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
+                                            modifier = Modifier.liquidPress(pressedScale = 0.96f)
+                                        ) {
+                                            Text(
+                                                text = source.label,
+                                                fontSize = 12.5.sp,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        AnimatedVisibility(visible = settings.uiStyle == UiStyle.LIQUID_GLASS) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Opacity,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "液态玻璃可视度",
+                                            fontSize = 14.5.sp,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
+                                    Text(
+                                        text = "${(settings.glassOpacity * 100f).roundToInt()}%",
+                                        fontSize = 12.5.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                                Slider(
+                                    value = settings.glassOpacity,
+                                    onValueChange = onGlassOpacityChange,
+                                    valueRange = 0.15f..0.90f
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Text(
+                    text = "自定义背景",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+                )
+                Surface(
+                    shape = MaterialTheme.shapes.large,
+                    color = visuals.cardContainerColor,
+                    contentColor = visuals.cardContentColor,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.large)
+                        .liquidGlassSurface(26.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Image,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = if (settings.backgroundImagePath != null) "已设置背景" else "未设置背景",
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (settings.backgroundImagePath != null) {
+                                    TextButton(onClick = onClearBackground, modifier = Modifier.liquidPress()) {
+                                        Text("清除", fontSize = 12.5.sp, maxLines = 1, softWrap = false)
+                                    }
+                                }
+                                FilledTonalButton(
+                                    shape = RoundedCornerShape(50),
+                                    onClick = {
+                                        imagePicker.launch(
+                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                        )
+                                    },
+                                    modifier = Modifier.liquidPress()
+                                ) {
+                                    Text(
+                                        text = if (settings.backgroundImagePath != null) "更换" else "选择图片",
+                                        fontSize = 12.5.sp,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+                        }
+
+                        AnimatedVisibility(visible = settings.backgroundImagePath != null) {
+                            Column(modifier = Modifier.padding(top = 12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.BlurOn,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "模糊程度",
+                                            fontSize = 13.5.sp,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
+                                    Text(
+                                        text = "${settings.backgroundBlurDp.roundToInt()} dp",
+                                        fontSize = 12.5.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                                Slider(
+                                    value = settings.backgroundBlurDp,
+                                    onValueChange = onBackgroundBlurChange,
+                                    valueRange = 0f..30f
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeRadioRow(
+    icon: ImageVector,
+    title: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidPress(pressedScale = 0.985f)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(
+            text = title,
+            fontSize = 14.5.sp,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        RadioButton(
+            selected = selected,
+            onClick = onClick
+        )
+    }
+}
