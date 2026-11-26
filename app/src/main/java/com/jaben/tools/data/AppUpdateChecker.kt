@@ -1,6 +1,10 @@
 package com.jaben.tools.data
 
+import android.app.DownloadManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Environment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -56,7 +60,14 @@ object AppUpdateChecker {
                 val json = JSONObject(body)
                 val tagName = json.optString("tag_name", "").trim()
                 val releaseName = json.optString("name", tagName).trim().ifBlank { tagName }
-                val releaseNotes = json.optString("body", "").trim()
+                val rawNotes = json.optString("body", "").trim()
+                val releaseNotes = rawNotes.lines()
+                    .filterNot { line ->
+                        val t = line.trim()
+                        t.startsWith("**Full Changelog**") || t.startsWith("Full Changelog:")
+                    }
+                    .joinToString("\n")
+                    .trim()
                 val htmlUrl = json.optString("html_url", "$REPO_URL/releases")
 
                 var apkUrl: String? = null
@@ -89,6 +100,32 @@ object AppUpdateChecker {
                 runCatching { conn?.disconnect() }
             }
         }
+
+
+    fun startSystemDownload(context: Context, downloadUrl: String, latestVersion: String): Boolean {
+        return runCatching {
+            if (downloadUrl.endsWith(".apk", ignoreCase = true)) {
+                val cleanVer = latestVersion.removePrefix("v").removePrefix("V").ifBlank { "update" }
+                val fileName = "Jools-release-$cleanVer.apk"
+                val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                val req = DownloadManager.Request(Uri.parse(downloadUrl)).apply {
+                    setTitle("Jools $latestVersion")
+                    setDescription("正在下载更新安装包...")
+                    setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    setMimeType("application/vnd.android.package-archive")
+                    setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "Jools/$fileName")
+                }
+                dm.enqueue(req)
+                true
+            } else {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                true
+            }
+        }.getOrDefault(false)
+    }
 
     private fun compareVersions(remote: String, local: String): Int {
         val rParts = remote.removePrefix("v").removePrefix("V").split(Regex("[^0-9]+"))

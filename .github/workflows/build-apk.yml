@@ -9,6 +9,10 @@ on:
         description: '填写版本号（如 1.0.1）将构建 Release 版并发布到 GitHub Release；留空则仅构建 Debug 版'
         required: false
         default: ''
+      changelog:
+        description: '更新日志（Changelog），可用分号 ; 或换行分隔多条内容'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -35,11 +39,12 @@ jobs:
 
       - name: Resolve Build Mode & Version
         id: ver
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.release_version }}
+          INPUT_CHANGELOG: ${{ github.event.inputs.changelog }}
         run: |
-          TAG=""
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_version }}" ]; then
-            RAW="${{ github.event.inputs.release_version }}"
-            RAW="${RAW#v}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$INPUT_VERSION" ]; then
+            RAW="${INPUT_VERSION#v}"
             RAW="${RAW#V}"
             TAG="v${RAW}"
             echo "is_release=true" >> $GITHUB_OUTPUT
@@ -51,6 +56,24 @@ jobs:
             echo "version_name=1.0.0" >> $GITHUB_OUTPUT
           fi
           echo "version_code=${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+          if [ -n "$INPUT_CHANGELOG" ]; then
+            FORMATTED=$(printf '%s' "$INPUT_CHANGELOG" | sed 's/；/;/g; s/;/\n- /g')
+            case "$FORMATTED" in
+              -*|*"\n"*) ;;
+              *) FORMATTED="- $FORMATTED" ;;
+            esac
+            {
+              echo "changelog<<EOF_CHANGELOG"
+              printf '%b
+' "$FORMATTED"
+              echo "EOF_CHANGELOG"
+            } >> $GITHUB_OUTPUT
+            echo "has_changelog=true" >> $GITHUB_OUTPUT
+          else
+            echo "changelog=" >> $GITHUB_OUTPUT
+            echo "has_changelog=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Prepare CI Signing Key
         if: steps.ver.outputs.is_release == 'true'
@@ -106,8 +129,18 @@ jobs:
           path: app/build/outputs/apk/release/Jools-release-*.apk
           if-no-files-found: error
 
-      - name: Publish to GitHub Release
-        if: steps.ver.outputs.is_release == 'true'
+      - name: Publish to GitHub Release (with Changelog)
+        if: steps.ver.outputs.is_release == 'true' && steps.ver.outputs.has_changelog == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Jools ${{ steps.ver.outputs.tag }}
+          body: ${{ steps.ver.outputs.changelog }}
+          files: app/build/outputs/apk/release/Jools-release-*.apk
+          generate_release_notes: false
+
+      - name: Publish to GitHub Release (Auto Notes)
+        if: steps.ver.outputs.is_release == 'true' && steps.ver.outputs.has_changelog != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}

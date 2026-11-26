@@ -1,5 +1,6 @@
 package com.jaben.tools.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -217,11 +218,17 @@ fun SettingsScreen(
                     TextButton(
                         onClick = {
                             val url = res.downloadUrl
+                            val ver = res.latestVersion
                             updateResult = null
-                            onOpenUpdateUrl(url)
+                            val ok = AppUpdateChecker.startSystemDownload(context, url, ver)
+                            if (ok) {
+                                Toast.makeText(context, "已调用系统下载器开始下载，请在通知栏查看进度", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "启动系统下载器失败", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     ) {
-                        Text("前往下载")
+                        Text("立即下载")
                     }
                 } else {
                     TextButton(onClick = { updateResult = null }) {
@@ -232,7 +239,7 @@ fun SettingsScreen(
             dismissButton = {
                 if (res is UpdateCheckResult.UpdateAvailable) {
                     TextButton(onClick = { updateResult = null }) {
-                        Text("稍后再说")
+                        Text("取消")
                     }
                 }
             }
