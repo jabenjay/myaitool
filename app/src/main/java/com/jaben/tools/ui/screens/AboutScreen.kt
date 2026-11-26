@@ -58,11 +58,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.jaben.tools.data.AppUpdateChecker
 import com.jaben.tools.data.OutputStorageHelper
 import com.jaben.tools.tools.qr.QrCodeHelper
 import com.jaben.tools.tools.qr.QrDotStyle
+import com.jaben.tools.tools.qr.QrEccLevel
 import com.jaben.tools.ui.theme.LocalAppThemeVisuals
 import com.jaben.tools.ui.theme.liquidGlassSurface
 import com.jaben.tools.ui.theme.liquidPress
@@ -90,13 +90,13 @@ fun AboutScreen(
     val payUrl = if (isAlipay) ALIPAY_DONATE_URL else WECHAT_DONATE_URL
 
     val qrBitmap = remember(selectedPayTab) {
-        QrCodeHelper.generateQrBitmap(
+        QrCodeHelper.generateStyledQrBitmap(
             content = payUrl,
             sizePx = 720,
             fgColor = android.graphics.Color.BLACK,
             bgColor = android.graphics.Color.WHITE,
-            ecc = ErrorCorrectionLevel.M,
-            dotStyle = QrDotStyle.SQUARE
+            dotStyle = QrDotStyle.SQUARE,
+            eccLevel = QrEccLevel.M
         )
     }
 
@@ -310,11 +310,13 @@ fun AboutScreen(
                             modifier = Modifier.padding(16.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Image(
-                                bitmap = qrBitmap.asImageBitmap(),
-                                contentDescription = "${payTitle}收款码",
-                                modifier = Modifier.size(210.dp)
-                            )
+                            qrBitmap?.let { bmp ->
+                                Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = "${payTitle}收款码",
+                                    modifier = Modifier.size(210.dp)
+                                )
+                            }
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = payTitle,
@@ -332,8 +334,9 @@ fun AboutScreen(
                         OutlinedButton(
                             onClick = {
                                 val fileName = if (isAlipay) "Jools_Alipay_Donate.png" else "Jools_WeChat_Donate.png"
+                                val bmp = qrBitmap ?: return@OutlinedButton
                                 val baos = ByteArrayOutputStream()
-                                qrBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                                bmp.compress(Bitmap.CompressFormat.PNG, 100, baos)
                                 val uri = OutputStorageHelper.saveStream(
                                     context = context,
                                     subFolder = OutputStorageHelper.SUB_PICTURES,
