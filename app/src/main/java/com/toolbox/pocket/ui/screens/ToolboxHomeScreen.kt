@@ -16,7 +16,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
-import androidx.compose.material.icons.rounded.AddCircleOutline
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -31,18 +30,17 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.toolbox.pocket.ui.theme.LocalAppThemeVisuals
 
 data class ToolboxModule(
     val id: String,
     val title: String,
     val subtitle: String,
-    val tag: String,
-    val icon: ImageVector,
-    val enabled: Boolean = true
+    val icon: ImageVector
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -52,47 +50,34 @@ fun ToolboxHomeScreen(
     modifier: Modifier = Modifier
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val visuals = LocalAppThemeVisuals.current
 
     val tools = listOf(
         ToolboxModule(
             id = "base64",
             title = "Base64 编解码",
-            subtitle = "支持超长文本分段整理、JSON 自动格式化、行号显示与双指捏合缩放阅读",
-            tag = "文本编码",
-            icon = Icons.Rounded.Code,
-            enabled = true
-        ),
-        ToolboxModule(
-            id = "coming_soon",
-            title = "更多工具扩展中",
-            subtitle = "模块化工具箱架构已就绪，后续可按需扩展 URL 编解码、哈希计算、JSON 格式化等",
-            tag = "规划中",
-            icon = Icons.Rounded.AddCircleOutline,
-            enabled = false
+            subtitle = "长文本分段换行、行号定位与双指缩放",
+            icon = Icons.Rounded.Code
         )
     )
 
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = Color.Transparent,
         topBar = {
             LargeTopAppBar(
                 title = {
-                    Column {
-                        Text(
-                            text = "口袋工具箱",
-                            style = MaterialTheme.typography.headlineLarge
-                        )
-                        Text(
-                            text = "Material You · 轻量高效",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
+                    Text(
+                        text = "工具箱",
+                        style = MaterialTheme.typography.headlineLarge
+                    )
                 },
                 scrollBehavior = scrollBehavior,
                 colors = TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer.copy(
+                        alpha = if (visuals.isLiquidGlass || visuals.hasCustomBackground) 0.78f else 1f
+                    )
                 )
             )
         }
@@ -102,120 +87,61 @@ fun ToolboxHomeScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(tools, key = { it.id }) { tool ->
-                ToolboxModuleCard(
-                    tool = tool,
-                    onClick = { if (tool.enabled) onOpenTool(tool.id) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ToolboxModuleCard(
-    tool: ToolboxModule,
-    onClick: () -> Unit
-) {
-    val containerColor = if (tool.enabled) {
-        MaterialTheme.colorScheme.surfaceContainerLow
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.6f)
-    }
-
-    Card(
-        onClick = onClick,
-        enabled = tool.enabled,
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = containerColor,
-            disabledContainerColor = containerColor
-        ),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = if (tool.enabled) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerHigh
-                },
-                modifier = Modifier.size(56.dp)
-            ) {
-                Icon(
-                    imageVector = tool.icon,
-                    contentDescription = tool.title,
-                    tint = if (tool.enabled) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    modifier = Modifier.padding(14.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Card(
+                    onClick = { onOpenTool(tool.id) },
+                    shape = MaterialTheme.shapes.large,
+                    border = visuals.cardBorder,
+                    colors = CardDefaults.cardColors(
+                        containerColor = visuals.cardContainerColor
+                    ),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = tool.title,
-                        style = MaterialTheme.typography.titleLarge,
-                        color = if (tool.enabled) {
-                            MaterialTheme.colorScheme.onSurface
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
-                    )
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = if (tool.enabled) {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHighest
-                        }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = tool.tag,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Medium,
-                            color = if (tool.enabled) {
-                                MaterialTheme.colorScheme.onSecondaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(52.dp)
+                        ) {
+                            Icon(
+                                imageVector = tool.icon,
+                                contentDescription = tool.title,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(13.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(16.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = tool.title,
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = tool.subtitle,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = tool.subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            if (tool.enabled) {
-                Spacer(modifier = Modifier.width(8.dp))
-                Icon(
-                    imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
             }
         }
     }

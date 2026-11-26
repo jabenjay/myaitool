@@ -1,33 +1,38 @@
 package com.toolbox.pocket.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CloseFullscreen
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.SwapVert
-import androidx.compose.material.icons.rounded.ZoomIn
-import androidx.compose.material.icons.rounded.ZoomOut
+import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -36,9 +41,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -50,11 +52,17 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -66,6 +74,7 @@ import com.toolbox.pocket.tools.base64.Base64Processor
 import com.toolbox.pocket.tools.base64.Base64Variant
 import com.toolbox.pocket.tools.base64.LineWrapWidth
 import com.toolbox.pocket.ui.components.PinchZoomTextViewer
+import com.toolbox.pocket.ui.theme.LocalAppThemeVisuals
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -79,9 +88,14 @@ fun Base64Screen(
     val clipboardManager = LocalClipboardManager.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val visuals = LocalAppThemeVisuals.current
 
-    var inputText by rememberSaveable { mutableStateOf("") }
-    var mode by rememberSaveable { mutableStateOf(Base64Mode.ENCODE) }
+    var topText by rememberSaveable { mutableStateOf("") }
+    var bottomText by rememberSaveable { mutableStateOf("") }
+    var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    var lastActionInfo by rememberSaveable { mutableStateOf("") }
+
     var variant by rememberSaveable { mutableStateOf(Base64Variant.STANDARD) }
     var wrapWidth by rememberSaveable { mutableStateOf(LineWrapWidth.COL_64) }
     var preserveParagraphs by rememberSaveable { mutableStateOf(true) }
@@ -92,32 +106,44 @@ fun Base64Screen(
     var fontSizeSp by rememberSaveable { mutableFloatStateOf(14f) }
     var isFullScreenReader by rememberSaveable { mutableStateOf(false) }
 
-    val result = remember(
-        inputText,
-        mode,
-        variant,
-        wrapWidth,
-        autoFormatJson,
-        preserveParagraphs
-    ) {
-        Base64Processor.process(
-            input = inputText,
+    // Resizable box heights (dp) via bottom-right drag handle
+    var topBoxHeightDp by rememberSaveable { mutableFloatStateOf(170f) }
+    var bottomBoxHeightDp by rememberSaveable { mutableFloatStateOf(270f) }
+
+    fun runTransform(mode: Base64Mode) {
+        if (topText.isEmpty()) {
+            bottomText = ""
+            errorMessage = null
+            lastActionInfo = ""
+            return
+        }
+        val res = Base64Processor.process(
+            input = topText,
             mode = mode,
             variant = variant,
             wrapWidth = wrapWidth,
             autoFormatJson = autoFormatJson,
             preserveParagraphs = preserveParagraphs
         )
+        if (res.isError) {
+            errorMessage = res.errorMessage
+        } else {
+            errorMessage = null
+            bottomText = res.output
+            val jsonTag = if (res.isPrettyJson) " · JSON" else ""
+            lastActionInfo = "${res.lineCount} 行 · ${res.charCount} 字符$jsonTag"
+        }
     }
 
     Scaffold(
         modifier = modifier,
+        containerColor = Color.Transparent,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
                     Text(
-                        text = "Base64 加解密",
+                        text = "Base64",
                         style = MaterialTheme.typography.titleLarge
                     )
                 },
@@ -130,7 +156,7 @@ fun Base64Screen(
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    containerColor = Color.Transparent
                 )
             )
         }
@@ -139,26 +165,11 @@ fun Base64Screen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp),
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Mode Switch: Encode / Decode
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                Base64Mode.entries.forEachIndexed { index, item ->
-                    SegmentedButton(
-                        selected = mode == item,
-                        onClick = { mode = item },
-                        shape = SegmentedButtonDefaults.itemShape(
-                            index = index,
-                            count = Base64Mode.entries.size
-                        )
-                    ) {
-                        Text(item.label)
-                    }
-                }
-            }
-
-            // Formatting & Display Options Chips (horizontally scrollable for small screens)
+            // Compact format & view chips
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -176,35 +187,29 @@ fun Base64Screen(
                     },
                     label = { Text(variant.label) }
                 )
-
-                if (mode == Base64Mode.ENCODE) {
-                    FilterChip(
-                        selected = wrapWidth != LineWrapWidth.NONE,
-                        onClick = {
-                            val entries = LineWrapWidth.entries
-                            wrapWidth = entries[(entries.indexOf(wrapWidth) + 1) % entries.size]
-                        },
-                        label = { Text("分段: ${wrapWidth.label}") }
-                    )
-                    FilterChip(
-                        selected = preserveParagraphs,
-                        onClick = { preserveParagraphs = !preserveParagraphs },
-                        label = { Text("保留原换行") }
-                    )
-                } else {
-                    FilterChip(
-                        selected = autoFormatJson,
-                        onClick = { autoFormatJson = !autoFormatJson },
-                        label = { Text("JSON 自动排版") }
-                    )
-                }
-
+                FilterChip(
+                    selected = wrapWidth != LineWrapWidth.NONE,
+                    onClick = {
+                        val entries = LineWrapWidth.entries
+                        wrapWidth = entries[(entries.indexOf(wrapWidth) + 1) % entries.size]
+                    },
+                    label = { Text(wrapWidth.label) }
+                )
+                FilterChip(
+                    selected = preserveParagraphs,
+                    onClick = { preserveParagraphs = !preserveParagraphs },
+                    label = { Text("保留换行") }
+                )
+                FilterChip(
+                    selected = autoFormatJson,
+                    onClick = { autoFormatJson = !autoFormatJson },
+                    label = { Text("JSON 排版") }
+                )
                 FilterChip(
                     selected = showLineNumbers,
                     onClick = { showLineNumbers = !showLineNumbers },
-                    label = { Text("显示行号") }
+                    label = { Text("行号") }
                 )
-
                 FilterChip(
                     selected = softWrap,
                     onClick = { softWrap = !softWrap },
@@ -212,251 +217,280 @@ fun Base64Screen(
                 )
             }
 
-            // Input Card
+            // Top Input Card (with bottom-right resize handle)
             Surface(
                 shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                modifier = Modifier.fillMaxWidth()
+                color = visuals.cardContainerColor,
+                border = visuals.cardBorder,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(topBoxHeightDp.dp)
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(12.dp)
                     ) {
-                        Text(
-                            text = if (mode == Base64Mode.ENCODE) "原始文本输入" else "Base64 密文输入",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            IconButton(
-                                onClick = {
-                                    val clip = clipboardManager.getText()?.text
-                                    if (!clip.isNullOrEmpty()) {
-                                        inputText = clip
-                                    } else {
-                                        scope.launch {
-                                            snackbarHostState.showSnackbar("剪贴板为空")
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.ContentPaste,
-                                    contentDescription = "粘贴",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            if (result.output.isNotEmpty() && !result.isError) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "输入",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                                 IconButton(
                                     onClick = {
-                                        inputText = result.output
-                                        mode = if (mode == Base64Mode.ENCODE) {
-                                            Base64Mode.DECODE
+                                        val clip = clipboardManager.getText()?.text
+                                        if (!clip.isNullOrEmpty()) {
+                                            topText = clip
                                         } else {
-                                            Base64Mode.ENCODE
+                                            scope.launch { snackbarHostState.showSnackbar("剪贴板为空") }
                                         }
                                     },
-                                    modifier = Modifier.size(34.dp)
+                                    modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Rounded.SwapVert,
-                                        contentDescription = "互换输入输出",
+                                        imageVector = Icons.Rounded.ContentPaste,
+                                        contentDescription = "粘贴",
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
-                            }
-                            if (inputText.isNotEmpty()) {
-                                IconButton(
-                                    onClick = { inputText = "" },
-                                    modifier = Modifier.size(34.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.DeleteOutline,
-                                        contentDescription = "清空",
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                if (topText.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = { topText = "" },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.DeleteOutline,
+                                            contentDescription = "清空",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
+
+                        OutlinedTextField(
+                            value = topText,
+                            onValueChange = { topText = it },
+                            placeholder = { Text("输入或粘贴需要处理的长文本...") },
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = visuals.innerFieldColor,
+                                unfocusedContainerColor = visuals.innerFieldColor
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                        )
                     }
 
-                    OutlinedTextField(
-                        value = inputText,
-                        onValueChange = { inputText = it },
-                        placeholder = {
-                            Text(
-                                text = if (mode == Base64Mode.ENCODE) {
-                                    "在此粘贴或输入长文本（支持多行）..."
-                                } else {
-                                    "在此粘贴 Base64 字符串（自动忽略多余换行）..."
-                                }
-                            )
+                    ResizeCornerHandle(
+                        onDragDeltaY = { deltaPx ->
+                            val deltaDp = with(density) { deltaPx.toDp().value }
+                            topBoxHeightDp = (topBoxHeightDp + deltaDp).coerceIn(120f, 460f)
                         },
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest
-                        ),
-                        minLines = 3,
-                        maxLines = 5,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 150.dp)
+                        modifier = Modifier.align(Alignment.BottomEnd)
                     )
                 }
             }
 
-            // Output Card with Pinch-to-Zoom & Organized Line Display
+            // Middle Action Row: Encode, Decode, and Swap Top/Bottom
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = { runTransform(Base64Mode.ENCODE) },
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Lock,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("编码")
+                }
+
+                FilledTonalButton(
+                    onClick = { runTransform(Base64Mode.DECODE) },
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.LockOpen,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("解码")
+                }
+
+                FilledTonalIconButton(
+                    onClick = {
+                        val tmp = topText
+                        topText = bottomText
+                        bottomText = tmp
+                        errorMessage = null
+                    },
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.SwapVert,
+                        contentDescription = "上下互换"
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = errorMessage != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = errorMessage.orEmpty(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+
+            // Bottom Output Card (with Pinch-to-Zoom + bottom-right resize handle)
             Surface(
                 shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                color = visuals.cardContainerColor,
+                border = visuals.cardBorder,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .padding(bottom = 12.dp)
+                    .height(bottomBoxHeightDp.dp)
+                    .padding(bottom = 8.dp)
             ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    // Output Header & Zoom Controls
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (result.isPrettyJson) "输出结果（已自动格式化 JSON）" else "输出结果 · 支持双指捏合缩放",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            if (result.output.isNotEmpty() && !result.isError) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
                                 Text(
-                                    text = "${result.lineCount} 行 · ${result.charCount} 字符 · ${result.byteCount} 字节",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = "输出",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
-                            }
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(
-                                onClick = { fontSizeSp = (fontSizeSp - 2f).coerceAtLeast(8f) },
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.ZoomOut,
-                                    contentDescription = "缩小字体",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Text(
-                                text = "${((fontSizeSp / 14f) * 100f).roundToInt()}%",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            IconButton(
-                                onClick = { fontSizeSp = (fontSizeSp + 2f).coerceAtMost(32f) },
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.ZoomIn,
-                                    contentDescription = "放大字体",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            if (fontSizeSp != 14f) {
-                                IconButton(
-                                    onClick = { fontSizeSp = 14f },
-                                    modifier = Modifier.size(34.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.RestartAlt,
-                                        contentDescription = "重置缩放",
-                                        modifier = Modifier.size(18.dp)
+                                if (lastActionInfo.isNotEmpty()) {
+                                    Text(
+                                        text = lastActionInfo,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
-                            IconButton(
-                                onClick = { isFullScreenReader = true },
-                                enabled = result.output.isNotEmpty() && !result.isError,
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.OpenInFull,
-                                    contentDescription = "全屏阅读",
-                                    modifier = Modifier.size(18.dp)
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "${((fontSizeSp / 14f) * 100f).roundToInt()}%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                            }
-                            FilledTonalIconButton(
-                                onClick = {
-                                    if (result.output.isNotEmpty()) {
-                                        clipboardManager.setText(AnnotatedString(result.output))
-                                        scope.launch {
-                                            snackbarHostState.showSnackbar("已复制结果到剪贴板")
-                                        }
+                                if (fontSizeSp != 14f) {
+                                    IconButton(
+                                        onClick = { fontSizeSp = 14f },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.RestartAlt,
+                                            contentDescription = "重置缩放",
+                                            modifier = Modifier.size(18.dp)
+                                        )
                                     }
-                                },
-                                enabled = result.output.isNotEmpty() && !result.isError,
-                                modifier = Modifier
-                                    .padding(start = 4.dp)
-                                    .size(34.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.ContentCopy,
-                                    contentDescription = "复制结果",
-                                    modifier = Modifier.size(16.dp)
-                                )
+                                }
+                                IconButton(
+                                    onClick = { isFullScreenReader = true },
+                                    enabled = bottomText.isNotEmpty(),
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.OpenInFull,
+                                        contentDescription = "全屏",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                FilledTonalIconButton(
+                                    onClick = {
+                                        if (bottomText.isNotEmpty()) {
+                                            clipboardManager.setText(AnnotatedString(bottomText))
+                                            scope.launch { snackbarHostState.showSnackbar("已复制") }
+                                        }
+                                    },
+                                    enabled = bottomText.isNotEmpty(),
+                                    modifier = Modifier
+                                        .padding(start = 4.dp)
+                                        .size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.ContentCopy,
+                                        contentDescription = "复制",
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         }
-                    }
 
-                    AnimatedVisibility(visible = result.isError) {
                         Surface(
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            shape = RoundedCornerShape(14.dp),
+                            shape = RoundedCornerShape(18.dp),
+                            color = visuals.innerFieldColor,
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .fillMaxSize()
+                                .padding(start = 10.dp, end = 10.dp, bottom = 12.dp)
                         ) {
-                            Text(
-                                text = result.errorMessage.orEmpty(),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                modifier = Modifier.padding(12.dp)
+                            PinchZoomTextViewer(
+                                text = bottomText,
+                                fontSizeSp = fontSizeSp,
+                                onFontSizeChange = { fontSizeSp = it },
+                                showLineNumbers = showLineNumbers,
+                                softWrap = softWrap,
+                                placeholder = "点击上方「编码」或「解码」查看结果",
+                                modifier = Modifier.fillMaxSize()
                             )
                         }
                     }
 
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(start = 10.dp, end = 10.dp, bottom = 10.dp)
-                    ) {
-                        PinchZoomTextViewer(
-                            text = if (result.isError) "" else result.output,
-                            fontSizeSp = fontSizeSp,
-                            onFontSizeChange = { fontSizeSp = it },
-                            showLineNumbers = showLineNumbers,
-                            softWrap = softWrap,
-                            placeholder = "处理结果将在此处按行整理展示\n可用双指捏合手势随时放大或缩小文字",
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
+                    ResizeCornerHandle(
+                        onDragDeltaY = { deltaPx ->
+                            val deltaDp = with(density) { deltaPx.toDp().value }
+                            bottomBoxHeightDp = (bottomBoxHeightDp + deltaDp).coerceIn(150f, 560f)
+                        },
+                        modifier = Modifier.align(Alignment.BottomEnd)
+                    )
                 }
             }
         }
     }
 
-    // Full-screen distraction-free reader modal for very long text
     if (isFullScreenReader) {
         Dialog(
             onDismissRequest = { isFullScreenReader = false },
@@ -474,29 +508,19 @@ fun Base64Screen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text(
-                                text = "全屏阅读模式",
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Text(
-                                text = "双指捏合可缩放 · ${result.lineCount} 行",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text(
+                            text = "阅读视图",
+                            style = MaterialTheme.typography.titleMedium
+                        )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = {
-                                clipboardManager.setText(AnnotatedString(result.output))
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("已复制结果")
-                                }
+                                clipboardManager.setText(AnnotatedString(bottomText))
+                                scope.launch { snackbarHostState.showSnackbar("已复制") }
                             }) {
                                 Icon(Icons.Rounded.ContentCopy, contentDescription = "复制")
                             }
-                            Spacer(modifier = Modifier.width(4.dp))
                             IconButton(onClick = { isFullScreenReader = false }) {
-                                Icon(Icons.Rounded.CloseFullscreen, contentDescription = "退出全屏")
+                                Icon(Icons.Rounded.CloseFullscreen, contentDescription = "退出")
                             }
                         }
                     }
@@ -507,7 +531,7 @@ fun Base64Screen(
                         modifier = Modifier.fillMaxSize()
                     ) {
                         PinchZoomTextViewer(
-                            text = result.output,
+                            text = bottomText,
                             fontSizeSp = fontSizeSp,
                             onFontSizeChange = { fontSizeSp = it },
                             showLineNumbers = showLineNumbers,
@@ -520,6 +544,48 @@ fun Base64Screen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ResizeCornerHandle(
+    onDragDeltaY: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val latestOnDrag by rememberUpdatedState(onDragDeltaY)
+    val handleColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+
+    Box(
+        modifier = modifier
+            .size(34.dp)
+            .pointerInput(Unit) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    latestOnDrag(dragAmount.y)
+                }
+            },
+        contentAlignment = Alignment.BottomEnd
+    ) {
+        Canvas(
+            modifier = Modifier
+                .padding(end = 9.dp, bottom = 9.dp)
+                .size(12.dp)
+        ) {
+            drawLine(
+                color = handleColor,
+                start = Offset(size.width * 0.25f, size.height),
+                end = Offset(size.width, size.height * 0.25f),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = handleColor,
+                start = Offset(size.width * 0.65f, size.height),
+                end = Offset(size.width, size.height * 0.65f),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round
+            )
         }
     }
 }

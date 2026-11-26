@@ -1,12 +1,16 @@
 package com.toolbox.pocket.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,11 +33,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.text.font.FontFamily
@@ -45,11 +53,11 @@ import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 /**
- * Organized long-text viewer supporting:
- * - Smooth two-finger pinch-to-zoom (8sp..32sp) without conflicting with single-finger scrolling
- * - Optional line numbers for structured inspection of long multi-line output
- * - Toggleable soft-wrap vs horizontal scroll
- * - Native text selection
+ * Silky-smooth 60/120fps pinch-to-zoom long-text viewer:
+ * - Uses pointerInput(Unit) + rememberUpdatedState so the gesture stream NEVER restarts mid-pinch
+ * - Applies GPU graphicsLayer scaling during active pinch (zero text relayout lag),
+ *   then commits the final crisp fontSizeSp smoothly upon finger release
+ * - Double-tap resets zoom to 100%
  */
 @Composable
 fun PinchZoomTextViewer(
@@ -64,12 +72,28 @@ fun PinchZoomTextViewer(
     maxFontSizeSp: Float = 32f,
     baseFontSizeSp: Float = 14f
 ) {
+    var livePinchScale by remember { mutableFloatStateOf(1f) }
+    var isPinching by remember { mutableStateOf(false) }
     var showZoomBadge by remember { mutableStateOf(false) }
-    val zoomPercent = ((fontSizeSp / baseFontSizeSp) * 100f).roundToInt()
 
-    LaunchedEffect(fontSizeSp) {
-        if (showZoomBadge) {
-            delay(1200)
+    val latestFontSize by rememberUpdatedState(fontSizeSp)
+    val latestOnFontSizeChange by rememberUpdatedState(onFontSizeChange)
+
+    val effectiveFontSizeSp = (fontSizeSp * livePinchScale).coerceIn(minFontSizeSp, maxFontSizeSp)
+    val zoomPercent = ((effectiveFontSizeSp / baseFontSizeSp) * 100f).roundToInt()
+
+    val animatedLayerScale by animateFloatAsState(
+        targetValue = if (isPinching) livePinchScale else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessHigh
+        ),
+        label = "pinchScale"
+    )
+
+    LaunchedEffect(isPinching, effectiveFontSizeSp) {
+        if (!isPinching && showZoomBadge) {
+            delay(1100)
             showZoomBadge = false
         }
     }
@@ -83,20 +107,30 @@ fun PinchZoomTextViewer(
 
     Box(
         modifier = modifier
-            .pointerInput(minFontSizeSp, maxFontSizeSp, fontSizeSp) {
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onDoubleTap = {
+                        latestOnFontSizeChange(baseFontSizeSp)
+                        showZoomBadge = true
+                    }
+                )
+            }
+            .pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
+                    var pinchDetected = false
                     do {
                         val event = awaitPointerEvent()
                         val pressedCount = event.changes.count { it.pressed }
-                        // Only intercept when 2 or more fingers are pinching
                         if (pressedCount >= 2) {
                             val zoomChange = event.calculateZoom()
                             if (zoomChange != 1f) {
-                                val updated = (fontSizeSp * zoomChange)
-                                    .coerceIn(minFontSizeSp, maxFontSizeSp)
-                                onFontSizeChange(updated)
+                                pinchDetected = true
+                                isPinching = true
                                 showZoomBadge = true
+                                val minRatio = minFontSizeSp / latestFontSize
+                                val maxRatio = maxFontSizeSp / latestFontSize
+                                livePinchScale = (livePinchScale * zoomChange).coerceIn(minRatio, maxRatio)
                                 event.changes.forEach { change ->
                                     if (change.positionChanged()) {
                                         change.consume()
@@ -105,6 +139,14 @@ fun PinchZoomTextViewer(
                             }
                         }
                     } while (event.changes.any { it.pressed })
+
+                    if (pinchDetected) {
+                        val committed = (latestFontSize * livePinchScale)
+                            .coerceIn(minFontSizeSp, maxFontSizeSp)
+                        livePinchScale = 1f
+                        isPinching = false
+                        latestOnFontSizeChange(committed)
+                    }
                 }
             }
     ) {
@@ -128,6 +170,11 @@ fun PinchZoomTextViewer(
                 .verticalScroll(verticalScrollState)
                 .let { mod ->
                     if (!softWrap) mod.horizontalScroll(horizontalScrollState) else mod
+                }
+                .graphicsLayer {
+                    scaleX = animatedLayerScale
+                    scaleY = animatedLayerScale
+                    transformOrigin = TransformOrigin(0f, 0f)
                 }
                 .padding(horizontal = 12.dp, vertical = 12.dp)
 
@@ -190,7 +237,6 @@ fun PinchZoomTextViewer(
             }
         }
 
-        // Floating zoom indicator pill
         AnimatedVisibility(
             visible = showZoomBadge,
             enter = fadeIn(),
@@ -205,7 +251,7 @@ fun PinchZoomTextViewer(
                 tonalElevation = 4.dp
             ) {
                 Text(
-                    text = "$zoomPercent% · ${fontSizeSp.roundToInt()}sp",
+                    text = "$zoomPercent% · ${effectiveFontSizeSp.roundToInt()}sp",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.inverseOnSurface,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
