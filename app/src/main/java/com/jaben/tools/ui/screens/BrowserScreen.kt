@@ -1190,285 +1190,6 @@ fun BrowserScreen(
             }
         )
     }
-}
-
-@Composable
-private fun BookmarkDropdownPanel(
-    bookmarks: List<BookmarkItem>,
-    homeUrl: String,
-    panelBg: Color,
-    panelFg: Color,
-    onSelectBookmark: (BookmarkItem) -> Unit,
-    onSetHome: (BookmarkItem) -> Unit,
-    onEditBookmark: (BookmarkItem) -> Unit,
-    onMoveBookmark: (Int, Int) -> Unit,
-    onAddClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val haptic = LocalHapticFeedback.current
-    var draggedId by remember { mutableStateOf<String?>(null) }
-    var dragOffsetY by remember { mutableFloatStateOf(0f) }
-    var rowHeightPx by remember { mutableFloatStateOf(140f) }
-
-    val latestBookmarks by rememberUpdatedState(bookmarks)
-    val latestOnMove by rememberUpdatedState(onMoveBookmark)
-
-    Surface(
-        shape = RoundedCornerShape(22.dp),
-        color = panelBg,
-        contentColor = panelFg,
-        shadowElevation = 10.dp,
-        modifier = modifier
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 320.dp)
-                    .clipToBounds()
-            ) {
-                itemsIndexed(bookmarks, key = { _, item -> item.id }) { index, item ->
-                    val isDragging = draggedId == item.id
-                    val scale by animateFloatAsState(
-                        targetValue = if (isDragging) 1.015f else 1f,
-                        animationSpec = spring(
-                            dampingRatio = 0.76f,
-                            stiffness = Spring.StiffnessMedium
-                        ),
-                        label = "bookmarkFloatScale"
-                    )
-                    val elevation by animateDpAsState(
-                        targetValue = if (isDragging) 12.dp else 0.dp,
-                        label = "bookmarkFloatElevation"
-                    )
-                    val isDarkPanel = panelBg.red < 0.5f
-                    val rowBg = if (isDragging) {
-                        if (isDarkPanel) Color(0xFF2B3140) else Color(0xFFF0F4FA)
-                    } else {
-                        panelBg
-                    }
-
-                    Surface(
-                        color = rowBg,
-                        contentColor = panelFg,
-                        shadowElevation = elevation,
-                        shape = RoundedCornerShape(if (isDragging) 14.dp else 0.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .zIndex(if (isDragging) 10f else 0f)
-                            .then(if (!isDragging) Modifier.animateItem() else Modifier)
-                            .onSizeChanged { size ->
-                                if (size.height > 0) rowHeightPx = size.height.toFloat()
-                            }
-                            .graphicsLayer {
-                                if (isDragging) {
-                                    translationY = dragOffsetY
-                                }
-                                scaleX = scale
-                                scaleY = scale
-                            }
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onSelectBookmark(item) }
-                                .padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Public,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = item.name,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = panelFg,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = item.url.removePrefix("https://").removePrefix("http://"),
-                                    fontSize = 11.5.sp,
-                                    color = panelFg.copy(alpha = 0.6f),
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            // Pencil edit button
-                            IconButton(
-                                onClick = { onEditBookmark(item) },
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Edit,
-                                    contentDescription = "编辑书签",
-                                    tint = panelFg.copy(alpha = 0.72f),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-
-                            // Home button between edit and sort buttons (filled if current homepage)
-                            val isCurrentHome = item.url.trim().removeSuffix("/")
-                                .equals(homeUrl.trim().removeSuffix("/"), ignoreCase = true)
-                            IconButton(
-                                onClick = { onSetHome(item) },
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isCurrentHome) Icons.Rounded.Home else Icons.Outlined.Home,
-                                    contentDescription = "设为主页",
-                                    tint = if (isCurrentHome) MaterialTheme.colorScheme.primary else panelFg.copy(alpha = 0.65f),
-                                    modifier = Modifier.size(19.dp)
-                                )
-                            }
-
-                            // Drag handle button to the right of home button
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .pointerInput(item.id) {
-                                        detectDragGestures(
-                                            onDragStart = {
-                                                draggedId = item.id
-                                                dragOffsetY = 0f
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            },
-                                            onDragEnd = {
-                                                draggedId = null
-                                                dragOffsetY = 0f
-                                            },
-                                            onDragCancel = {
-                                                draggedId = null
-                                                dragOffsetY = 0f
-                                            },
-                                            onDrag = { change, dragAmount ->
-                                                change.consume()
-                                                dragOffsetY += dragAmount.y
-                                                val currentList = latestBookmarks
-                                                val currentIdx = currentList.indexOfFirst { it.id == item.id }
-                                                if (currentIdx != -1) {
-                                                    val threshold = rowHeightPx * 0.55f
-                                                    if (dragOffsetY > threshold && currentIdx < currentList.lastIndex) {
-                                                        latestOnMove(currentIdx, currentIdx + 1)
-                                                        dragOffsetY -= rowHeightPx
-                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                    } else if (dragOffsetY < -threshold && currentIdx > 0) {
-                                                        latestOnMove(currentIdx, currentIdx - 1)
-                                                        dragOffsetY += rowHeightPx
-                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.DragHandle,
-                                    contentDescription = "拖动排序",
-                                    tint = if (isDragging) MaterialTheme.colorScheme.primary else panelFg.copy(alpha = 0.6f),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            HorizontalDivider(color = panelFg.copy(alpha = 0.1f))
-
-            // Bottom row: Add Bookmark
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onAddClick)
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Add,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "添加书签",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                    softWrap = false
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun BookmarkEditDialog(
-    title: String,
-    initialName: String,
-    initialUrl: String,
-    onDismiss: () -> Unit,
-    onDelete: (() -> Unit)?,
-    onSave: (String, String) -> Unit
-) {
-    var name by remember { mutableStateOf(initialName) }
-    var url by remember { mutableStateOf(initialUrl) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title, maxLines = 1, softWrap = false) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("书签名称", maxLines = 1, softWrap = false) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = { url = it },
-                    label = { Text("网址（例如 www.baidu.com）", maxLines = 1, softWrap = false) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (onDelete != null) {
-                    TextButton(onClick = onDelete) {
-                        Text("删除", color = MaterialTheme.colorScheme.error, maxLines = 1, softWrap = false)
-                    }
-                }
-                FilledTonalButton(
-                    enabled = url.isNotBlank(),
-                    onClick = { onSave(name, url) }
-                ) {
-                    Text("保存", maxLines = 1, softWrap = false)
-                }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消", maxLines = 1, softWrap = false)
-            }
-        }
-    )
 
     if (showMenuSheet) {
         val activeDownloadCount = downloadItems.count { it.status == DownloadStatus.DOWNLOADING }
@@ -1808,6 +1529,286 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 }
 
 
+
+@Composable
+private fun BookmarkDropdownPanel(
+    bookmarks: List<BookmarkItem>,
+    homeUrl: String,
+    panelBg: Color,
+    panelFg: Color,
+    onSelectBookmark: (BookmarkItem) -> Unit,
+    onSetHome: (BookmarkItem) -> Unit,
+    onEditBookmark: (BookmarkItem) -> Unit,
+    onMoveBookmark: (Int, Int) -> Unit,
+    onAddClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+    var draggedId by remember { mutableStateOf<String?>(null) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var rowHeightPx by remember { mutableFloatStateOf(140f) }
+
+    val latestBookmarks by rememberUpdatedState(bookmarks)
+    val latestOnMove by rememberUpdatedState(onMoveBookmark)
+
+    Surface(
+        shape = RoundedCornerShape(22.dp),
+        color = panelBg,
+        contentColor = panelFg,
+        shadowElevation = 10.dp,
+        modifier = modifier
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
+                    .clipToBounds()
+            ) {
+                itemsIndexed(bookmarks, key = { _, item -> item.id }) { index, item ->
+                    val isDragging = draggedId == item.id
+                    val scale by animateFloatAsState(
+                        targetValue = if (isDragging) 1.015f else 1f,
+                        animationSpec = spring(
+                            dampingRatio = 0.76f,
+                            stiffness = Spring.StiffnessMedium
+                        ),
+                        label = "bookmarkFloatScale"
+                    )
+                    val elevation by animateDpAsState(
+                        targetValue = if (isDragging) 12.dp else 0.dp,
+                        label = "bookmarkFloatElevation"
+                    )
+                    val isDarkPanel = panelBg.red < 0.5f
+                    val rowBg = if (isDragging) {
+                        if (isDarkPanel) Color(0xFF2B3140) else Color(0xFFF0F4FA)
+                    } else {
+                        panelBg
+                    }
+
+                    Surface(
+                        color = rowBg,
+                        contentColor = panelFg,
+                        shadowElevation = elevation,
+                        shape = RoundedCornerShape(if (isDragging) 14.dp else 0.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .zIndex(if (isDragging) 10f else 0f)
+                            .then(if (!isDragging) Modifier.animateItem() else Modifier)
+                            .onSizeChanged { size ->
+                                if (size.height > 0) rowHeightPx = size.height.toFloat()
+                            }
+                            .graphicsLayer {
+                                if (isDragging) {
+                                    translationY = dragOffsetY
+                                }
+                                scaleX = scale
+                                scaleY = scale
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelectBookmark(item) }
+                                .padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Public,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.name,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = panelFg,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = item.url.removePrefix("https://").removePrefix("http://"),
+                                    fontSize = 11.5.sp,
+                                    color = panelFg.copy(alpha = 0.6f),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            // Pencil edit button
+                            IconButton(
+                                onClick = { onEditBookmark(item) },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Edit,
+                                    contentDescription = "编辑书签",
+                                    tint = panelFg.copy(alpha = 0.72f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            // Home button between edit and sort buttons (filled if current homepage)
+                            val isCurrentHome = item.url.trim().removeSuffix("/")
+                                .equals(homeUrl.trim().removeSuffix("/"), ignoreCase = true)
+                            IconButton(
+                                onClick = { onSetHome(item) },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isCurrentHome) Icons.Rounded.Home else Icons.Outlined.Home,
+                                    contentDescription = "设为主页",
+                                    tint = if (isCurrentHome) MaterialTheme.colorScheme.primary else panelFg.copy(alpha = 0.65f),
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+
+                            // Drag handle button to the right of home button
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .pointerInput(item.id) {
+                                        detectDragGestures(
+                                            onDragStart = {
+                                                draggedId = item.id
+                                                dragOffsetY = 0f
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            },
+                                            onDragEnd = {
+                                                draggedId = null
+                                                dragOffsetY = 0f
+                                            },
+                                            onDragCancel = {
+                                                draggedId = null
+                                                dragOffsetY = 0f
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                dragOffsetY += dragAmount.y
+                                                val currentList = latestBookmarks
+                                                val currentIdx = currentList.indexOfFirst { it.id == item.id }
+                                                if (currentIdx != -1) {
+                                                    val threshold = rowHeightPx * 0.55f
+                                                    if (dragOffsetY > threshold && currentIdx < currentList.lastIndex) {
+                                                        latestOnMove(currentIdx, currentIdx + 1)
+                                                        dragOffsetY -= rowHeightPx
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    } else if (dragOffsetY < -threshold && currentIdx > 0) {
+                                                        latestOnMove(currentIdx, currentIdx - 1)
+                                                        dragOffsetY += rowHeightPx
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.DragHandle,
+                                    contentDescription = "拖动排序",
+                                    tint = if (isDragging) MaterialTheme.colorScheme.primary else panelFg.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider(color = panelFg.copy(alpha = 0.1f))
+
+            // Bottom row: Add Bookmark
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onAddClick)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "添加书签",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookmarkEditDialog(
+    title: String,
+    initialName: String,
+    initialUrl: String,
+    onDismiss: () -> Unit,
+    onDelete: (() -> Unit)?,
+    onSave: (String, String) -> Unit
+) {
+    var name by remember { mutableStateOf(initialName) }
+    var url by remember { mutableStateOf(initialUrl) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, maxLines = 1, softWrap = false) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("书签名称", maxLines = 1, softWrap = false) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("网址（例如 www.baidu.com）", maxLines = 1, softWrap = false) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (onDelete != null) {
+                    TextButton(onClick = onDelete) {
+                        Text("删除", color = MaterialTheme.colorScheme.error, maxLines = 1, softWrap = false)
+                    }
+                }
+                FilledTonalButton(
+                    enabled = url.isNotBlank(),
+                    onClick = { onSave(name, url) }
+                ) {
+                    Text("保存", maxLines = 1, softWrap = false)
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消", maxLines = 1, softWrap = false)
+            }
+        }
+    )
+
+}
 private fun formatDlBytes(bytes: Long): String {
     if (bytes <= 0L) return "0 B"
     return when {
