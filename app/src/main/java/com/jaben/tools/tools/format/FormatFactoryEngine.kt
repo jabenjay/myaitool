@@ -94,7 +94,9 @@ data class SourceMediaInfo(
     val uri: Uri,
     val displayName: String,
     val sizeBytes: Long,
-    val detailText: String
+    val detailText: String,
+    val width: Int = 0,
+    val height: Int = 0
 )
 
 data class ConversionResult(
@@ -123,12 +125,18 @@ object FormatFactoryEngine {
                 }
             }
         }
+        var imgW = 0
+        var imgH = 0
         val detail = when (category) {
             MediaCategory.IMAGE -> {
                 runCatching {
                     val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
-                    if (opts.outWidth > 0 && opts.outHeight > 0) "${opts.outWidth} × ${opts.outHeight}" else "图片文件"
+                    if (opts.outWidth > 0 && opts.outHeight > 0) {
+                        imgW = opts.outWidth
+                        imgH = opts.outHeight
+                        "${imgW} × ${imgH}"
+                    } else "图片文件"
                 }.getOrDefault("图片文件")
             }
             MediaCategory.VIDEO, MediaCategory.AUDIO -> {
@@ -145,7 +153,42 @@ object FormatFactoryEngine {
                 }.getOrDefault(if (category == MediaCategory.VIDEO) "视频文件" else "音频文件")
             }
         }
-        return SourceMediaInfo(uri = uri, displayName = name, sizeBytes = size, detailText = detail)
+        return SourceMediaInfo(uri = uri, displayName = name, sizeBytes = size, detailText = detail, width = imgW, height = imgH)
+    }
+
+    fun estimateImageOutputBytes(
+        width: Int,
+        height: Int,
+        target: TargetFormat,
+        quality: Int
+    ): Long {
+        val w = width.coerceAtLeast(1)
+        val h = height.coerceAtLeast(1)
+        val pixels = w.toLong() * h.toLong()
+        return when (target) {
+            TargetFormat.IMG_BMP -> 54L + (((w * 3L + 3L) / 4L) * 4L) * h
+            TargetFormat.IMG_TGA -> 18L + pixels * 4L
+            TargetFormat.IMG_TIFF -> 142L + pixels * 4L
+            TargetFormat.IMG_PPM -> 16L + pixels * 3L
+            TargetFormat.IMG_ICO -> {
+                val ratio = min(256.0 / w, 256.0 / h).coerceAtMost(1.0)
+                val iw = max(1, (w * ratio).roundToInt())
+                val ih = max(1, (h * ratio).roundToInt())
+                (iw.toLong() * ih * 1.1).toLong().coerceAtLeast(1024L)
+            }
+            TargetFormat.IMG_PNG -> (pixels * 1.35).toLong().coerceAtLeast(2048L)
+            TargetFormat.IMG_WEBP_LOSSLESS -> (pixels * 1.05).toLong().coerceAtLeast(1536L)
+            TargetFormat.IMG_GIF -> (pixels * 0.45).toLong().coerceAtLeast(1024L)
+            TargetFormat.IMG_JPG -> {
+                val bpp = 0.08 + (quality.coerceIn(10, 100) / 100.0).let { it * it } * 0.55
+                (pixels * bpp).toLong().coerceAtLeast(2048L)
+            }
+            TargetFormat.IMG_WEBP_LOSSY -> {
+                val bpp = 0.05 + (quality.coerceIn(10, 100) / 100.0).let { it * it } * 0.40
+                (pixels * bpp).toLong().coerceAtLeast(1536L)
+            }
+            else -> 0L
+        }
     }
 
     suspend fun convert(
@@ -154,6 +197,8 @@ object FormatFactoryEngine {
         target: TargetFormat,
         imageQuality: Int = 90,
         imageScalePercent: Int = 100,
+        targetWidth: Int = 0,
+        targetHeight: Int = 0,
         videoMaxHeight: Int = 0, // 0 = original
         audioBitrateKbps: Int = 192,
         onProgress: (Float) -> Unit
@@ -170,7 +215,7 @@ object FormatFactoryEngine {
 
         when (target.category) {
             MediaCategory.IMAGE -> convertImage(
-                context, source.uri, target, outFile, imageQuality, imageScalePercent, onProgress
+                context, source.uri, target, outFile, imageQuality, imageScalePercent, targetWidth, targetHeight, onProgress
             )
             MediaCategory.VIDEO -> when (target) {
                 TargetFormat.VID_GIF -> convertVideoToGif(context, source.uri, outFile, onProgress)
@@ -218,16 +263,26 @@ object FormatFactoryEngine {
         outFile: File,
         quality: Int,
         scalePercent: Int,
+        targetWidth: Int,
+        targetHeight: Int,
         onProgress: (Float) -> Unit
     ) = withContext(Dispatchers.IO) {
         onProgress(0.15f)
         var bitmap = decodeSoftwareBitmap(context, uri)
             ?: throw IllegalArgumentException("无法解码该图片格式")
 
-        if (scalePercent in 10..99) {
-            val newW = max(1, (bitmap.width * scalePercent / 100f).roundToInt())
-            val newH = max(1, (bitmap.height * scalePercent / 100f).roundToInt())
-            val scaled = Bitmap.createScaledBitmap(bitmap, newW, newH, true)
+        val finalW = when {
+            targetWidth > 0 -> targetWidth.coerceIn(1, 16384)
+            scalePercent in 10..99 -> max(1, (bitmap.width * scalePercent / 100f).roundToInt())
+            else -> bitmap.width
+        }
+        val finalH = when {
+            targetHeight > 0 -> targetHeight.coerceIn(1, 16384)
+            scalePercent in 10..99 -> max(1, (bitmap.height * scalePercent / 100f).roundToInt())
+            else -> bitmap.height
+        }
+        if (finalW != bitmap.width || finalH != bitmap.height) {
+            val scaled = Bitmap.createScaledBitmap(bitmap, finalW, finalH, true)
             if (scaled != bitmap) bitmap.recycle()
             bitmap = scaled
         }

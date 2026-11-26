@@ -90,12 +90,20 @@ jobs:
           -PappVersionName=${{ steps.ver.outputs.version_name }}
           -PappVersionCode=${{ steps.ver.outputs.version_code }}
 
+      - name: Rename Release APK
+        if: steps.ver.outputs.is_release == 'true'
+        run: |
+          APK_SRC=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+          APK_DST="app/build/outputs/apk/release/Jools-release-${{ steps.ver.outputs.version_name }}.apk"
+          mv "$APK_SRC" "$APK_DST"
+          echo "Renamed APK to $APK_DST"
+
       - name: Upload Release APK Artifact
         if: steps.ver.outputs.is_release == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: Jools-Release-APK
-          path: app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/release/Jools-release-*.apk
           if-no-files-found: error
 
       - name: Publish to GitHub Release
@@ -104,5 +112,5 @@ jobs:
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: Jools ${{ steps.ver.outputs.tag }}
-          files: app/build/outputs/apk/release/*.apk
+          files: app/build/outputs/apk/release/Jools-release-*.apk
           generate_release_notes: true
