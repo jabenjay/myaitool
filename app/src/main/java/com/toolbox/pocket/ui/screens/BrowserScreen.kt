@@ -115,6 +115,7 @@ private const val DEFAULT_HOME_URL = "https://cn.pornhub.com/"
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun BrowserScreen(
+    initialUrl: String = DEFAULT_HOME_URL,
     bookmarks: List<BookmarkItem>,
     onAddBookmark: (String, String) -> Unit,
     onUpdateBookmark: (String, String, String) -> Unit,
@@ -132,7 +133,16 @@ fun BrowserScreen(
     val menuBg = if (visuals.isDark) Color(0xFF1C1F28) else Color(0xFFFFFFFF)
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    var urlInput by remember { mutableStateOf(DEFAULT_HOME_URL) }
+    val startUrl = remember(initialUrl) {
+        val t = initialUrl.trim()
+        when {
+            t.isEmpty() -> DEFAULT_HOME_URL
+            t.startsWith("http://") || t.startsWith("https://") -> t
+            t.contains(".") && !t.contains(" ") -> "https://$t"
+            else -> "https://www.bing.com/search?q=${android.net.Uri.encode(t)}"
+        }
+    }
+    var urlInput by remember { mutableStateOf(startUrl) }
     var showBookmarks by remember { mutableStateOf(false) }
     var progress by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
@@ -388,7 +398,7 @@ fun BrowserScreen(
                         }
 
                         AppLogManager.log("BROWSER", "初始化WebView并加载主页")
-                    loadUrl(DEFAULT_HOME_URL)
+                    loadUrl(startUrl)
                         webViewRef = this
                     }
                 },

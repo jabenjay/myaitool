@@ -27,6 +27,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.QrCode2
+import androidx.compose.material.icons.rounded.QrCodeScanner
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -76,7 +79,9 @@ fun ToolboxHomeScreen(
     toolOrder: List<String>,
     bottomExtraPadding: Dp = 0.dp,
     onMoveTool: (Int, Int) -> Unit,
+    onDragActiveChange: (Boolean) -> Unit = {},
     onOpenTool: (String) -> Unit,
+    onOpenScanner: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val headerState = rememberSmoothHeaderScrollState()
@@ -98,6 +103,12 @@ fun ToolboxHomeScreen(
                 title = "Base64 编解码",
                 subtitle = "长文本分段换行、行号定位与双指缩放",
                 icon = Icons.Rounded.Code
+            ),
+            "qr" to ToolboxModule(
+                id = "qr",
+                title = "二维码",
+                subtitle = "生成美化、保存相册与相册识别",
+                icon = Icons.Rounded.QrCode2
             )
         )
     }
@@ -122,8 +133,17 @@ fun ToolboxHomeScreen(
             .nestedScroll(headerState.nestedScrollConnection)
     ) {
         SmoothCollapsingHeader(
-            title = "工具箱",
-            collapseProgress = headerState.progress
+            title = "主页",
+            collapseProgress = headerState.progress,
+            trailingAction = {
+                IconButton(onClick = onOpenScanner, modifier = Modifier.liquidPress()) {
+                    Icon(
+                        imageVector = Icons.Rounded.QrCodeScanner,
+                        contentDescription = "扫描二维码",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
         )
 
         LazyVerticalGrid(
@@ -177,16 +197,19 @@ fun ToolboxHomeScreen(
                             detectDragGesturesAfterLongPress(
                                 onDragStart = {
                                     draggedId = tool.id
+                                    onDragActiveChange(true)
                                     dragOffset = Offset.Zero
                                     lastSwapTimeMs = 0L
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 },
                                 onDragEnd = {
                                     draggedId = null
+                                    onDragActiveChange(false)
                                     dragOffset = Offset.Zero
                                 },
                                 onDragCancel = {
                                     draggedId = null
+                                    onDragActiveChange(false)
                                     dragOffset = Offset.Zero
                                 },
                                 onDrag = { change, dragAmount ->

@@ -3,6 +3,13 @@ package com.toolbox.pocket.ui.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +33,7 @@ import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.SwapVert
@@ -34,7 +42,10 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -67,6 +78,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.toolbox.pocket.data.AppSettings
@@ -85,6 +97,8 @@ import kotlin.math.roundToInt
 @Composable
 fun Base64Screen(
     appSettings: AppSettings,
+    onDefaultLineNumbersChange: (Boolean) -> Unit,
+    onDefaultSoftWrapChange: (Boolean) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -106,8 +120,12 @@ fun Base64Screen(
 
     var showLineNumbers by rememberSaveable { mutableStateOf(appSettings.defaultShowLineNumbers) }
     var softWrap by rememberSaveable { mutableStateOf(appSettings.defaultSoftWrap) }
+    var inputFontSizeSp by rememberSaveable { mutableFloatStateOf(14f) }
     var fontSizeSp by rememberSaveable { mutableFloatStateOf(14f) }
+    var inputLiveScale by remember { mutableFloatStateOf(1f) }
+    val latestInputFontSize by rememberUpdatedState(inputFontSizeSp)
     var isFullScreenReader by rememberSaveable { mutableStateOf(false) }
+    var showOptionsMenu by remember { mutableStateOf(false) }
 
     // Resizable box heights (dp) via bottom-right drag handle
     var topBoxHeightDp by rememberSaveable { mutableFloatStateOf(170f) }
@@ -158,6 +176,75 @@ fun Base64Screen(
                         )
                     }
                 },
+                actions = {
+                    Box {
+                        IconButton(onClick = { showOptionsMenu = true }) {
+                            Icon(
+                                imageVector = Icons.Rounded.MoreVert,
+                                contentDescription = "选项"
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showOptionsMenu,
+                            onDismissRequest = { showOptionsMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("编码模式：${variant.label}", maxLines = 1, softWrap = false) },
+                                onClick = {
+                                    variant = if (variant == Base64Variant.STANDARD) {
+                                        Base64Variant.URL_SAFE
+                                    } else {
+                                        Base64Variant.STANDARD
+                                    }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("编码分段：${wrapWidth.label}", maxLines = 1, softWrap = false) },
+                                onClick = {
+                                    val entries = LineWrapWidth.entries
+                                    wrapWidth = entries[(entries.indexOf(wrapWidth) + 1) % entries.size]
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("保留原换行", maxLines = 1, softWrap = false) },
+                                trailingIcon = {
+                                    Checkbox(checked = preserveParagraphs, onCheckedChange = null)
+                                },
+                                onClick = { preserveParagraphs = !preserveParagraphs }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("JSON 自动排版", maxLines = 1, softWrap = false) },
+                                trailingIcon = {
+                                    Checkbox(checked = autoFormatJson, onCheckedChange = null)
+                                },
+                                onClick = { autoFormatJson = !autoFormatJson }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("显示行号（默认）", maxLines = 1, softWrap = false) },
+                                trailingIcon = {
+                                    Checkbox(checked = showLineNumbers, onCheckedChange = null)
+                                },
+                                onClick = {
+                                    val next = !showLineNumbers
+                                    showLineNumbers = next
+                                    onDefaultLineNumbersChange(next)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("自动换行（默认）", maxLines = 1, softWrap = false) },
+                                trailingIcon = {
+                                    Checkbox(checked = softWrap, onCheckedChange = null)
+                                },
+                                onClick = {
+                                    val next = !softWrap
+                                    softWrap = next
+                                    onDefaultSoftWrapChange(next)
+                                }
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = Color.Transparent
                 )
@@ -172,53 +259,7 @@ fun Base64Screen(
                 .padding(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Compact format & view chips
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterChip(
-                    selected = variant == Base64Variant.URL_SAFE,
-                    onClick = {
-                        variant = if (variant == Base64Variant.STANDARD) {
-                            Base64Variant.URL_SAFE
-                        } else {
-                            Base64Variant.STANDARD
-                        }
-                    },
-                    label = { Text(variant.label) }
-                )
-                FilterChip(
-                    selected = wrapWidth != LineWrapWidth.NONE,
-                    onClick = {
-                        val entries = LineWrapWidth.entries
-                        wrapWidth = entries[(entries.indexOf(wrapWidth) + 1) % entries.size]
-                    },
-                    label = { Text(wrapWidth.label) }
-                )
-                FilterChip(
-                    selected = preserveParagraphs,
-                    onClick = { preserveParagraphs = !preserveParagraphs },
-                    label = { Text("保留换行") }
-                )
-                FilterChip(
-                    selected = autoFormatJson,
-                    onClick = { autoFormatJson = !autoFormatJson },
-                    label = { Text("JSON 排版") }
-                )
-                FilterChip(
-                    selected = showLineNumbers,
-                    onClick = { showLineNumbers = !showLineNumbers },
-                    label = { Text("行号") }
-                )
-                FilterChip(
-                    selected = softWrap,
-                    onClick = { softWrap = !softWrap },
-                    label = { Text(if (softWrap) "自动换行" else "横向滚动") }
-                )
-            }
+
 
             // Top Input Card (with bottom-right resize handle)
             Surface(
@@ -247,7 +288,28 @@ fun Base64Screen(
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.primary
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${(((inputFontSizeSp * inputLiveScale).coerceIn(1.4f, 56f) / 14f) * 100f).roundToInt()}%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(end = 2.dp)
+                                )
+                                if (inputFontSizeSp != 14f) {
+                                    IconButton(
+                                        onClick = { inputFontSizeSp = 14f },
+                                        modifier = Modifier.size(30.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.RestartAlt,
+                                            contentDescription = "重置输入缩放",
+                                            modifier = Modifier.size(17.dp)
+                                        )
+                                    }
+                                }
                                 IconButton(
                                     onClick = {
                                         val clip = clipboardManager.getText()?.text
@@ -280,22 +342,57 @@ fun Base64Screen(
                             }
                         }
 
-                        OutlinedTextField(
-                            value = topText,
-                            onValueChange = { topText = it },
-                            placeholder = { Text("输入或粘贴需要处理的长文本...") },
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = visuals.innerFieldColor,
-                                unfocusedContainerColor = visuals.innerFieldColor
-                            ),
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
-                        )
+                                .pointerInput(Unit) {
+                                    awaitEachGesture {
+                                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                        var pinched = false
+                                        do {
+                                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                                            if (event.changes.count { it.pressed } >= 2) {
+                                                val zoom = event.calculateZoom()
+                                                if (zoom != 1f) {
+                                                    pinched = true
+                                                    val minR = 1.4f / latestInputFontSize
+                                                    val maxR = 56f / latestInputFontSize
+                                                    inputLiveScale = (inputLiveScale * zoom).coerceIn(minR, maxR)
+                                                }
+                                                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                            }
+                                        } while (event.changes.any { it.pressed })
+                                        if (pinched) {
+                                            inputFontSizeSp = (latestInputFontSize * inputLiveScale).coerceIn(1.4f, 56f)
+                                            inputLiveScale = 1f
+                                        }
+                                    }
+                                }
+                        ) {
+                            OutlinedTextField(
+                                value = topText,
+                                onValueChange = { topText = it },
+                                placeholder = { Text("输入或粘贴需要处理的长文本...") },
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = inputFontSizeSp.sp,
+                                    lineHeight = (inputFontSizeSp * 1.45f).sp
+                                ),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = visuals.innerFieldColor,
+                                    unfocusedContainerColor = visuals.innerFieldColor
+                                ),
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        scaleX = inputLiveScale
+                                        scaleY = inputLiveScale
+                                        transformOrigin = TransformOrigin(0f, 0f)
+                                    }
+                            )
+                        }
                     }
 
                     ResizeCornerHandle(

@@ -71,7 +71,8 @@ fun rememberSmoothHeaderScrollState(): SmoothHeaderScrollState {
 fun SmoothCollapsingHeader(
     title: String,
     collapseProgress: Float,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    trailingAction: (@Composable () -> Unit)? = null
 ) {
     val headerHeight = lerp(82.dp, 48.dp, collapseProgress)
     val scale = 1f - (0.24f * collapseProgress) // 1.0 -> 0.76 smoothly
@@ -91,6 +92,7 @@ fun SmoothCollapsingHeader(
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             modifier = Modifier
+                .align(Alignment.BottomStart)
                 .padding(bottom = lerp(12.dp, 10.dp, collapseProgress))
                 .graphicsLayer {
                     scaleX = scale
@@ -98,5 +100,14 @@ fun SmoothCollapsingHeader(
                     transformOrigin = TransformOrigin(0f, 0.5f)
                 }
         )
+        if (trailingAction != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = lerp(4.dp, 2.dp, collapseProgress))
+            ) {
+                trailingAction()
+            }
+        }
     }
 }

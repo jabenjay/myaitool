@@ -36,7 +36,7 @@ data class AppSettings(
     val defaultShowLineNumbers: Boolean = true,
     val defaultSoftWrap: Boolean = true,
     val homeColumns: Int = 1,
-    val toolOrder: List<String> = listOf("browser", "base64"),
+    val toolOrder: List<String> = listOf("browser", "base64", "qr"),
     val backgroundImagePath: String? = null,
     val backgroundBlurDp: Float = 12f,
     val backgroundVersion: Int = 0,
@@ -87,10 +87,10 @@ class ThemePreferences(private val context: Context) {
             defaultShowLineNumbers = prefs.getBoolean(KEY_LINE_NUMBERS, true),
             defaultSoftWrap = prefs.getBoolean(KEY_SOFT_WRAP, true),
             homeColumns = prefs.getInt(KEY_HOME_COLUMNS, 1).coerceIn(1, 4),
-            toolOrder = (prefs.getString(KEY_TOOL_ORDER, "browser,base64") ?: "browser,base64")
+            toolOrder = (prefs.getString(KEY_TOOL_ORDER, "browser,base64,qr") ?: "browser,base64,qr")
                 .split(",")
                 .filter { it.isNotBlank() }
-                .ifEmpty { listOf("browser", "base64") },
+                .ifEmpty { listOf("browser", "base64", "qr") },
             backgroundImagePath = bgPath,
             backgroundBlurDp = prefs.getFloat(KEY_BG_BLUR, 12f),
             backgroundVersion = prefs.getInt(KEY_BG_VERSION, 0),

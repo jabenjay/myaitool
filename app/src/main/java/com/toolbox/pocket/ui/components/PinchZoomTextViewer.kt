@@ -65,8 +65,8 @@ fun PinchZoomTextViewer(
     softWrap: Boolean,
     placeholder: String,
     modifier: Modifier = Modifier,
-    minFontSizeSp: Float = 8f,
-    maxFontSizeSp: Float = 32f,
+    minFontSizeSp: Float = 1.4f,
+    maxFontSizeSp: Float = 56f,
     baseFontSizeSp: Float = 14f
 ) {
     var livePinchScale by remember { mutableFloatStateOf(1f) }

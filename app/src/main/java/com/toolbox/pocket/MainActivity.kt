@@ -38,9 +38,11 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Build
+import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -53,8 +55,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -67,7 +71,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import android.net.Uri
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
+import androidx.navigation.navArgument
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
@@ -78,16 +85,20 @@ import com.toolbox.pocket.data.ThemeMode
 import com.toolbox.pocket.data.ThemePreferences
 import com.toolbox.pocket.ui.screens.Base64Screen
 import com.toolbox.pocket.ui.screens.BrowserScreen
+import com.toolbox.pocket.ui.screens.LayoutSettingsScreen
 import com.toolbox.pocket.ui.screens.LogViewerScreen
 import com.toolbox.pocket.ui.screens.ProxySettingsScreen
+import com.toolbox.pocket.ui.screens.QrScannerScreen
+import com.toolbox.pocket.ui.screens.QrToolScreen
 import com.toolbox.pocket.ui.screens.SettingsScreen
+import com.toolbox.pocket.ui.screens.ThemeSettingsScreen
 import com.toolbox.pocket.ui.screens.ToolboxHomeScreen
 import com.toolbox.pocket.ui.theme.LocalAppThemeVisuals
 import com.toolbox.pocket.ui.theme.PocketToolboxTheme
 import com.toolbox.pocket.ui.theme.liquidGlassSurface
 import com.toolbox.pocket.ui.theme.liquidPress
-import androidx.compose.ui.graphics.Color as ComposeColor
 import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.Color as ComposeColor
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -154,16 +165,19 @@ fun PocketToolboxApp(
     val proxyState by proxyManager.state.collectAsState()
     val gfwRuleState by gfwRuleManager.state.collectAsState()
     val bookmarks by bookmarkManager.bookmarks.collectAsState()
+    val visuals = LocalAppThemeVisuals.current
     val appScope = rememberCoroutineScope()
+
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
+    var isHomeDragging by remember { mutableStateOf(false) }
+
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = backStackEntry?.destination?.route
+    val showBottomBar = currentRoute == "main"
 
     LaunchedEffect(Unit) {
         gfwRuleManager.updateRulesOnStartup()
     }
-    val visuals = LocalAppThemeVisuals.current
-    val backStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = backStackEntry?.destination?.route
-
-    val showBottomBar = currentRoute == "home" || currentRoute == "settings"
 
     val bgBitmap = remember(settings.backgroundImagePath, settings.backgroundVersion) {
         settings.backgroundImagePath?.let { path ->
@@ -172,7 +186,7 @@ fun PocketToolboxApp(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Layer 1: Custom wallpaper OR clean iOS-style ambient backdrop OR solid M3 surface
+        // Layer 1: Background
         if (bgBitmap != null) {
             Image(
                 bitmap = bgBitmap,
@@ -181,11 +195,7 @@ fun PocketToolboxApp(
                 modifier = Modifier
                     .fillMaxSize()
                     .let { mod ->
-                        if (settings.backgroundBlurDp > 0f) {
-                            mod.blur(settings.backgroundBlurDp.dp)
-                        } else {
-                            mod
-                        }
+                        if (settings.backgroundBlurDp > 0f) mod.blur(settings.backgroundBlurDp.dp) else mod
                     }
             )
             Box(
@@ -198,22 +208,13 @@ fun PocketToolboxApp(
                     )
             )
         } else if (visuals.isLiquidGlass) {
-            // Crisp iOS-like neutral sky/aurora backdrop so crystal white/dark glass stands out
             Canvas(modifier = Modifier.fillMaxSize()) {
                 drawRect(
                     brush = Brush.verticalGradient(
                         colors = if (visuals.isDark) {
-                            listOf(
-                                ComposeColor(0xFF0A0D14),
-                                ComposeColor(0xFF101828),
-                                ComposeColor(0xFF090B10)
-                            )
+                            listOf(ComposeColor(0xFF0A0D14), ComposeColor(0xFF101828), ComposeColor(0xFF090B10))
                         } else {
-                            listOf(
-                                ComposeColor(0xFFD6E6FA),
-                                ComposeColor(0xFFE7EFFA),
-                                ComposeColor(0xFFDCE6F4)
-                            )
+                            listOf(ComposeColor(0xFFD6E6FA), ComposeColor(0xFFE7EFFA), ComposeColor(0xFFDCE6F4))
                         }
                     )
                 )
@@ -250,125 +251,184 @@ fun PocketToolboxApp(
             )
         }
 
-        // Layer 2: Full-bleed NavHost + overlaid floating oval dock when in Liquid Glass mode
-        if (visuals.isLiquidGlass) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                val floatingDockPadding = if (showBottomBar) 92.dp else 0.dp
-                NavHost(
-                    navController = navController,
-                    startDestination = "home",
-                    modifier = Modifier.fillMaxSize(),
-                    enterTransition = {
-                        slideIntoContainer(
-                            towards = AnimatedContentTransitionScope.SlideDirection.Left,
-                            animationSpec = spring(dampingRatio = 0.74f, stiffness = Spring.StiffnessMediumLow)
-                        ) + scaleIn(
-                            initialScale = 0.94f,
-                            animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
-                        ) + fadeIn(animationSpec = tween(220))
-                    },
-                    exitTransition = {
-                        scaleOut(targetScale = 0.96f, animationSpec = tween(180)) + fadeOut(animationSpec = tween(180))
-                    },
-                    popEnterTransition = {
-                        scaleIn(
-                            initialScale = 0.96f,
-                            animationSpec = spring(dampingRatio = 0.74f, stiffness = Spring.StiffnessMediumLow)
-                        ) + fadeIn(animationSpec = tween(220))
-                    },
-                    popExitTransition = {
-                        slideOutOfContainer(
-                            towards = AnimatedContentTransitionScope.SlideDirection.Right,
-                            animationSpec = spring(dampingRatio = 0.74f, stiffness = Spring.StiffnessMediumLow)
-                        ) + scaleOut(targetScale = 0.94f, animationSpec = tween(200)) + fadeOut(animationSpec = tween(200))
-                    }
-                ) {
-                    composable("home") {
-                        ToolboxHomeScreen(
-                            homeColumns = settings.homeColumns,
-                            toolOrder = settings.toolOrder,
-                            onMoveTool = { from, to -> themePreferences.moveTool(from, to) },
-                            bottomExtraPadding = floatingDockPadding,
-                            onOpenTool = { toolId ->
-                                when (toolId) {
-                                    "base64" -> navController.navigate("tool/base64")
-                                    "browser" -> navController.navigate("tool/browser")
+        // Layer 2: Navigation & Screens
+        val contentHost: @Composable (Modifier) -> Unit = { hostModifier ->
+            NavHost(
+                navController = navController,
+                startDestination = "main",
+                modifier = hostModifier,
+                enterTransition = {
+                    slideIntoContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Left,
+                        animationSpec = spring(dampingRatio = 0.76f, stiffness = Spring.StiffnessMediumLow)
+                    ) + scaleIn(
+                        initialScale = 0.95f,
+                        animationSpec = spring(dampingRatio = 0.74f, stiffness = Spring.StiffnessMediumLow)
+                    ) + fadeIn(animationSpec = tween(220))
+                },
+                exitTransition = {
+                    scaleOut(targetScale = 0.96f, animationSpec = tween(180)) + fadeOut(animationSpec = tween(180))
+                },
+                popEnterTransition = {
+                    scaleIn(
+                        initialScale = 0.96f,
+                        animationSpec = spring(dampingRatio = 0.76f, stiffness = Spring.StiffnessMediumLow)
+                    ) + fadeIn(animationSpec = tween(220))
+                },
+                popExitTransition = {
+                    slideOutOfContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Right,
+                        animationSpec = spring(dampingRatio = 0.76f, stiffness = Spring.StiffnessMediumLow)
+                    ) + scaleOut(targetScale = 0.95f, animationSpec = tween(200)) + fadeOut(animationSpec = tween(200))
+                }
+            ) {
+                composable("main") {
+                    val dockExtraPadding = if (visuals.isLiquidGlass) 92.dp else 0.dp
+                    HorizontalPager(
+                        state = pagerState,
+                        userScrollEnabled = !isHomeDragging,
+                        modifier = Modifier.fillMaxSize()
+                    ) { page ->
+                        when (page) {
+                            0 -> ToolboxHomeScreen(
+                                homeColumns = settings.homeColumns,
+                                toolOrder = settings.toolOrder,
+                                bottomExtraPadding = dockExtraPadding,
+                                onMoveTool = { from, to -> themePreferences.moveTool(from, to) },
+                                onDragActiveChange = { active -> isHomeDragging = active },
+                                onOpenScanner = { navController.navigate("tool/qr_scanner") },
+                                onOpenTool = { toolId ->
+                                    when (toolId) {
+                                        "base64" -> navController.navigate("tool/base64")
+                                        "browser" -> navController.navigate("tool/browser")
+                                        "qr" -> navController.navigate("tool/qr")
+                                    }
                                 }
-                            }
-                        )
-                    }
-                    composable("tool/base64") {
-                        Base64Screen(
-                            appSettings = settings,
-                            onBack = { navController.popBackStack() }
-                        )
-                    }
-                    composable(
-                        "tool/browser",
-                        enterTransition = { fadeIn(tween(180)) },
-                        exitTransition = { fadeOut(tween(150)) }
-                    ) {
-                        BrowserScreen(
-                            bookmarks = bookmarks,
-                            onAddBookmark = { n, u -> bookmarkManager.addBookmark(n, u) },
-                            onUpdateBookmark = { id, n, u -> bookmarkManager.updateBookmark(id, n, u) },
-                            onDeleteBookmark = { id -> bookmarkManager.deleteBookmark(id) },
-                            onMoveBookmark = { from, to -> bookmarkManager.moveBookmark(from, to) },
-                            onExit = { navController.popBackStack() }
-                        )
-                    }
-                    composable("settings") {
-                        SettingsScreen(
-                            settings = settings,
-                            proxyState = proxyState,
-                            bottomExtraPadding = floatingDockPadding,
-                            onOpenProxySettings = { navController.navigate("settings/proxy") },
-                            onOpenLogs = { navController.navigate("settings/logs") },
-                            onThemeModeChange = { themePreferences.setThemeMode(it) },
-                            onUiStyleChange = { themePreferences.setUiStyle(it) },
-                            onM3ColorSourceChange = { themePreferences.setM3ColorSource(it) },
-                            onGlassOpacityChange = { themePreferences.setGlassOpacity(it) },
-                            onHomeColumnsChange = { themePreferences.setHomeColumns(it) },
-                            onBackgroundPicked = { uri -> themePreferences.saveBackgroundImage(uri) },
-                            onClearBackground = { themePreferences.clearBackgroundImage() },
-                            onBackgroundBlurChange = { blur -> themePreferences.setBackgroundBlur(blur) },
-                            onDefaultLineNumbersChange = { themePreferences.setDefaultLineNumbers(it) },
-                            onDefaultSoftWrapChange = { themePreferences.setDefaultSoftWrap(it) }
-                        )
-                    }
-                    composable("settings/logs") {
-                        LogViewerScreen(onBack = { navController.popBackStack() })
-                    }
-                    composable("settings/proxy") {
-                        ProxySettingsScreen(
-                            proxyState = proxyState,
-                            gfwRuleState = gfwRuleState,
-                            onBack = { navController.popBackStack() },
-                            onProxyToggle = { proxyManager.setEnabled(it) },
-                            onSelectProxy = { proxyManager.selectNode(it) },
-                            onAddProxy = { proxyManager.addNode(it) },
-                            onDeleteProxy = { proxyManager.deleteNode(it) },
-                            onTestNode = { proxyManager.testNode(it) },
-                            onTestAllNodes = { proxyManager.testAllNodes() },
-                            onRefreshGfwRules = { appScope.launch { gfwRuleManager.updateRulesOnStartup() } }
-                        )
+                            )
+                            else -> SettingsScreen(
+                                settings = settings,
+                                proxyState = proxyState,
+                                bottomExtraPadding = dockExtraPadding,
+                                onOpenThemeSettings = { navController.navigate("settings/theme") },
+                                onOpenLayoutSettings = { navController.navigate("settings/layout") },
+                                onOpenProxySettings = { navController.navigate("settings/proxy") },
+                                onOpenLogs = { navController.navigate("settings/logs") }
+                            )
+                        }
                     }
                 }
+                composable("tool/base64") {
+                    Base64Screen(
+                        appSettings = settings,
+                        onDefaultLineNumbersChange = { themePreferences.setDefaultLineNumbers(it) },
+                        onDefaultSoftWrapChange = { themePreferences.setDefaultSoftWrap(it) },
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+                composable(
+                    route = "tool/browser?url={url}",
+                    arguments = listOf(
+                        navArgument("url") {
+                            type = NavType.StringType
+                            defaultValue = ""
+                        }
+                    ),
+                    enterTransition = { fadeIn(tween(180)) },
+                    exitTransition = { fadeOut(tween(150)) }
+                ) { entry ->
+                    val argUrl = entry.arguments?.getString("url").orEmpty()
+                    val decodedUrl = if (argUrl.isNotEmpty()) Uri.decode(argUrl) else ""
+                    BrowserScreen(
+                        initialUrl = decodedUrl.ifBlank { "https://cn.pornhub.com/" },
+                        bookmarks = bookmarks,
+                        onAddBookmark = { n, u -> bookmarkManager.addBookmark(n, u) },
+                        onUpdateBookmark = { id, n, u -> bookmarkManager.updateBookmark(id, n, u) },
+                        onDeleteBookmark = { id -> bookmarkManager.deleteBookmark(id) },
+                        onMoveBookmark = { from, to -> bookmarkManager.moveBookmark(from, to) },
+                        onExit = { navController.popBackStack() }
+                    )
+                }
+                composable(
+                    "tool/qr_scanner",
+                    enterTransition = { fadeIn(tween(180)) },
+                    exitTransition = { fadeOut(tween(150)) }
+                ) {
+                    QrScannerScreen(
+                        onResult = { scanned ->
+                            val encoded = Uri.encode(scanned)
+                            navController.navigate("tool/browser?url=$encoded") {
+                                popUpTo("tool/qr_scanner") { inclusive = true }
+                            }
+                        },
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+                composable("tool/qr") {
+                    QrToolScreen(
+                        onOpenCameraScan = { navController.navigate("tool/qr_scanner") },
+                        onOpenInBrowser = { content ->
+                            val encoded = Uri.encode(content)
+                            navController.navigate("tool/browser?url=$encoded")
+                        },
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+                composable("settings/theme") {
+                    ThemeSettingsScreen(
+                        settings = settings,
+                        onBack = { navController.popBackStack() },
+                        onThemeModeChange = { themePreferences.setThemeMode(it) },
+                        onUiStyleChange = { themePreferences.setUiStyle(it) },
+                        onM3ColorSourceChange = { themePreferences.setM3ColorSource(it) },
+                        onGlassOpacityChange = { themePreferences.setGlassOpacity(it) },
+                        onBackgroundPicked = { uri -> themePreferences.saveBackgroundImage(uri) },
+                        onClearBackground = { themePreferences.clearBackgroundImage() },
+                        onBackgroundBlurChange = { blur -> themePreferences.setBackgroundBlur(blur) }
+                    )
+                }
+                composable("settings/layout") {
+                    LayoutSettingsScreen(
+                        settings = settings,
+                        onBack = { navController.popBackStack() },
+                        onHomeColumnsChange = { themePreferences.setHomeColumns(it) }
+                    )
+                }
+                composable("settings/proxy") {
+                    ProxySettingsScreen(
+                        proxyState = proxyState,
+                        gfwRuleState = gfwRuleState,
+                        onBack = { navController.popBackStack() },
+                        onProxyToggle = { proxyManager.setEnabled(it) },
+                        onSelectProxy = { proxyManager.selectNode(it) },
+                        onAddProxy = { proxyManager.addNode(it) },
+                        onDeleteProxy = { proxyManager.deleteNode(it) },
+                        onTestNode = { proxyManager.testNode(it) },
+                        onTestAllNodes = { proxyManager.testAllNodes() },
+                        onRefreshGfwRules = { appScope.launch { gfwRuleManager.updateRulesOnStartup() } }
+                    )
+                }
+                composable("settings/logs") {
+                    LogViewerScreen(onBack = { navController.popBackStack() })
+                }
+            }
+        }
 
+        if (visuals.isLiquidGlass) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                contentHost(Modifier.fillMaxSize())
                 if (showBottomBar) {
                     LiquidGlassFloatingOvalDock(
-                        currentRoute = currentRoute,
-                        onSelectRoute = { route ->
-                            if (route == "home") {
-                                navController.navigate("home") {
-                                    popUpTo("home") { inclusive = true }
-                                    launchSingleTop = true
-                                }
-                            } else {
-                                navController.navigate("settings") {
-                                    popUpTo("home")
-                                    launchSingleTop = true
-                                }
+                        selectedIndex = pagerState.currentPage,
+                        pageOffsetFraction = pagerState.currentPageOffsetFraction,
+                        onSelectPage = { page ->
+                            appScope.launch {
+                                pagerState.animateScrollToPage(
+                                    page = page,
+                                    animationSpec = spring(
+                                        dampingRatio = 0.78f,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                )
                             }
                         },
                         modifier = Modifier.align(Alignment.BottomCenter)
@@ -389,23 +449,17 @@ fun PocketToolboxApp(
                             }
                         ) {
                             NavigationBarItem(
-                                selected = currentRoute == "home",
+                                selected = pagerState.currentPage == 0,
                                 onClick = {
-                                    navController.navigate("home") {
-                                        popUpTo("home") { inclusive = true }
-                                        launchSingleTop = true
-                                    }
+                                    appScope.launch { pagerState.animateScrollToPage(0) }
                                 },
-                                icon = { Icon(Icons.Rounded.Build, contentDescription = "工具箱") },
-                                label = { Text("工具箱") }
+                                icon = { Icon(Icons.Rounded.Home, contentDescription = "主页") },
+                                label = { Text("主页") }
                             )
                             NavigationBarItem(
-                                selected = currentRoute == "settings",
+                                selected = pagerState.currentPage == 1,
                                 onClick = {
-                                    navController.navigate("settings") {
-                                        popUpTo("home")
-                                        launchSingleTop = true
-                                    }
+                                    appScope.launch { pagerState.animateScrollToPage(1) }
                                 },
                                 icon = { Icon(Icons.Rounded.Settings, contentDescription = "设置") },
                                 label = { Text("设置") }
@@ -414,98 +468,7 @@ fun PocketToolboxApp(
                     }
                 }
             ) { innerPadding ->
-                NavHost(
-                    navController = navController,
-                    startDestination = "home",
-                    modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding()),
-                    enterTransition = {
-                        slideIntoContainer(
-                            towards = AnimatedContentTransitionScope.SlideDirection.Left,
-                            animationSpec = tween(220)
-                        ) + fadeIn(animationSpec = tween(220))
-                    },
-                    exitTransition = {
-                        fadeOut(animationSpec = tween(160))
-                    },
-                    popEnterTransition = {
-                        fadeIn(animationSpec = tween(200))
-                    },
-                    popExitTransition = {
-                        slideOutOfContainer(
-                            towards = AnimatedContentTransitionScope.SlideDirection.Right,
-                            animationSpec = tween(220)
-                        ) + fadeOut(animationSpec = tween(200))
-                    }
-                ) {
-                    composable("home") {
-                        ToolboxHomeScreen(
-                            homeColumns = settings.homeColumns,
-                            toolOrder = settings.toolOrder,
-                            onMoveTool = { from, to -> themePreferences.moveTool(from, to) },
-                            onOpenTool = { toolId ->
-                                when (toolId) {
-                                    "base64" -> navController.navigate("tool/base64")
-                                    "browser" -> navController.navigate("tool/browser")
-                                }
-                            }
-                        )
-                    }
-                    composable("tool/base64") {
-                        Base64Screen(
-                            appSettings = settings,
-                            onBack = { navController.popBackStack() }
-                        )
-                    }
-                    composable(
-                        "tool/browser",
-                        enterTransition = { fadeIn(tween(180)) },
-                        exitTransition = { fadeOut(tween(150)) }
-                    ) {
-                        BrowserScreen(
-                            bookmarks = bookmarks,
-                            onAddBookmark = { n, u -> bookmarkManager.addBookmark(n, u) },
-                            onUpdateBookmark = { id, n, u -> bookmarkManager.updateBookmark(id, n, u) },
-                            onDeleteBookmark = { id -> bookmarkManager.deleteBookmark(id) },
-                            onMoveBookmark = { from, to -> bookmarkManager.moveBookmark(from, to) },
-                            onExit = { navController.popBackStack() }
-                        )
-                    }
-                    composable("settings") {
-                        SettingsScreen(
-                            settings = settings,
-                            proxyState = proxyState,
-                            onOpenProxySettings = { navController.navigate("settings/proxy") },
-                            onOpenLogs = { navController.navigate("settings/logs") },
-                            onThemeModeChange = { themePreferences.setThemeMode(it) },
-                            onUiStyleChange = { themePreferences.setUiStyle(it) },
-                            onM3ColorSourceChange = { themePreferences.setM3ColorSource(it) },
-                            onGlassOpacityChange = { themePreferences.setGlassOpacity(it) },
-                            onHomeColumnsChange = { themePreferences.setHomeColumns(it) },
-                            onBackgroundPicked = { uri -> themePreferences.saveBackgroundImage(uri) },
-                            onClearBackground = { themePreferences.clearBackgroundImage() },
-                            onBackgroundBlurChange = { blur -> themePreferences.setBackgroundBlur(blur) },
-                            onDefaultLineNumbersChange = { themePreferences.setDefaultLineNumbers(it) },
-                            onDefaultSoftWrapChange = { themePreferences.setDefaultSoftWrap(it) }
-                        )
-                    }
-                    composable("settings/logs") {
-                        LogViewerScreen(onBack = { navController.popBackStack() })
-                    }
-                    composable("settings/proxy") {
-                        ProxySettingsScreen(
-                            proxyState = proxyState,
-                            gfwRuleState = gfwRuleState,
-                            onBack = { navController.popBackStack() },
-                            onProxyToggle = { proxyManager.setEnabled(it) },
-                            onSelectProxy = { proxyManager.selectNode(it) },
-                            onAddProxy = { proxyManager.addNode(it) },
-                            onDeleteProxy = { proxyManager.deleteNode(it) },
-                            onTestNode = { proxyManager.testNode(it) },
-                            onTestAllNodes = { proxyManager.testAllNodes() },
-                            onRefreshGfwRules = { appScope.launch { gfwRuleManager.updateRulesOnStartup() } }
-                        )
-                    }
-                }
+                contentHost(Modifier.padding(bottom = innerPadding.calculateBottomPadding()))
             }
         }
     }
@@ -513,12 +476,12 @@ fun PocketToolboxApp(
 
 @Composable
 private fun LiquidGlassFloatingOvalDock(
-    currentRoute: String?,
-    onSelectRoute: (String) -> Unit,
+    selectedIndex: Int,
+    pageOffsetFraction: Float,
+    onSelectPage: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val visuals = LocalAppThemeVisuals.current
-    val selectedIndex = if (currentRoute == "settings") 1 else 0
 
     Box(
         modifier = modifier
@@ -542,14 +505,9 @@ private fun LiquidGlassFloatingOvalDock(
                     .padding(4.dp)
             ) {
                 val pillWidth = maxWidth / 2
-                val indicatorOffset by animateDpAsState(
-                    targetValue = if (selectedIndex == 0) 0.dp else pillWidth,
-                    animationSpec = spring(
-                        dampingRatio = 0.56f,
-                        stiffness = Spring.StiffnessMediumLow
-                    ),
-                    label = "liquidDockOffset"
-                )
+                // Track live HorizontalPager swipe offset 1:1
+                val fraction = (selectedIndex + pageOffsetFraction).coerceIn(0f, 1f)
+                val indicatorOffset = pillWidth * fraction
 
                 Box(
                     modifier = Modifier
@@ -566,10 +524,10 @@ private fun LiquidGlassFloatingOvalDock(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     LiquidGlassDockItem(
-                        label = "工具箱",
-                        icon = Icons.Rounded.Build,
+                        label = "主页",
+                        icon = Icons.Rounded.Home,
                         selected = selectedIndex == 0,
-                        onClick = { onSelectRoute("home") },
+                        onClick = { onSelectPage(0) },
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
@@ -578,7 +536,7 @@ private fun LiquidGlassFloatingOvalDock(
                         label = "设置",
                         icon = Icons.Rounded.Settings,
                         selected = selectedIndex == 1,
-                        onClick = { onSelectRoute("settings") },
+                        onClick = { onSelectPage(1) },
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
