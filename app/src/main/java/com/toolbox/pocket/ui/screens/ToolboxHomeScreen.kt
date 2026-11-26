@@ -6,6 +6,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -154,14 +155,7 @@ fun ToolboxHomeScreen(
                     label = "toolFloatScale"
                 )
 
-                Card(
-                    onClick = { if (draggedId == null) onOpenTool(tool.id) },
-                    interactionSource = interactionSource,
-                    shape = RoundedCornerShape(corner),
-                    colors = CardDefaults.cardColors(
-                        containerColor = visuals.cardContainerColor,
-                        contentColor = visuals.cardContentColor
-                    ),
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .zIndex(if (isDragging) 10f else 0f)
@@ -208,6 +202,17 @@ fun ToolboxHomeScreen(
                                 }
                             )
                         }
+                ) {
+                Card(
+                    onClick = { if (draggedId == null) onOpenTool(tool.id) },
+                    interactionSource = interactionSource,
+                    shape = RoundedCornerShape(corner),
+                    colors = CardDefaults.cardColors(
+                        containerColor = visuals.cardContainerColor,
+                        contentColor = visuals.cardContentColor
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
                         .graphicsLayer {
                             if (isDragging) {
                                 translationX = dragOffset.x
@@ -311,6 +316,7 @@ fun ToolboxHomeScreen(
                             }
                         }
                     }
+                }
                 }
             }
         }
