@@ -11,6 +11,10 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -62,6 +66,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -70,6 +75,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -83,6 +89,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -129,6 +136,8 @@ fun BrowserScreen(
     var showBookmarks by remember { mutableStateOf(false) }
     var progress by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
+    var showLoadingOverlay by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) { kotlinx.coroutines.delay(6000); showLoadingOverlay = false }
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
 
@@ -317,6 +326,7 @@ fun BrowserScreen(
                         settings.displayZoomControls = false
                         settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                         settings.mediaPlaybackRequiresUserGesture = true
+                    setBackgroundColor(barBg.toArgb())
 
                         webViewClient = object : WebViewClient() {
                             override fun shouldOverrideUrlLoading(
@@ -336,8 +346,13 @@ fun BrowserScreen(
                                 canGoForward = view?.canGoForward() == true
                             }
 
+                            override fun onPageCommitVisible(view: WebView?, url: String?) {
+                                showLoadingOverlay = false
+                            }
+
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 isLoading = false
+                                showLoadingOverlay = false
                                 if (!url.isNullOrEmpty() && (url.startsWith("http://") || url.startsWith("https://"))) {
                                     urlInput = url
                                 }
@@ -367,7 +382,8 @@ fun BrowserScreen(
                         webChromeClient = object : WebChromeClient() {
                             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                                 progress = newProgress
-                                if (newProgress >= 100) isLoading = false
+                                if (newProgress >= 75) showLoadingOverlay = false
+                            if (newProgress >= 100) isLoading = false
                             }
                         }
 
@@ -378,6 +394,60 @@ fun BrowserScreen(
                 },
                 modifier = Modifier.fillMaxSize()
             )
+
+            // Themed loading animation page while WebView prepares first paint
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showLoadingOverlay,
+                enter = fadeIn(tween(150)),
+                exit = fadeOut(tween(260))
+            ) {
+                val infiniteTransition = rememberInfiniteTransition(label = "browserSplash")
+                val pulseScale by infiniteTransition.animateFloat(
+                    initialValue = 0.92f,
+                    targetValue = 1.08f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(900),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "pulseScale"
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(28.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier
+                                .size(76.dp)
+                                .graphicsLayer {
+                                    scaleX = pulseScale
+                                    scaleY = pulseScale
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(
+                                    color = MaterialTheme.colorScheme.primary,
+                                    strokeWidth = 3.dp,
+                                    modifier = Modifier.size(34.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = "正在加载页面...",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = barFg
+                        )
+                    }
+                }
+            }
 
             // Scrim to dismiss bookmark menu when tapping outside
             androidx.compose.animation.AnimatedVisibility(
