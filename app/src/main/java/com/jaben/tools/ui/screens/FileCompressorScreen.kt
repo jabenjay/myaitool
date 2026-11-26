@@ -375,11 +375,13 @@ fun FileCompressorScreen(
                     .then(if (visuals.isLiquidGlass) Modifier.liquidGlassSurface(22.dp) else Modifier)
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -401,17 +403,16 @@ fun FileCompressorScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(
-                            modifier = Modifier.width(74.dp),
                             horizontalAlignment = Alignment.Start
                         ) {
                             Text(
                                 text = "原文件",
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 color = visuals.cardContentColor.copy(alpha = 0.6f)
                             )
                             Text(
                                 text = sourceMeta?.let { formatBytes(it.sizeBytes) } ?: "--",
-                                fontSize = 13.sp,
+                                fontSize = 11.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1
                             )
@@ -435,22 +436,21 @@ fun FileCompressorScreen(
                             enabled = sourceMeta != null && !isCompressing,
                             modifier = Modifier
                                 .weight(1f)
-                                .padding(horizontal = 6.dp)
+                                .padding(horizontal = 2.dp)
                         )
 
                         Column(
-                            modifier = Modifier.width(74.dp),
                             horizontalAlignment = Alignment.End
                         ) {
                             Text(
-                                text = "预估大小",
-                                fontSize = 11.sp,
+                                text = "预估",
+                                fontSize = 10.sp,
                                 color = visuals.cardContentColor.copy(alpha = 0.6f),
                                 textAlign = TextAlign.End
                             )
                             Text(
                                 text = if (estimate != null) formatBytes(estimate.estimatedBytes) else "--",
-                                fontSize = 13.sp,
+                                fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isBelowFloor) warnColor else MaterialTheme.colorScheme.primary,
                                 maxLines = 1,
