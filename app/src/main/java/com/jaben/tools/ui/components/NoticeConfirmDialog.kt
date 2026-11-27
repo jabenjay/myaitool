@@ -20,6 +20,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.runtime.mutableIntStateOf
+import kotlinx.coroutines.delay
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -58,6 +61,19 @@ fun NoticeConfirmDialog(
     val context = LocalContext.current
     val scrollState = rememberScrollState()
     var hasReachedBottom by remember(item.contentHash) { mutableStateOf(false) }
+    var remainingSeconds by remember(item.contentHash) {
+        mutableIntStateOf(if (item.type == NoticeType.USAGE_NOTICE) 15 else 0)
+    }
+    var isAgreed by remember(item.contentHash) {
+        mutableStateOf(item.type != NoticeType.USAGE_NOTICE)
+    }
+
+    LaunchedEffect(item.contentHash) {
+        while (remainingSeconds > 0) {
+            delay(1000)
+            remainingSeconds--
+        }
+    }
 
     val donationCfg = remember(item) {
         if (item.type == NoticeType.USAGE_NOTICE) (item.donationConfig ?: NoticeDonationConfig()) else null
@@ -254,17 +270,47 @@ fun NoticeConfirmDialog(
                         )
                     }
                 }
+                if (item.type == NoticeType.USAGE_NOTICE) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    HorizontalDivider()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isAgreed = !isAgreed }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = isAgreed,
+                            onCheckedChange = { isAgreed = it }
+                        )
+                        Text(
+                            text = "我已完整阅读、充分理解并自愿同意上述全部条款",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            lineHeight = 18.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
+            val canAcknowledge = hasReachedBottom && remainingSeconds <= 0 && isAgreed
+            val btnText = when {
+                !hasReachedBottom -> if (remainingSeconds > 0) "请滑动阅读至末尾 (${remainingSeconds}s)" else "请滑动阅读至末尾"
+                !isAgreed -> if (remainingSeconds > 0) "请勾选同意条款 (${remainingSeconds}s)" else "请勾选同意条款"
+                remainingSeconds > 0 -> "我已知晓 (${remainingSeconds}s)"
+                else -> "我已知晓"
+            }
             Button(
-                enabled = hasReachedBottom,
+                enabled = canAcknowledge,
                 onClick = onAcknowledge,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = if (hasReachedBottom) "我已知晓" else "请滑动阅读至末尾",
+                    text = btnText,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 )
