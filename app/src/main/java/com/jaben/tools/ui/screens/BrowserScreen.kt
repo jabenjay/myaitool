@@ -1435,7 +1435,16 @@ fun BrowserScreen(
                                         if (next) "已开启广告屏蔽" else "已关闭广告屏蔽",
                                         Toast.LENGTH_SHORT
                                     ).show()
-                                    runCatching { webViewRef?.reload() }
+                                    runCatching {
+                                        webViewRef?.clearCache(true)
+                                        if (!next) {
+                                            webViewRef?.evaluateJavascript(
+                                                "document.getElementById('jools-adblock-style')?.remove();",
+                                                null
+                                            )
+                                        }
+                                        webViewRef?.reload()
+                                    }
                                 },
                                 onLongClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)

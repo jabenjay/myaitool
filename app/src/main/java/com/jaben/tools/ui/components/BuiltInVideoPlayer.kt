@@ -379,13 +379,20 @@ fun BuiltInVideoPlayerOverlay(
                             awaitFirstDown(requireUnconsumed = false)
                             isGestureActive = true
                             var moved = false
+                            var wasMultiTouch = false
+                            var totalPanDist = 0f
+                            val downTime = System.currentTimeMillis()
                             do {
                                 val event = awaitPointerEvent()
+                                if (event.changes.size > 1) wasMultiTouch = true
                                 val zoomChange = event.calculateZoom()
                                 val panChange = event.calculatePan()
 
                                 if (zoomChange != 1f || panChange.x != 0f || panChange.y != 0f) {
-                                    moved = true
+                                    totalPanDist += kotlin.math.hypot(panChange.x, panChange.y)
+                                    if (totalPanDist > 10f || zoomChange != 1f) {
+                                        moved = true
+                                    }
                                     if (zoomChange != 1f) {
                                         // Allow rubber-band overshoot beyond screen width up to 1.18x maxRestingScale
                                         val nextScale = (targetScale * zoomChange)
@@ -398,13 +405,21 @@ fun BuiltInVideoPlayerOverlay(
                                         targetOffsetY -= (newH - oldH) / 2f
                                         targetScale = nextScale
                                     }
-                                    targetOffsetX += panChange.x
-                                    targetOffsetY += panChange.y
-                                    event.changes.forEach { it.consume() }
+                                    if (moved) {
+                                        targetOffsetX += panChange.x
+                                        targetOffsetY += panChange.y
+                                        event.changes.forEach { it.consume() }
+                                    }
                                 }
                             } while (event.changes.any { it.pressed })
 
                             isGestureActive = false
+
+                            // Tap (no drag/zoom) -> toggle controls visibility
+                            if (!moved && !wasMultiTouch && (System.currentTimeMillis() - downTime) < 350L) {
+                                controlsVisible = !controlsVisible
+                                return@awaitEachGesture
+                            }
 
                             // 1. Snap scale back within [minScale, maxRestingScale] smoothly
                             val clampedScale = targetScale.coerceIn(minScale, maxRestingScale)
@@ -438,10 +453,6 @@ fun BuiltInVideoPlayerOverlay(
                             }
                         }
                     }
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { controlsVisible = !controlsVisible }
             }
 
             Box(modifier = playerBoxModifier) {
