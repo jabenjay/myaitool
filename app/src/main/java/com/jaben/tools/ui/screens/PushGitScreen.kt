@@ -141,6 +141,7 @@ fun PushGitScreen(
     var selectedWorkflow by remember { mutableStateOf<WorkflowInfo?>(null) }
     var workflowInputs by remember { mutableStateOf<List<WorkflowInputField>>(emptyList()) }
     val workflowInputValues = remember { mutableStateMapOf<String, String>() }
+    var showWorkflowPickerDialog by remember { mutableStateOf(false) }
     var showRunWorkflowDialog by remember { mutableStateOf(false) }
     var isLoadingWorkflowInputs by remember { mutableStateOf(false) }
     var isDispatchingWorkflow by remember { mutableStateOf(false) }
@@ -182,6 +183,34 @@ fun PushGitScreen(
                 workflowRuns = runs
             }
             isFetchingMeta = false
+        }
+    }
+
+    fun openWorkflowInputDialog(wf: WorkflowInfo) {
+        selectedWorkflow = wf
+        scope.launch {
+            isLoadingWorkflowInputs = true
+            val nextVer = engine.fetchNextReleaseVersion(pat, targetRepo)
+            val remoteChangelog = engine.fetchChangelogContent(pat, targetRepo, branch)
+            engine.fetchWorkflowInputs(pat, targetRepo, wf.path, branch)
+                .onSuccess { fields ->
+                    workflowInputs = fields
+                    workflowInputValues.clear()
+                    fields.forEach { f ->
+                        val prefill = when {
+                            f.key.contains("version", ignoreCase = true) && !nextVer.isNullOrBlank() -> nextVer
+                            f.key.contains("changelog", ignoreCase = true) && !remoteChangelog.isNullOrBlank() -> remoteChangelog
+                            else -> f.defaultValue
+                        }
+                        workflowInputValues[f.key] = prefill
+                    }
+                    showRunWorkflowDialog = true
+                }
+                .onFailure {
+                    workflowInputs = emptyList()
+                    showRunWorkflowDialog = true
+                }
+            isLoadingWorkflowInputs = false
         }
     }
 
@@ -777,38 +806,20 @@ fun PushGitScreen(
                     onClick = {
                         scope.launch {
                             isLoadingWorkflowInputs = true
-                            val wf = selectedWorkflow ?: workflows.firstOrNull() ?: run {
-                                engine.listWorkflows(pat, targetRepo).getOrNull()?.firstOrNull()?.also {
-                                    selectedWorkflow = it
-                                }
-                            }
-                            if (wf == null) {
-                                Toast.makeText(context, "未找到可用 Workflow", Toast.LENGTH_SHORT).show()
-                                isLoadingWorkflowInputs = false
-                                return@launch
-                            }
-                            selectedWorkflow = wf
-                            val nextVer = engine.fetchNextReleaseVersion(pat, targetRepo)
-                            val remoteChangelog = engine.fetchChangelogContent(pat, targetRepo, branch)
-                            engine.fetchWorkflowInputs(pat, targetRepo, wf.path, branch)
-                                .onSuccess { fields ->
-                                    workflowInputs = fields
-                                    workflowInputValues.clear()
-                                    fields.forEach { f ->
-                                        val prefill = when {
-                                            f.key.contains("version", ignoreCase = true) && !nextVer.isNullOrBlank() -> nextVer
-                                            f.key.contains("changelog", ignoreCase = true) && !remoteChangelog.isNullOrBlank() -> remoteChangelog
-                                            else -> f.defaultValue
-                                        }
-                                        workflowInputValues[f.key] = prefill
-                                    }
-                                    showRunWorkflowDialog = true
-                                }
-                                .onFailure {
-                                    workflowInputs = emptyList()
-                                    showRunWorkflowDialog = true
-                                }
+                            val wfList = engine.listWorkflows(pat, targetRepo).getOrNull()?.takeIf { it.isNotEmpty() } ?: workflows
+                            workflows = wfList
                             isLoadingWorkflowInputs = false
+                            when {
+                                wfList.isEmpty() -> {
+                                    Toast.makeText(context, "未找到可用 Workflow", Toast.LENGTH_SHORT).show()
+                                }
+                                wfList.size == 1 -> {
+                                    openWorkflowInputDialog(wfList.first())
+                                }
+                                else -> {
+                                    showWorkflowPickerDialog = true
+                                }
+                            }
                         }
                     },
                     enabled = pat.isNotBlank() && targetRepo.isNotBlank() && !isLoadingWorkflowInputs && !isDispatchingWorkflow,
@@ -1087,6 +1098,43 @@ fun PushGitScreen(
             }
         )
     }
+    if (showWorkflowPickerDialog) {
+        AlertDialog(
+            onDismissRequest = { showWorkflowPickerDialog = false },
+            title = { Text("选择 Workflow", fontSize = 17.sp, fontWeight = FontWeight.Bold) },
+            text = {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 280.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(workflows, key = { it.id }) { wf ->
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    showWorkflowPickerDialog = false
+                                    openWorkflowInputDialog(wf)
+                                }
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                                Text(wf.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                Text(wf.path, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showWorkflowPickerDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
     if (showRunWorkflowDialog) {
         val wf = selectedWorkflow
         AlertDialog(
