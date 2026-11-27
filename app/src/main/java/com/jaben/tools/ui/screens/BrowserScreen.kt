@@ -258,6 +258,7 @@ fun BrowserScreen(
     var detectedVideoPosMs by remember { mutableStateOf(0L) }
     var activeBuiltInVideoUrl by remember { mutableStateOf<String?>(null) }
     var userDismissedFloatingForPage by remember { mutableStateOf(false) }
+    var lastVideoPageUrl by remember { mutableStateOf("") }
     var webViewUserAgent by remember { mutableStateOf("Mozilla/5.0") }
 
     LaunchedEffect(Unit) {
@@ -579,9 +580,10 @@ fun BrowserScreen(
                             .replace("Version/4.0 ", "")
                         settings.userAgentString = cleanUa
                         webViewUserAgent = cleanUa
+                        val currentWebView = this
                         android.webkit.CookieManager.getInstance().apply {
                             setAcceptCookie(true)
-                            setAcceptThirdPartyCookies(this@apply, true)
+                            setAcceptThirdPartyCookies(currentWebView, true)
                         }
                         addJavascriptInterface(object {
                             @JavascriptInterface
@@ -628,13 +630,44 @@ fun BrowserScreen(
                                 view: WebView?,
                                 request: WebResourceRequest?
                             ): android.webkit.WebResourceResponse? {
+                                val reqUrl = request?.url?.toString().orEmpty()
                                 if (currentAdBlockEnabled && request != null && !request.isForMainFrame) {
-                                    val reqUrl = request.url?.toString().orEmpty()
                                     if (adBlockManager.shouldBlock(reqUrl, currentCompiledAdRules)) {
                                         return AdBlockManager.emptyResponse()
                                     }
                                 }
+                                if (reqUrl.startsWith("http://") || reqUrl.startsWith("https://")) {
+                                    val pathLower = reqUrl.substringBefore('?').lowercase()
+                                    if (pathLower.endsWith(".m3u8") || pathLower.endsWith(".mp4") || pathLower.endsWith(".webm")) {
+                                        view?.post {
+                                            if (detectedVideoUrl == null) {
+                                                detectedVideoUrl = reqUrl
+                                                detectedVideoPosMs = 0L
+                                            }
+                                        }
+                                    }
+                                }
                                 return super.shouldInterceptRequest(view, request)
+                            }
+
+                            override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                                super.doUpdateVisitedHistory(view, url, isReload)
+                                val cleanUrl = url.orEmpty()
+                                if (cleanUrl.isNotEmpty() && cleanUrl != lastVideoPageUrl) {
+                                    lastVideoPageUrl = cleanUrl
+                                    detectedVideoUrl = null
+                                    detectedVideoPosMs = 0L
+                                    userDismissedFloatingForPage = false
+                                    activeBuiltInVideoUrl = null
+                                    if (cleanUrl.startsWith("http://") || cleanUrl.startsWith("https://")) {
+                                        urlInput = cleanUrl
+                                    }
+                                    canGoBack = view?.canGoBack() == true
+                                    canGoForward = view?.canGoForward() == true
+                                    view?.postDelayed({
+                                        view.evaluateJavascript(VIDEO_DETECTOR_JS, null)
+                                    }, 600)
+                                }
                             }
 
                             override fun shouldOverrideUrlLoading(
@@ -647,6 +680,7 @@ fun BrowserScreen(
 
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 isLoading = true
+                                if (!url.isNullOrEmpty()) lastVideoPageUrl = url
                                 detectedVideoUrl = null
                                 detectedVideoPosMs = 0L
                                 userDismissedFloatingForPage = false
@@ -2104,14 +2138,6 @@ private fun formatDlBytes(bytes: Long): String {
 
 private const val VIDEO_DETECTOR_JS = """
 (function() {
-  if (window.__joolsVideoHooked) {
-    scanVideos();
-    return;
-  }
-  window.__joolsVideoHooked = true;
-  if (window.__joolsAutoHijack === undefined) {
-    window.__joolsAutoHijack = true;
-  }
   function getVideoSrc(v) {
     var src = v.currentSrc || v.src || '';
     if (!src) {
@@ -2127,12 +2153,27 @@ private const val VIDEO_DETECTOR_JS = """
         var src = getVideoSrc(vids[i]);
         if (src && (src.indexOf('http://') === 0 || src.indexOf('https://') === 0)) {
           window.JoolsVideoBridge && window.JoolsVideoBridge.onVideoFound(src, vids[i].currentTime || 0);
-          break;
+          return;
         }
+      }
+      var iframes = document.querySelectorAll('iframe');
+      for (var j = 0; j < iframes.length; j++) {
+        try {
+          var ivs = iframes[j].contentDocument && iframes[j].contentDocument.querySelectorAll('video');
+          if (ivs) {
+            for (var k = 0; k < ivs.length; k++) {
+              var isrc = getVideoSrc(ivs[k]);
+              if (isrc && (isrc.indexOf('http://') === 0 || isrc.indexOf('https://') === 0)) {
+                window.JoolsVideoBridge && window.JoolsVideoBridge.onVideoFound(isrc, ivs[k].currentTime || 0);
+                return;
+              }
+            }
+          }
+        } catch (e) {}
       }
     } catch (e) {}
   }
-  document.addEventListener('play', function(e) {
+  function handlePlayEvent(e) {
     var v = e.target;
     if (v && v.tagName === 'VIDEO') {
       var src = getVideoSrc(v);
@@ -2145,7 +2186,18 @@ private const val VIDEO_DETECTOR_JS = """
         }
       }
     }
-  }, true);
+  }
+  if (!window.__joolsVideoHooked) {
+    window.__joolsVideoHooked = true;
+    window.__joolsAutoHijack = true;
+    document.addEventListener('play', handlePlayEvent, true);
+    document.addEventListener('playing', handlePlayEvent, true);
+    try {
+      var obs = new MutationObserver(function() { scanVideos(); });
+      if (document.body) obs.observe(document.body, { childList: true, subtree: true });
+    } catch (e) {}
+  }
+  scanVideos();
   setTimeout(scanVideos, 800);
   setTimeout(scanVideos, 2500);
 })();
