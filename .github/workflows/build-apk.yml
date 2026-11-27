@@ -172,146 +172,23 @@ jobs:
           path: app/build/outputs/apk/release/Jools-*.apk
           if-no-files-found: error
 
-  build_ios:
-    name: Build iOS IPA
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Resolve Version
-        id: ver
-        env:
-          INPUT_TYPE: ${{ github.event.inputs.build_type }}
-          INPUT_VERSION: ${{ github.event.inputs.release_version }}
-        run: |
-          BTYPE="${INPUT_TYPE:-release}"
-          RAW="${INPUT_VERSION#v}"
-          RAW="${RAW#V}"
-          RAW="${RAW:-1.0.0}"
-          if [ "$BTYPE" = "beta" ]; then
-            CFG="Release"
-          elif [ "$BTYPE" = "pre-release" ]; then
-            CFG="Release"
-          elif [ "$BTYPE" = "debug" ]; then
-            CFG="Debug"
-          else
-            CFG="Release"
-          fi
-          echo "build_type=${BTYPE}" >> "$GITHUB_OUTPUT"
-          echo "version_name=${RAW}" >> "$GITHUB_OUTPUT"
-          echo "cfg=${CFG}" >> "$GITHUB_OUTPUT"
-
-      - name: Build iOS App (Unsigned IPA)
-        run: |
-          xcodebuild -project ios/Jools.xcodeproj \
-            -scheme Jools \
-            -configuration "${{ steps.ver.outputs.cfg }}" \
-            -sdk iphoneos \
-            -derivedDataPath ios_build \
-            MARKETING_VERSION="${{ steps.ver.outputs.version_name }}" \
-            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build
-          mkdir -p ios_ipa/Payload
-          cp -R "ios_build/Build/Products/${{ steps.ver.outputs.cfg }}-iphoneos/Jools.app" ios_ipa/Payload/
-          cd ios_ipa
-          zip -qry "../Jools-iOS-${{ steps.ver.outputs.build_type }}-${{ steps.ver.outputs.version_name }}.ipa" Payload
-
-      - name: Upload iOS IPA Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Jools-iOS-IPA
-          path: Jools-iOS-*.ipa
-          if-no-files-found: error
-
-  publish_release:
-    name: Publish GitHub Release
-    needs: [build, build_ios]
-    if: always() && needs.build.result == 'success' && github.event.inputs.build_type != 'debug'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download Android APK
-        uses: actions/download-artifact@v4
-        with:
-          name: Jools-Release-APK
-          path: release_assets
-
-      - name: Download iOS IPA
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: Jools-iOS-IPA
-          path: release_assets
-
-      - name: Resolve Release Metadata
-        id: meta
-        env:
-          INPUT_TYPE: ${{ github.event.inputs.build_type }}
-          INPUT_VERSION: ${{ github.event.inputs.release_version }}
-          INPUT_CHANGELOG: ${{ github.event.inputs.changelog }}
-        run: |
-          BTYPE="${INPUT_TYPE:-release}"
-          RAW="${INPUT_VERSION#v}"
-          RAW="${RAW#V}"
-          RAW="${RAW:-1.0.0}"
-          if [ "$BTYPE" = "beta" ]; then
-            TAG="v${RAW}-beta"
-            IS_PRE="true"
-          elif [ "$BTYPE" = "pre-release" ]; then
-            TAG="v${RAW}-pre"
-            IS_PRE="true"
-          else
-            TAG="v${RAW}"
-            IS_PRE="false"
-          fi
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "is_prerelease=${IS_PRE}" >> "$GITHUB_OUTPUT"
-          if [ -n "$INPUT_CHANGELOG" ]; then
-            FORMATTED=$(printf '%s' "$INPUT_CHANGELOG" | sed 's/；/;/g; s/;/\n- /g')
-            {
-              echo "changelog<<EOF_CHANGELOG"
-              printf '%s\n' "$FORMATTED"
-              echo "EOF_CHANGELOG"
-            } >> "$GITHUB_OUTPUT"
-            echo "has_changelog=true" >> "$GITHUB_OUTPUT"
-          elif [ -f CHANGELOG.md ] && [ -s CHANGELOG.md ]; then
-            {
-              echo "changelog<<EOF_CHANGELOG"
-              cat CHANGELOG.md
-              echo ""
-              echo "EOF_CHANGELOG"
-            } >> "$GITHUB_OUTPUT"
-            echo "has_changelog=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changelog=" >> "$GITHUB_OUTPUT"
-            echo "has_changelog=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Publish Release (with Changelog)
-        if: steps.meta.outputs.has_changelog == 'true'
+      - name: Publish to GitHub Release (with Changelog)
+        if: steps.ver.outputs.is_debug != 'true' && steps.ver.outputs.has_changelog == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          name: Jools ${{ steps.meta.outputs.tag }}
-          body: ${{ steps.meta.outputs.changelog }}
-          files: release_assets/*
-          prerelease: ${{ steps.meta.outputs.is_prerelease == 'true' }}
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Jools ${{ steps.ver.outputs.tag }}
+          body: ${{ steps.ver.outputs.changelog }}
+          files: app/build/outputs/apk/release/Jools-*.apk
+          prerelease: ${{ steps.ver.outputs.is_prerelease == 'true' }}
           generate_release_notes: false
 
-      - name: Publish Release (Auto Notes)
-        if: steps.meta.outputs.has_changelog != 'true'
+      - name: Publish to GitHub Release (Auto Notes)
+        if: steps.ver.outputs.is_debug != 'true' && steps.ver.outputs.has_changelog != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          name: Jools ${{ steps.meta.outputs.tag }}
-          files: release_assets/*
-          prerelease: ${{ steps.meta.outputs.is_prerelease == 'true' }}
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Jools ${{ steps.ver.outputs.tag }}
+          files: app/build/outputs/apk/release/Jools-*.apk
+          prerelease: ${{ steps.ver.outputs.is_prerelease == 'true' }}
           generate_release_notes: true

@@ -683,7 +683,8 @@ class PushGitEngine(private val context: Context) {
             var failedJobId: Long? = null
             for (i in 0 until jobsArr.length()) {
                 val job = jobsArr.optJSONObject(i) ?: continue
-                if (job.optString("conclusion") == "failure") {
+                val c = job.optString("conclusion")
+                if (c == "failure" || c == "cancelled" || c == "startup_failure" || c == "timed_out") {
                     failedJobId = job.optLong("id")
                     break
                 }

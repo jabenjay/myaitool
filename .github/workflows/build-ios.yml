@@ -1,0 +1,103 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: '选择构建类型'
+        type: choice
+        required: true
+        default: 'release'
+        options:
+          - release
+          - beta
+          - pre-release
+          - debug
+      release_version:
+        description: '填写发布版本号（如 0.3.5）'
+        required: true
+        default: '0.3.5'
+
+permissions:
+  contents: write
+
+jobs:
+  build_ios:
+    name: Build iOS IPA
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve Version
+        id: ver
+        env:
+          INPUT_TYPE: ${{ github.event.inputs.build_type }}
+          INPUT_VERSION: ${{ github.event.inputs.release_version }}
+        run: |
+          BTYPE="${INPUT_TYPE:-release}"
+          RAW="${INPUT_VERSION#v}"
+          RAW="${RAW#V}"
+          RAW="${RAW:-1.0.0}"
+          if [ "$BTYPE" = "beta" ]; then
+            TAG="v${RAW}-beta"
+            IS_PRE="true"
+            IS_DEBUG="false"
+            CFG="Release"
+          elif [ "$BTYPE" = "pre-release" ]; then
+            TAG="v${RAW}-pre"
+            IS_PRE="true"
+            IS_DEBUG="false"
+            CFG="Release"
+          elif [ "$BTYPE" = "debug" ]; then
+            TAG="v${RAW}-debug"
+            IS_PRE="true"
+            IS_DEBUG="true"
+            CFG="Debug"
+          else
+            TAG="v${RAW}"
+            IS_PRE="false"
+            IS_DEBUG="false"
+            CFG="Release"
+          fi
+          echo "build_type=${BTYPE}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version_name=${RAW}" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=${IS_PRE}" >> "$GITHUB_OUTPUT"
+          echo "is_debug=${IS_DEBUG}" >> "$GITHUB_OUTPUT"
+          echo "cfg=${CFG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build iOS App (Unsigned IPA)
+        run: |
+          xcodebuild -project ios/Jools.xcodeproj \
+            -scheme Jools \
+            -configuration "${{ steps.ver.outputs.cfg }}" \
+            -sdk iphoneos \
+            -derivedDataPath ios_build \
+            MARKETING_VERSION="${{ steps.ver.outputs.version_name }}" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+          mkdir -p ios_ipa/Payload
+          cp -R "ios_build/Build/Products/${{ steps.ver.outputs.cfg }}-iphoneos/Jools.app" ios_ipa/Payload/
+          cd ios_ipa
+          zip -qry "../Jools-iOS-${{ steps.ver.outputs.build_type }}-${{ steps.ver.outputs.version_name }}.ipa" Payload
+
+      - name: Upload iOS IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jools-iOS-IPA
+          path: Jools-iOS-*.ipa
+          if-no-files-found: error
+
+      - name: Attach iOS IPA to Release
+        if: steps.ver.outputs.is_debug != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Jools ${{ steps.ver.outputs.tag }}
+          files: Jools-iOS-*.ipa
+          prerelease: ${{ steps.ver.outputs.is_prerelease == 'true' }}
