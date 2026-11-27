@@ -2,16 +2,16 @@ package com.jaben.tools.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jaben.tools.data.AppLogManager
@@ -114,29 +115,45 @@ fun LogViewerScreen(
                 .liquidGlassSurface(24.dp)
         ) {
             SelectionContainer {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(14.dp),
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     if (logs.isEmpty()) {
-                        item {
-                            Text(
-                                text = "暂无运行日志",
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text(
+                            text = "暂无运行日志",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     } else {
-                        items(logs) { line ->
+                        val lineNumWidth = (logs.size.toString().length.coerceAtLeast(2) * 8 + 6).dp
+                        logs.forEachIndexed { index, line ->
                             val isCrash = line.contains("[CRASH]") || line.contains("ERROR")
-                            Text(
-                                text = line,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.5.sp,
-                                lineHeight = 16.sp,
-                                color = if (isCrash) MaterialTheme.colorScheme.error else visuals.cardContentColor
-                            )
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                DisableSelection {
+                                    Text(
+                                        text = "${index + 1}",
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        lineHeight = 16.sp,
+                                        textAlign = TextAlign.End,
+                                        color = visuals.cardContentColor.copy(alpha = 0.45f),
+                                        modifier = Modifier.width(lineNumWidth)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = line,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 16.sp,
+                                    color = if (isCrash) MaterialTheme.colorScheme.error else visuals.cardContentColor,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                         }
                     }
                 }
