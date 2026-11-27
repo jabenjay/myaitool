@@ -82,6 +82,9 @@ import androidx.navigation.compose.rememberNavController
 import android.content.Intent
 import com.jaben.tools.data.AppShortcutHelper
 import com.jaben.tools.data.AppUpdateChecker
+import com.jaben.tools.data.PendingNoticeItem
+import com.jaben.tools.data.RemoteNoticeManager
+import com.jaben.tools.ui.components.NoticeConfirmDialog
 import com.jaben.tools.data.UpdateCheckResult
 import com.jaben.tools.ui.components.UpdateBottomSheet
 import com.jaben.tools.data.BookmarkManager
@@ -205,6 +208,7 @@ fun PocketToolboxApp(
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
     var isHomeDragging by remember { mutableStateOf(false) }
     var startupUpdateInfo by remember { mutableStateOf<UpdateCheckResult.UpdateAvailable?>(null) }
+    var pendingNotices by remember { mutableStateOf<List<PendingNoticeItem>>(emptyList()) }
 
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
@@ -217,6 +221,7 @@ fun PocketToolboxApp(
     }
 
     LaunchedEffect(Unit) {
+        pendingNotices = RemoteNoticeManager.checkPendingNotices(context)
         val res = AppUpdateChecker.checkLatestRelease(context, proxyManager.activeJavaProxy())
         if (res is UpdateCheckResult.UpdateAvailable) {
             startupUpdateInfo = res
@@ -578,11 +583,22 @@ fun PocketToolboxApp(
             }
         }
 
-        startupUpdateInfo?.let { info ->
-            UpdateBottomSheet(
-                updateInfo = info,
-                onDismiss = { startupUpdateInfo = null }
+        val activeNotice = pendingNotices.firstOrNull()
+        if (activeNotice != null) {
+            NoticeConfirmDialog(
+                item = activeNotice,
+                onAcknowledge = {
+                    RemoteNoticeManager.markAcknowledged(context, activeNotice)
+                    pendingNotices = pendingNotices.drop(1)
+                }
             )
+        } else {
+            startupUpdateInfo?.let { info ->
+                UpdateBottomSheet(
+                    updateInfo = info,
+                    onDismiss = { startupUpdateInfo = null }
+                )
+            }
         }
     }
 }
