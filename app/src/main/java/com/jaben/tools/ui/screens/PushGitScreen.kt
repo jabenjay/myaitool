@@ -950,14 +950,36 @@ fun PushGitScreen(
                     } else {
                         0f
                     }
-                    if (isRunning && createdMs > 0L) {
-                        Text(
-                            text = "${elapsedSec}s",
-                            color = badgeColor,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(end = 6.dp)
-                        )
+                    if (isRunning) {
+                        if (createdMs > 0L) {
+                            Text(
+                                text = "${elapsedSec}s",
+                                color = badgeColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(end = 6.dp)
+                            )
+                        }
+                        TextButton(
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            onClick = {
+                                scope.launch {
+                                    engine.cancelWorkflowRun(pat, targetRepo, run.id)
+                                        .onSuccess {
+                                            Toast.makeText(context, "已取消构建", Toast.LENGTH_SHORT).show()
+                                            delay(1000)
+                                            engine.listWorkflowRuns(pat, targetRepo).onSuccess { workflowRuns = it }
+                                        }
+                                        .onFailure {
+                                            Toast.makeText(context, "取消失败", Toast.LENGTH_SHORT).show()
+                                        }
+                                }
+                            },
+                            modifier = Modifier.height(24.dp)
+                        ) {
+                            Text("取消", color = Color(0xFFDC2626), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
                     }
                     IconButton(
                         onClick = {

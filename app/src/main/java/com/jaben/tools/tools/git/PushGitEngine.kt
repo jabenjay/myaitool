@@ -582,6 +582,18 @@ class PushGitEngine(private val context: Context) {
         }.getOrNull()
     }
 
+    suspend fun cancelWorkflowRun(
+        pat: String,
+        ownerRepoInput: String,
+        runId: Long
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = parseOwnerRepo(ownerRepoInput)
+            apiRequest("POST", "https://api.github.com/repos/$repo/actions/runs/$runId/cancel", pat, "{}")
+            Unit
+        }
+    }
+
     suspend fun listWorkflowRuns(pat: String, ownerRepoInput: String): Result<List<WorkflowRunInfo>> = withContext(Dispatchers.IO) {
         runCatching {
             val repo = parseOwnerRepo(ownerRepoInput)
