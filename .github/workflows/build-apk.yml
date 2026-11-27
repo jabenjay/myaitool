@@ -52,12 +52,12 @@ jobs:
           if [ -n "$INPUT_CHANGELOG" ]; then
             FORMATTED=$(printf '%s' "$INPUT_CHANGELOG" | sed 's/；/;/g; s/;/\n- /g')
             case "$FORMATTED" in
-              -*|*"\n"*) ;;
+              -*|#*|"$(printf '*\n*')") ;;
               *) FORMATTED="- $FORMATTED" ;;
             esac
             {
               echo "changelog<<EOF_CHANGELOG"
-              printf '%b\n' "$FORMATTED"
+              printf '%s\n' "$FORMATTED"
               echo "EOF_CHANGELOG"
             } >> "$GITHUB_OUTPUT"
             echo "has_changelog=true" >> "$GITHUB_OUTPUT"

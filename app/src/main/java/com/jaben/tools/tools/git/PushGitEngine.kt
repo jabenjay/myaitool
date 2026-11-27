@@ -342,13 +342,14 @@ class PushGitEngine(private val context: Context) {
         commitMessageInput: String,
         diff: GitDiffSummary,
         syncDeletions: Boolean,
+        overrideFiles: List<PushFileEntry>? = null,
         onProgress: (done: Int, total: Int, currentPath: String) -> Unit
     ): Result<PushGitResult> = withContext(Dispatchers.IO) {
         runCatching {
             val repo = parseOwnerRepo(ownerRepoInput)
             val branch = branchInput.trim().ifBlank { "main" }
             val message = commitMessageInput.trim().ifBlank { "Sync project files via PushGit" }
-            val filesToUpload = diff.uploadFiles
+            val filesToUpload = overrideFiles ?: diff.uploadFiles
             require(filesToUpload.isNotEmpty() || (syncDeletions && diff.deletedPaths.isNotEmpty())) {
                 "没有需要推送的变动文件"
             }
@@ -549,6 +550,34 @@ class PushGitEngine(private val context: Context) {
         }
     }
 
+    suspend fun fetchChangelogContent(pat: String, ownerRepoInput: String, branch: String): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = parseOwnerRepo(ownerRepoInput)
+            val resp = apiRequest("GET", "https://api.github.com/repos/$repo/contents/CHANGELOG.md?ref=${branch.trim()}", pat, null)
+            val b64 = JSONObject(resp).optString("content").replace("\n", "")
+            String(Base64.decode(b64, Base64.DEFAULT), Charsets.UTF_8).trim()
+        }.getOrNull()
+    }
+
+    suspend fun fetchNextReleaseVersion(pat: String, ownerRepoInput: String): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = parseOwnerRepo(ownerRepoInput)
+            val latestTag = runCatching {
+                val resp = apiRequest("GET", "https://api.github.com/repos/$repo/releases/latest", pat, null)
+                JSONObject(resp).optString("tag_name")
+            }.getOrNull()?.takeIf { it.isNotBlank() } ?: run {
+                val tagsResp = apiRequest("GET", "https://api.github.com/repos/$repo/tags?per_page=1", pat, null)
+                JSONArray(tagsResp).optJSONObject(0)?.optString("name").orEmpty()
+            }
+            val clean = latestTag.trim().removePrefix("v").removePrefix("V")
+            val parts = clean.split(".").mapNotNull { it.toIntOrNull() }.toMutableList()
+            if (parts.isEmpty()) return@runCatching null
+            while (parts.size < 3) parts.add(0)
+            parts[parts.lastIndex] = parts.last() + 1
+            parts.joinToString(".")
+        }.getOrNull()
+    }
+
     suspend fun listWorkflowRuns(pat: String, ownerRepoInput: String): Result<List<WorkflowRunInfo>> = withContext(Dispatchers.IO) {
         runCatching {
             val repo = parseOwnerRepo(ownerRepoInput)
@@ -571,6 +600,62 @@ class PushGitEngine(private val context: Context) {
                     )
                 }
             }
+        }
+    }
+
+    suspend fun fetchFailedRunLog(
+        pat: String,
+        ownerRepoInput: String,
+        runId: Long
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = parseOwnerRepo(ownerRepoInput)
+            val jobsResp = apiRequest("GET", "https://api.github.com/repos/$repo/actions/runs/$runId/jobs", pat, null)
+            val jobsArr = JSONObject(jobsResp).optJSONArray("jobs") ?: JSONArray()
+            var failedJobId: Long? = null
+            for (i in 0 until jobsArr.length()) {
+                val job = jobsArr.optJSONObject(i) ?: continue
+                if (job.optString("conclusion") == "failure") {
+                    failedJobId = job.optLong("id")
+                    break
+                }
+            }
+            val jobId = failedJobId ?: (jobsArr.optJSONObject(0)?.optLong("id") ?: 0L)
+            require(jobId > 0L) { "未找到失败的任务日志" }
+
+            // GitHub returns 302 redirect to a pre-signed Azure blob URL (must not send Authorization header to Azure)
+            val conn = (URL("https://api.github.com/repos/$repo/actions/jobs/$jobId/logs").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                instanceFollowRedirects = false
+                connectTimeout = 15000
+                readTimeout = 30000
+                setRequestProperty("Accept", "application/vnd.github+json")
+                setRequestProperty("Authorization", "Bearer ${pat.trim()}")
+                setRequestProperty("User-Agent", "Jools-PushGit/1.0")
+            }
+            val fullLog = try {
+                val code = conn.responseCode
+                if (code in 300..399) {
+                    val redirectUrl = conn.getHeaderField("Location")
+                        ?: throw IllegalStateException("日志重定向地址为空")
+                    val blobConn = (URL(redirectUrl).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 15000
+                        readTimeout = 30000
+                    }
+                    try {
+                        blobConn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    } finally {
+                        blobConn.disconnect()
+                    }
+                } else if (code in 200..299) {
+                    conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                } else {
+                    throw IllegalStateException("获取日志失败: HTTP $code")
+                }
+            } finally {
+                conn.disconnect()
+            }
+            fullLog
         }
     }
 

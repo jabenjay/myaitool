@@ -77,7 +77,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jaben.tools.tools.git.GitDiffSummary
 import com.jaben.tools.tools.git.PushFileEntry
+import com.jaben.tools.data.OutputStorageHelper
 import com.jaben.tools.tools.git.PushGitEngine
+import java.io.ByteArrayInputStream
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.runtime.mutableStateMapOf
@@ -118,6 +120,7 @@ fun PushGitScreen(
     var selectedFiles by remember { mutableStateOf<List<PushFileEntry>>(emptyList()) }
     var diffSummary by remember { mutableStateOf<GitDiffSummary?>(null) }
     var syncDeletions by remember { mutableStateOf(false) }
+    var forceFullPush by remember { mutableStateOf(false) }
 
     var isFetchingMeta by remember { mutableStateOf(false) }
     var isInspecting by remember { mutableStateOf(false) }
@@ -136,6 +139,9 @@ fun PushGitScreen(
     var workflowRuns by remember { mutableStateOf<List<WorkflowRunInfo>>(emptyList()) }
     var showRunHistoryMenu by remember { mutableStateOf(false) }
     var isFetchingRuns by remember { mutableStateOf(false) }
+    var failedRunLog by remember { mutableStateOf("") }
+    var fetchedLogRunId by remember { mutableStateOf<Long?>(null) }
+    var isFetchingFailedLog by remember { mutableStateOf(false) }
 
     fun refreshGitHubMeta(tokenToUse: String = pat) {
         if (tokenToUse.isBlank()) return
@@ -176,13 +182,27 @@ fun PushGitScreen(
     }
 
     val latestRun = workflowRuns.firstOrNull()
-    LaunchedEffect(latestRun?.id, latestRun?.status, pat, targetRepo) {
+    LaunchedEffect(latestRun?.id, latestRun?.status, latestRun?.conclusion, pat, targetRepo) {
         val status = latestRun?.status
         if (pat.isNotBlank() && (status == "queued" || status == "in_progress" || status == "waiting")) {
             delay(5000)
             engine.listWorkflowRuns(pat, targetRepo).onSuccess { runs ->
                 workflowRuns = runs
             }
+        } else if (latestRun != null && latestRun.conclusion == "failure" && fetchedLogRunId != latestRun.id && pat.isNotBlank()) {
+            isFetchingFailedLog = true
+            engine.fetchFailedRunLog(pat, targetRepo, latestRun.id)
+                .onSuccess { logText ->
+                    failedRunLog = logText
+                    fetchedLogRunId = latestRun.id
+                }
+                .onFailure { err ->
+                    failedRunLog = "获取日志失败: ${err.message}"
+                }
+            isFetchingFailedLog = false
+        } else if (latestRun?.conclusion == "success") {
+            failedRunLog = ""
+            fetchedLogRunId = null
         }
     }
 
@@ -555,6 +575,15 @@ fun PushGitScreen(
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary
                         )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { forceFullPush = !forceFullPush }
+                        ) {
+                            Checkbox(checked = forceFullPush, onCheckedChange = { forceFullPush = it })
+                            Text("全量覆盖推送（默认仅推送变动文件）", fontSize = 12.sp)
+                        }
                         if (diff.deletedPaths.isNotEmpty()) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -645,7 +674,8 @@ fun PushGitScreen(
         // Bottom Action Button: First Inspect Diff, then Push Changes
         val currentDiff = diffSummary
         val readyToPushCount = if (currentDiff != null) {
-            currentDiff.uploadFiles.size + if (syncDeletions) currentDiff.deletedPaths.size else 0
+            val uploadCnt = if (forceFullPush) selectedFiles.size else currentDiff.uploadFiles.size
+            uploadCnt + if (syncDeletions) currentDiff.deletedPaths.size else 0
         } else 0
 
         Button(
@@ -674,14 +704,15 @@ fun PushGitScreen(
                     scope.launch {
                         isPushing = true
                         pushDone = 0
-                        pushTotal = currentDiff.uploadFiles.size
+                        pushTotal = if (forceFullPush) selectedFiles.size else currentDiff.uploadFiles.size
                         engine.pushDiff(
                             pat = pat,
                             ownerRepoInput = targetRepo,
                             branchInput = branch,
                             commitMessageInput = commitMessage,
                             diff = currentDiff,
-                            syncDeletions = syncDeletions
+                            syncDeletions = syncDeletions,
+                            overrideFiles = if (forceFullPush) selectedFiles else null
                         ) { done, total, cur ->
                             pushDone = done
                             pushTotal = total
@@ -716,7 +747,7 @@ fun PushGitScreen(
                     isInspecting -> "正在比对..."
                     isPushing -> "正在推送..."
                     currentDiff == null -> "比对仓库差异"
-                    else -> "Push 变动文件 ($readyToPushCount)"
+                    else -> if (forceFullPush) "全量 Push ($readyToPushCount)" else "Push 变动文件 ($readyToPushCount)"
                 },
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold
@@ -749,11 +780,20 @@ fun PushGitScreen(
                                 return@launch
                             }
                             selectedWorkflow = wf
+                            val nextVer = engine.fetchNextReleaseVersion(pat, targetRepo)
+                            val remoteChangelog = engine.fetchChangelogContent(pat, targetRepo, branch)
                             engine.fetchWorkflowInputs(pat, targetRepo, wf.path, branch)
                                 .onSuccess { fields ->
                                     workflowInputs = fields
                                     workflowInputValues.clear()
-                                    fields.forEach { f -> workflowInputValues[f.key] = f.defaultValue }
+                                    fields.forEach { f ->
+                                        val prefill = when {
+                                            f.key.contains("version", ignoreCase = true) && !nextVer.isNullOrBlank() -> nextVer
+                                            f.key.contains("changelog", ignoreCase = true) && !remoteChangelog.isNullOrBlank() -> remoteChangelog
+                                            else -> f.defaultValue
+                                        }
+                                        workflowInputValues[f.key] = prefill
+                                    }
                                     showRunWorkflowDialog = true
                                 }
                                 .onFailure {
@@ -866,6 +906,70 @@ fun PushGitScreen(
                         modifier = Modifier.size(22.dp)
                     ) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "刷新状态", tint = badgeColor, modifier = Modifier.size(15.dp))
+                    }
+                }
+
+                if (run.conclusion == "failure") {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF1E1E1E),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (isFetchingFailedLog) "正在拉取失败日志..." else "失败日志摘要",
+                                    color = Color(0xFFF87171),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (failedRunLog.isNotBlank()) {
+                                    TextButton(
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        onClick = {
+                                            val fileName = "workflow_run_${run.runNumber}_error.txt"
+                                            val uri = OutputStorageHelper.saveStream(
+                                                context = context,
+                                                subFolder = OutputStorageHelper.SUB_FILES,
+                                                fileName = fileName,
+                                                mimeType = "text/plain",
+                                                inputStream = ByteArrayInputStream(failedRunLog.toByteArray(Charsets.UTF_8))
+                                            )
+                                            Toast.makeText(
+                                                context,
+                                                if (uri != null) "已保存 $fileName" else "保存失败",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    ) {
+                                        Text("保存 .txt", color = Color(0xFF93C5FD), fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                            if (failedRunLog.isNotBlank()) {
+                                val preview = failedRunLog.lines().takeLast(45).joinToString("\n")
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 140.dp)
+                                        .verticalScroll(rememberScrollState())
+                                ) {
+                                    Text(
+                                        text = preview,
+                                        color = Color(0xFFE5E7EB),
+                                        fontSize = 10.sp,
+                                        lineHeight = 14.sp
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -992,7 +1096,9 @@ fun PushGitScreen(
                                 supportingText = if (field.description.isNotBlank()) {
                                     { Text(field.description, fontSize = 11.sp) }
                                 } else null,
-                                singleLine = field.key != "changelog",
+                                singleLine = !field.key.contains("changelog", ignoreCase = true),
+                                minLines = if (field.key.contains("changelog", ignoreCase = true)) 3 else 1,
+                                maxLines = if (field.key.contains("changelog", ignoreCase = true)) 6 else 1,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
