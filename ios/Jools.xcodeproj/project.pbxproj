@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5BDA3C96835B430FA748B72D /* BookmarkManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0428A502B9A4EC8A9FDC9C4 /* Data/BookmarkManager.swift */; };
 		AF04E867A1E5F67C10695C85 /* AppLogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFDA17D4D415BB8E7AB4EDC5 /* Data/AppLogManager.swift */; };
 		9AA95989B6CE3513BF64B4F0 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CC0A24906418BD0E1B86BE1 /* Data/AppPreferences.swift */; };
 		B24653E7F0BF78024AC7142F /* AppUpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B407B9D827B5F0D6EF3F32F /* Data/AppUpdateChecker.swift */; };
@@ -36,6 +37,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		D0428A502B9A4EC8A9FDC9C4 /* Data/BookmarkManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BookmarkManager.swift; path = Data/BookmarkManager.swift; sourceTree = "<group>"; };
 		CFDA17D4D415BB8E7AB4EDC5 /* Data/AppLogManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "AppLogManager.swift"; path = "Data/AppLogManager.swift"; sourceTree = "<group>"; };
 		0CC0A24906418BD0E1B86BE1 /* Data/AppPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "AppPreferences.swift"; path = "Data/AppPreferences.swift"; sourceTree = "<group>"; };
 		7B407B9D827B5F0D6EF3F32F /* Data/AppUpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "AppUpdateChecker.swift"; path = "Data/AppUpdateChecker.swift"; sourceTree = "<group>"; };
@@ -200,6 +202,7 @@
 				AF04E867A1E5F67C10695C85 /* AppLogManager.swift in Sources */,
 				9AA95989B6CE3513BF64B4F0 /* AppPreferences.swift in Sources */,
 				B24653E7F0BF78024AC7142F /* AppUpdateChecker.swift in Sources */,
+				5BDA3C96835B430FA748B72D /* BookmarkManager.swift in Sources */,
 				C7107DFAF3715C9C525EE475 /* GitHubMirrorHelper.swift in Sources */,
 				B54DEDC95E627C9806F7C892 /* ProxyManager.swift in Sources */,
 				17429032412609BFD5C06F22 /* RemoteNoticeManager.swift in Sources */,

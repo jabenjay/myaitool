@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var prefs: AppPreferences
+    @ObservedObject private var bookmarkManager = BookmarkManager.shared
     let onOpenProxy: () -> Void
     let onOpenAbout: () -> Void
 
@@ -9,14 +10,16 @@ struct SettingsView: View {
     @State private var isCheckingUpdate = false
     @State private var updateResult: UpdateCheckResult?
     @State private var statusAlert: String?
+    @State private var showHomeUrlEditor = false
+    @State private var editingHomeUrl = ""
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("设置")
-                    .font(.system(size: 30, weight: .bold))
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
                     .padding(.horizontal, 4)
-                    .padding(.top, 8)
+                    .padding(.top, 6)
 
                 VStack(spacing: 12) {
                     // 主题
@@ -25,7 +28,7 @@ struct SettingsView: View {
                             .foregroundColor(.accentColor)
                             .frame(width: 24)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("主题").font(.system(size: 15))
+                            Text("主题").font(.system(size: 15, weight: .medium))
                             Text("\(prefs.uiStyle.label) · \(prefs.themeMode.label)")
                                 .font(.system(size: 11.5))
                                 .foregroundColor(.secondary)
@@ -40,14 +43,14 @@ struct SettingsView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 14)
-                    .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 22)
+                    .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 20)
 
                     // 界面风格
                     HStack(spacing: 14) {
                         Image(systemName: "sparkles")
                             .foregroundColor(.accentColor)
                             .frame(width: 24)
-                        Text("界面风格").font(.system(size: 15))
+                        Text("界面风格").font(.system(size: 15, weight: .medium))
                         Spacer()
                         Picker("", selection: $prefs.uiStyle) {
                             ForEach(AppUIStyle.allCases) { s in
@@ -59,31 +62,59 @@ struct SettingsView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 14)
-                    .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 22)
+                    .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 20)
 
-                    // 布局
+                    // 布局（支持 1-4 列，对齐安卓）
                     HStack(spacing: 14) {
                         Image(systemName: "square.grid.2x2.fill")
                             .foregroundColor(.accentColor)
                             .frame(width: 24)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("布局").font(.system(size: 15))
+                            Text("布局").font(.system(size: 15, weight: .medium))
                             Text("主页每行 \(prefs.homeColumns) 个工具")
                                 .font(.system(size: 11.5))
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
                         Picker("", selection: $prefs.homeColumns) {
+                            Text("1列").tag(1)
                             Text("2列").tag(2)
                             Text("3列").tag(3)
                             Text("4列").tag(4)
                         }
                         .pickerStyle(.segmented)
-                        .frame(width: 150)
+                        .frame(width: 184)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 14)
-                    .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 22)
+                    .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 20)
+
+                    // 浏览器默认主页
+                    Button {
+                        editingHomeUrl = bookmarkManager.homeUrl
+                        showHomeUrlEditor = true
+                    } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "safari.fill")
+                                .foregroundColor(.accentColor)
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("浏览器默认主页").font(.system(size: 15, weight: .medium)).foregroundColor(.primary)
+                                Text(bookmarkManager.homeUrl)
+                                    .font(.system(size: 11.5))
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 15)
+                        .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 20)
+                    }
+                    .buttonStyle(JoolsScaleButtonStyle())
 
                     // 网络代理
                     Button(action: onOpenProxy) {
@@ -92,7 +123,7 @@ struct SettingsView: View {
                                 .foregroundColor(.accentColor)
                                 .frame(width: 24)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("网络代理").font(.system(size: 15)).foregroundColor(.primary)
+                                Text("网络代理").font(.system(size: 15, weight: .medium)).foregroundColor(.primary)
                                 Text(ProxyManager.shared.statusMessage)
                                     .font(.system(size: 11.5))
                                     .foregroundColor(.secondary)
@@ -104,11 +135,11 @@ struct SettingsView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 15)
-                        .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 22)
+                        .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 20)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(JoolsScaleButtonStyle())
 
-                    // 检查更新（与其余卡片完全一致的排版与对齐）
+                    // 检查更新
                     Button {
                         guard !isCheckingUpdate else { return }
                         isCheckingUpdate = true
@@ -130,7 +161,7 @@ struct SettingsView: View {
                                 .foregroundColor(.accentColor)
                                 .frame(width: 24)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("检查更新").font(.system(size: 15)).foregroundColor(.primary)
+                                Text("检查更新").font(.system(size: 15, weight: .medium)).foregroundColor(.primary)
                                 Text(isCheckingUpdate ? "正在检查更新..." : "当前版本 v\(AppUpdateChecker.currentVersionName)")
                                     .font(.system(size: 11.5))
                                     .foregroundColor(.secondary)
@@ -164,9 +195,9 @@ struct SettingsView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 15)
-                        .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 22)
+                        .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 20)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(JoolsScaleButtonStyle())
 
                     // 关于
                     Button(action: onOpenAbout) {
@@ -175,7 +206,7 @@ struct SettingsView: View {
                                 .foregroundColor(.accentColor)
                                 .frame(width: 24)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("关于").font(.system(size: 15)).foregroundColor(.primary)
+                                Text("关于").font(.system(size: 15, weight: .medium)).foregroundColor(.primary)
                                 Text("开源地址、运行日志与捐赠支持")
                                     .font(.system(size: 11.5))
                                     .foregroundColor(.secondary)
@@ -187,17 +218,32 @@ struct SettingsView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 15)
-                        .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 22)
+                        .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 20)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(JoolsScaleButtonStyle())
                 }
             }
             .padding(16)
         }
+        .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
         .sheet(item: $updateResult) { res in
             if case let .updateAvailable(cur, lat, name, notes, dl) = res {
                 UpdateSheet(current: cur, latest: lat, name: name, notes: notes, downloadUrl: dl)
             }
+        }
+        .alert("设置默认主页", isPresented: $showHomeUrlEditor) {
+            TextField("https://biglist03.xyz/", text: $editingHomeUrl)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+            Button("恢复默认") {
+                bookmarkManager.setHomeUrl(BookmarkManager.defaultHomeUrl)
+            }
+            Button("保存") {
+                if !editingHomeUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    bookmarkManager.setHomeUrl(editingHomeUrl)
+                }
+            }
+            Button("取消", role: .cancel) {}
         }
         .alert(statusAlert ?? "", isPresented: Binding(get: { statusAlert != nil }, set: { if !$0 { statusAlert = nil } })) {
             Button("确定", role: .cancel) {}

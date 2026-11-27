@@ -47,29 +47,47 @@ struct JoolsCardModifier: ViewModifier {
             if isGlass {
                 return colorScheme == .dark
                     ? Color.white.opacity(0.08)
-                    : Color.white.opacity(0.68)
+                    : Color.white.opacity(0.76)
             } else {
-                return colorScheme == .dark
-                    ? Color(red: 0.12, green: 0.13, blue: 0.17)
-                    : Color(red: 0.96, green: 0.97, blue: 0.98)
+                return Color(uiColor: .secondarySystemGroupedBackground)
             }
         }()
 
         content
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(isGlass ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(bg))
+                    .fill(isGlass ? AnyShapeStyle(.regularMaterial) : AnyShapeStyle(bg))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(
-                        colorScheme == .dark
-                            ? Color.white.opacity(isGlass ? 0.16 : 0.08)
-                            : Color.black.opacity(isGlass ? 0.08 : 0.04),
-                        lineWidth: 0.8
+                        LinearGradient(
+                            colors: [
+                                colorScheme == .dark ? Color.white.opacity(isGlass ? 0.22 : 0.08) : Color.white.opacity(0.9),
+                                colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.06)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.75
                     )
             )
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .shadow(
+                color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.05),
+                radius: isGlass ? 10 : 6,
+                x: 0,
+                y: 3
+            )
+    }
+}
+
+struct JoolsScaleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .opacity(configuration.isPressed ? 0.92 : 1.0)
+            .animation(.spring(response: 0.24, dampingFraction: 0.72), value: configuration.isPressed)
     }
 }
 
