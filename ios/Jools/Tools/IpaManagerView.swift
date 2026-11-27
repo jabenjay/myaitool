@@ -27,6 +27,47 @@ struct IpaManagerView: View {
     @State private var toastMsg: String?
 
     var body: some View {
+        mainContent
+            .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+            .navigationTitle("IPA 管理")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { toolbarMenu }
+            .modifier(
+                IpaImportersModifier(
+                    manager: manager,
+                    showIpaImporter: $showIpaImporter,
+                    showP12Importer: $showP12Importer,
+                    showProfileImporter: $showProfileImporter,
+                    pendingP12URL: $pendingP12URL,
+                    p12Password: $p12Password,
+                    p12Alias: $p12Alias,
+                    showP12PasswordAlert: $showP12PasswordAlert,
+                    selectedTab: $selectedTab,
+                    toastMsg: $toastMsg
+                )
+            )
+            .sheet(item: $signingTarget) { target in
+                signingConfigSheet(for: target)
+            }
+            .sheet(isPresented: shareSheetBinding) {
+                if let url = shareFileURL {
+                    IpaShareSheet(items: [url])
+                }
+            }
+            .alert(toastMsg ?? "", isPresented: toastAlertBinding) {
+                Button("确定", role: .cancel) {}
+            }
+    }
+
+    private var shareSheetBinding: Binding<Bool> {
+        Binding(get: { shareFileURL != nil }, set: { if !$0 { shareFileURL = nil } })
+    }
+
+    private var toastAlertBinding: Binding<Bool> {
+        Binding(get: { toastMsg != nil }, set: { if !$0 { toastMsg = nil } })
+    }
+
+    private var mainContent: some View {
         VStack(spacing: 0) {
             Picker("IPA 分类", selection: $selectedTab) {
                 Text("未签名 (\(manager.unsignedIpas.count))").tag(0)
@@ -56,101 +97,31 @@ struct IpaManagerView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
         }
-        .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
-        .navigationTitle("IPA 管理")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button {
-                        showIpaImporter = true
-                    } label: {
-                        Label("导入未签名 IPA", systemImage: "doc.badge.plus")
-                    }
-                    Button {
-                        showP12Importer = true
-                    } label: {
-                        Label("导入 P12 证书", systemImage: "key.fill")
-                    }
-                    Button {
-                        showProfileImporter = true
-                    } label: {
-                        Label("导入描述文件 (.mobileprovision)", systemImage: "doc.text.fill")
-                    }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarMenu: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Button {
+                    showIpaImporter = true
                 } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 19))
+                    Label("导入未签名 IPA", systemImage: "doc.badge.plus")
                 }
-            }
-        }
-        .fileImporter(
-            isPresented: $showIpaImporter,
-            allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data, .archive],
-            allowsMultipleSelection: false
-        ) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                do {
-                    let item = try manager.importIpa(from: url, asSigned: false)
-                    selectedTab = 0
-                    toastMsg = "已导入「\(item.appName)」到未签名列表"
-                } catch {
-                    toastMsg = "导入失败：\(error.localizedDescription)"
+                Button {
+                    showP12Importer = true
+                } label: {
+                    Label("导入 P12 证书", systemImage: "key.fill")
                 }
-            }
-        }
-        .fileImporter(
-            isPresented: $showP12Importer,
-            allowedContentTypes: [UTType(filenameExtension: "p12") ?? .pkcs12, .data],
-            allowsMultipleSelection: false
-        ) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                pendingP12URL = url
-                p12Password = ""
-                p12Alias = url.deletingPathExtension().lastPathComponent
-                showP12PasswordAlert = true
-            }
-        }
-        .fileImporter(
-            isPresented: $showProfileImporter,
-            allowedContentTypes: [UTType(filenameExtension: "mobileprovision") ?? .data],
-            allowsMultipleSelection: false
-        ) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                do {
-                    let prof = try manager.importProfile(from: url)
-                    selectedTab = 2
-                    toastMsg = "已导入描述文件「\(prof.name)」"
-                } catch {
-                    toastMsg = "导入失败：\(error.localizedDescription)"
+                Button {
+                    showProfileImporter = true
+                } label: {
+                    Label("导入描述文件 (.mobileprovision)", systemImage: "doc.text.fill")
                 }
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 19))
             }
-        }
-        .alert("导入 P12 证书", isPresented: $showP12PasswordAlert) {
-            TextField("证书备注名称", text: $p12Alias)
-            SecureField("P12 密码（无密码可留空）", text: $p12Password)
-            Button("验证并导入") {
-                if let url = pendingP12URL {
-                    do {
-                        let cert = try manager.importP12(from: url, password: p12Password, customName: p12Alias)
-                        selectedTab = 2
-                        toastMsg = "证书「\(cert.name)」验证通过并已保存"
-                    } catch {
-                        toastMsg = error.localizedDescription
-                    }
-                }
-            }
-            Button("取消", role: .cancel) {}
-        }
-        .sheet(item: $signingTarget) { target in
-            signingConfigSheet(for: target)
-        }
-        .sheet(isPresented: Binding(get: { shareFileURL != nil }, set: { if !$0 { shareFileURL = nil } })) {
-            if let url = shareFileURL {
-                IpaShareSheet(items: [url])
-            }
-        }
-        .alert(toastMsg ?? "", isPresented: Binding(get: { toastMsg != nil }, set: { if !$0 { toastMsg = nil } })) {
-            Button("确定", role: .cancel) {}
         }
     }
 
@@ -170,48 +141,52 @@ struct IpaManagerView: View {
                 } else {
                     ForEach(manager.unsignedIpas) { item in
                         ipaCard(item: item) {
-                            HStack(spacing: 8) {
-                                Button {
-                                    prepareSigning(item)
-                                } label: {
-                                    Label("签名", systemImage: "signature")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 7)
-                                        .background(Color.accentColor)
-                                        .foregroundColor(.white)
-                                        .clipShape(Capsule())
-                                }
-                                .buttonStyle(.plain)
-
-                                Button {
-                                    shareFileURL = manager.fileURL(for: item)
-                                } label: {
-                                    Image(systemName: "square.and.arrow.up")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .frame(width: 32, height: 32)
-                                        .background(Color.primary.opacity(0.06))
-                                        .clipShape(Circle())
-                                }
-                                .buttonStyle(.plain)
-
-                                Button(role: .destructive) {
-                                    manager.deleteIpa(item)
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.red)
-                                        .frame(width: 32, height: 32)
-                                        .background(Color.red.opacity(0.08))
-                                        .clipShape(Circle())
-                                }
-                                .buttonStyle(.plain)
-                            }
+                            unsignedActions(for: item)
                         }
                     }
                 }
             }
             .padding(16)
+        }
+    }
+
+    private func unsignedActions(for item: IpaPackageItem) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                prepareSigning(item)
+            } label: {
+                Label("签名", systemImage: "signature")
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Color.accentColor)
+                    .foregroundColor(.white)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                shareFileURL = manager.fileURL(for: item)
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 32, height: 32)
+                    .background(Color.primary.opacity(0.06))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+
+            Button(role: .destructive) {
+                manager.deleteIpa(item)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 14))
+                    .foregroundColor(.red)
+                    .frame(width: 32, height: 32)
+                    .background(Color.red.opacity(0.08))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -231,37 +206,41 @@ struct IpaManagerView: View {
                 } else {
                     ForEach(manager.signedIpas) { item in
                         ipaCard(item: item) {
-                            HStack(spacing: 8) {
-                                Button {
-                                    shareFileURL = manager.fileURL(for: item)
-                                } label: {
-                                    Label("安装 / 导出", systemImage: "arrow.down.app.fill")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 7)
-                                        .background(Color(red: 0.12, green: 0.65, blue: 0.36))
-                                        .foregroundColor(.white)
-                                        .clipShape(Capsule())
-                                }
-                                .buttonStyle(.plain)
-
-                                Button(role: .destructive) {
-                                    manager.deleteIpa(item)
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.red)
-                                        .frame(width: 32, height: 32)
-                                        .background(Color.red.opacity(0.08))
-                                        .clipShape(Circle())
-                                }
-                                .buttonStyle(.plain)
-                            }
+                            signedActions(for: item)
                         }
                     }
                 }
             }
             .padding(16)
+        }
+    }
+
+    private func signedActions(for item: IpaPackageItem) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                shareFileURL = manager.fileURL(for: item)
+            } label: {
+                Label("安装 / 导出", systemImage: "arrow.down.app.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Color(red: 0.12, green: 0.65, blue: 0.36))
+                    .foregroundColor(.white)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+
+            Button(role: .destructive) {
+                manager.deleteIpa(item)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 14))
+                    .foregroundColor(.red)
+                    .frame(width: 32, height: 32)
+                    .background(Color.red.opacity(0.08))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -286,30 +265,7 @@ struct IpaManagerView: View {
                         .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 18)
                 } else {
                     ForEach(manager.certs) { cert in
-                        HStack(spacing: 12) {
-                            Image(systemName: "key.fill")
-                                .font(.system(size: 18))
-                                .foregroundColor(.white)
-                                .frame(width: 40, height: 40)
-                                .background(Color.orange.gradient)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(cert.name).font(.system(size: 14.5, weight: .semibold))
-                                Text(cert.commonName)
-                                    .font(.system(size: 11.5))
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            Button(role: .destructive) {
-                                manager.deleteCert(cert)
-                            } label: {
-                                Image(systemName: "trash").foregroundColor(.red)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(14)
-                        .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 18)
+                        certRow(cert)
                     }
                 }
 
@@ -331,35 +287,66 @@ struct IpaManagerView: View {
                         .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 18)
                 } else {
                     ForEach(manager.profiles) { prof in
-                        HStack(spacing: 12) {
-                            Image(systemName: "doc.text.fill")
-                                .font(.system(size: 18))
-                                .foregroundColor(.white)
-                                .frame(width: 40, height: 40)
-                                .background(Color.blue.gradient)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(prof.name).font(.system(size: 14.5, weight: .semibold))
-                                Text("\(prof.profileType) · \(prof.appId)")
-                                    .font(.system(size: 11.5))
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            Button(role: .destructive) {
-                                manager.deleteProfile(prof)
-                            } label: {
-                                Image(systemName: "trash").foregroundColor(.red)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(14)
-                        .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 18)
+                        profileRow(prof)
                     }
                 }
             }
             .padding(16)
         }
+    }
+
+    private func certRow(_ cert: P12CertItem) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "key.fill")
+                .font(.system(size: 18))
+                .foregroundColor(.white)
+                .frame(width: 40, height: 40)
+                .background(Color.orange.gradient)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(cert.name).font(.system(size: 14.5, weight: .semibold))
+                Text(cert.commonName)
+                    .font(.system(size: 11.5))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button(role: .destructive) {
+                manager.deleteCert(cert)
+            } label: {
+                Image(systemName: "trash").foregroundColor(.red)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 18)
+    }
+
+    private func profileRow(_ prof: ProvisionProfileItem) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "doc.text.fill")
+                .font(.system(size: 18))
+                .foregroundColor(.white)
+                .frame(width: 40, height: 40)
+                .background(Color.blue.gradient)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(prof.name).font(.system(size: 14.5, weight: .semibold))
+                Text("\(prof.profileType) · \(prof.appId)")
+                    .font(.system(size: 11.5))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button(role: .destructive) {
+                manager.deleteProfile(prof)
+            } label: {
+                Image(systemName: "trash").foregroundColor(.red)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 18)
     }
 
     // MARK: - Signing Sheet
@@ -529,6 +516,81 @@ struct IpaManagerView: View {
         f.timeZone = TimeZone.current
         f.dateFormat = "yyyy-MM-dd HH:mm"
         return f.string(from: Date(timeIntervalSince1970: ts))
+    }
+}
+
+private struct IpaImportersModifier: ViewModifier {
+    let manager: IpaManager
+    @Binding var showIpaImporter: Bool
+    @Binding var showP12Importer: Bool
+    @Binding var showProfileImporter: Bool
+    @Binding var pendingP12URL: URL?
+    @Binding var p12Password: String
+    @Binding var p12Alias: String
+    @Binding var showP12PasswordAlert: Bool
+    @Binding var selectedTab: Int
+    @Binding var toastMsg: String?
+
+    func body(content: Content) -> some View {
+        content
+            .fileImporter(
+                isPresented: $showIpaImporter,
+                allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data, .archive],
+                allowsMultipleSelection: false
+            ) { result in
+                if case .success(let urls) = result, let url = urls.first {
+                    do {
+                        let item = try manager.importIpa(from: url, asSigned: false)
+                        selectedTab = 0
+                        toastMsg = "已导入「\(item.appName)」到未签名列表"
+                    } catch {
+                        toastMsg = "导入失败：\(error.localizedDescription)"
+                    }
+                }
+            }
+            .fileImporter(
+                isPresented: $showP12Importer,
+                allowedContentTypes: [UTType(filenameExtension: "p12") ?? .pkcs12, .data],
+                allowsMultipleSelection: false
+            ) { result in
+                if case .success(let urls) = result, let url = urls.first {
+                    pendingP12URL = url
+                    p12Password = ""
+                    p12Alias = url.deletingPathExtension().lastPathComponent
+                    showP12PasswordAlert = true
+                }
+            }
+            .fileImporter(
+                isPresented: $showProfileImporter,
+                allowedContentTypes: [UTType(filenameExtension: "mobileprovision") ?? .data],
+                allowsMultipleSelection: false
+            ) { result in
+                if case .success(let urls) = result, let url = urls.first {
+                    do {
+                        let prof = try manager.importProfile(from: url)
+                        selectedTab = 2
+                        toastMsg = "已导入描述文件「\(prof.name)」"
+                    } catch {
+                        toastMsg = "导入失败：\(error.localizedDescription)"
+                    }
+                }
+            }
+            .alert("导入 P12 证书", isPresented: $showP12PasswordAlert) {
+                TextField("证书备注名称", text: $p12Alias)
+                SecureField("P12 密码（无密码可留空）", text: $p12Password)
+                Button("验证并导入") {
+                    if let url = pendingP12URL {
+                        do {
+                            let cert = try manager.importP12(from: url, password: p12Password, customName: p12Alias)
+                            selectedTab = 2
+                            toastMsg = "证书「\(cert.name)」验证通过并已保存"
+                        } catch {
+                            toastMsg = error.localizedDescription
+                        }
+                    }
+                }
+                Button("取消", role: .cancel) {}
+            }
     }
 }
 

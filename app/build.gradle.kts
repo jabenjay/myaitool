@@ -79,7 +79,9 @@ android {
                 "META-INF/*.version",
                 "META-INF/*.kotlin_module",
                 "DebugProbesKt.bin",
-                "kotlin-tooling-metadata.json"
+                "kotlin-tooling-metadata.json",
+                "META-INF/versions/*/OSGI-INF/MANIFEST.MF",
+                "META-INF/INDEX.LIST"
             )
         }
     }

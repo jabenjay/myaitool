@@ -359,7 +359,8 @@ final class IpaManager: ObservableObject {
         var files2Map: [String: Any] = [:]
         if let enumerator = fm.enumerator(at: appBundle, includingPropertiesForKeys: [.isRegularFileKey]) {
             let basePath = appBundle.path + "/"
-            for case let fileUrl as URL in enumerator {
+            let allUrls = (enumerator.allObjects as? [URL]) ?? []
+            for fileUrl in allUrls {
                 let rel = fileUrl.path.replacingOccurrences(of: basePath, with: "")
                 if rel.hasPrefix("_CodeSignature/") || rel == "Info.plist" { continue }
                 let vals = try? fileUrl.resourceValues(forKeys: [.isRegularFileKey])
