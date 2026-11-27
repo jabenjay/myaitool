@@ -447,7 +447,7 @@ fun PocketToolboxApp(
                     val argUrl = entry.arguments?.getString("url").orEmpty()
                     val decodedUrl = if (argUrl.isNotEmpty()) Uri.decode(argUrl) else ""
                     BrowserScreen(
-                        initialUrl = decodedUrl.ifBlank { browserHomeUrl },
+                        initialUrl = decodedUrl,
                         homeUrl = browserHomeUrl,
                         bookmarks = bookmarks,
                         proxyState = proxyState,

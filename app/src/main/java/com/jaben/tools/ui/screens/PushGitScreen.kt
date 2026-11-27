@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,7 +44,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -129,6 +127,7 @@ fun PushGitScreen(
 
     var branch by remember { mutableStateOf(engine.loadSavedBranch()) }
     var branches by remember { mutableStateOf(listOf("main")) }
+    var branchMenuExpanded by remember { mutableStateOf(false) }
     var commitMessage by remember { mutableStateOf(engine.loadSavedMessage()) }
 
     var selectedFiles by remember { mutableStateOf<List<PushFileEntry>>(emptyList()) }
@@ -178,7 +177,12 @@ fun PushGitScreen(
                 }
             }
             engine.listBranches(tokenToUse, targetRepo).onSuccess { bList ->
-                if (bList.isNotEmpty()) branches = bList
+                if (bList.isNotEmpty()) {
+                    branches = bList
+                    if (branch.isBlank() || branch !in bList) {
+                        branch = if ("main" in bList) "main" else bList.first()
+                    }
+                }
             }
             engine.listWorkflows(tokenToUse, targetRepo).onSuccess { wfList ->
                 workflows = wfList
@@ -474,8 +478,13 @@ fun PushGitScreen(
                                             targetRepo = r
                                             diffSummary = null
                                             scope.launch {
-                                                engine.listBranches(pat, r).onSuccess {
-                                                    if (it.isNotEmpty()) branches = it
+                                                engine.listBranches(pat, r).onSuccess { bList ->
+                                                    if (bList.isNotEmpty()) {
+                                                        branches = bList
+                                                        if (branch.isBlank() || branch !in bList) {
+                                                            branch = if ("main" in bList) "main" else bList.first()
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -536,27 +545,49 @@ fun PushGitScreen(
                 ) {
                     Text("分支与提交信息", fontSize = 14.sp, fontWeight = FontWeight.Bold)
 
-                    OutlinedTextField(
-                        value = branch,
-                        onValueChange = {
-                            branch = it
-                            diffSummary = null
-                        },
-                        label = { Text("Branch") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(branches) { b ->
-                            FilterChip(
-                                selected = branch == b,
-                                onClick = {
-                                    branch = b
-                                    diffSummary = null
-                                },
-                                label = { Text(b, fontSize = 12.sp) }
-                            )
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { if (branches.isNotEmpty()) branchMenuExpanded = true }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "分支: ${branch.ifBlank { "main" }}",
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(if (branches.isEmpty()) "待拉取" else "▾ (${branches.size})", fontSize = 12.sp)
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = branchMenuExpanded,
+                            onDismissRequest = { branchMenuExpanded = false }
+                        ) {
+                            branches.forEach { b ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = b,
+                                            fontWeight = if (b == branch) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    onClick = {
+                                        branchMenuExpanded = false
+                                        branch = b
+                                        diffSummary = null
+                                    }
+                                )
+                            }
                         }
                     }
 
@@ -728,6 +759,8 @@ fun PushGitScreen(
                     scope.launch {
                         isInspecting = true
                         pushStatus = "正在比对仓库文件..."
+                        delay(60)
+                        mainScrollState.animateScrollTo(mainScrollState.maxValue)
                         engine.inspectChanges(pat, targetRepo, branch, selectedFiles)
                             .onSuccess { diff ->
                                 diffSummary = diff
@@ -742,12 +775,16 @@ fun PushGitScreen(
                                 Toast.makeText(context, "比对失败", Toast.LENGTH_SHORT).show()
                             }
                         isInspecting = false
+                        delay(60)
+                        mainScrollState.animateScrollTo(mainScrollState.maxValue)
                     }
                 } else {
                     scope.launch {
                         isPushing = true
                         pushDone = 0
                         pushTotal = if (forceFullPush) selectedFiles.size else currentDiff.uploadFiles.size
+                        delay(60)
+                        mainScrollState.animateScrollTo(mainScrollState.maxValue)
                         engine.pushDiff(
                             pat = pat,
                             ownerRepoInput = targetRepo,
@@ -769,6 +806,8 @@ fun PushGitScreen(
                             Toast.makeText(context, "推送失败", Toast.LENGTH_SHORT).show()
                         }
                         isPushing = false
+                        delay(60)
+                        mainScrollState.animateScrollTo(mainScrollState.maxValue)
                     }
                 }
             },

@@ -211,14 +211,21 @@ fun BrowserScreen(
     val barFg = if (visuals.isDark) Color(0xFFF5F5F7) else Color(0xFF1C1C1E)
     val menuBg = if (visuals.isDark) Color(0xFF1C1F28) else Color(0xFFFFFFFF)
 
+    val browserStatePrefs = remember(context) {
+        context.getSharedPreferences("jools_browser_state", android.content.Context.MODE_PRIVATE)
+    }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     val startUrl = remember(initialUrl) {
         val t = initialUrl.trim()
+        val lastSaved = browserStatePrefs.getString("last_visited_url", "").orEmpty().trim()
         when {
-            t.isEmpty() -> homeUrl
-            t.startsWith("http://") || t.startsWith("https://") -> t
-            t.contains(".") && !t.contains(" ") -> "https://$t"
-            else -> "https://www.bing.com/search?q=${android.net.Uri.encode(t)}"
+            t.isNotEmpty() -> when {
+                t.startsWith("http://") || t.startsWith("https://") -> t
+                t.contains(".") && !t.contains(" ") -> "https://$t"
+                else -> "https://www.bing.com/search?q=${android.net.Uri.encode(t)}"
+            }
+            lastSaved.startsWith("http://") || lastSaved.startsWith("https://") -> lastSaved
+            else -> homeUrl
         }
     }
     var urlInput by remember { mutableStateOf(startUrl) }
@@ -336,6 +343,10 @@ fun BrowserScreen(
 
     DisposableEffect(Unit) {
         onDispose {
+            val lastUrl = webViewRef?.url?.trim().orEmpty()
+            if (lastUrl.startsWith("http://") || lastUrl.startsWith("https://")) {
+                browserStatePrefs.edit().putString("last_visited_url", lastUrl).apply()
+            }
             if (customVideoView != null) {
                 exitVideoFullscreen()
             }
@@ -743,6 +754,7 @@ fun BrowserScreen(
                                 showLoadingOverlay = false
                                 if (!url.isNullOrEmpty() && (url.startsWith("http://") || url.startsWith("https://"))) {
                                     urlInput = url
+                                    browserStatePrefs.edit().putString("last_visited_url", url).apply()
                                 }
                                 canGoBack = view?.canGoBack() == true
                                 canGoForward = view?.canGoForward() == true
