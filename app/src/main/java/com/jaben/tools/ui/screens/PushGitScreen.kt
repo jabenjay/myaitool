@@ -141,6 +141,8 @@ fun PushGitScreen(
     var selectedFiles by remember { mutableStateOf<List<PushFileEntry>>(emptyList()) }
     var lastPickerMode by remember { mutableStateOf(engine.loadLastPickerMode()) }
     var diffSummary by remember { mutableStateOf<GitDiffSummary?>(null) }
+    var selectedUploadPaths by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selectedDeletePaths by remember { mutableStateOf<Set<String>>(emptySet()) }
     var syncDeletions by remember { mutableStateOf(false) }
     var forceFullPush by remember { mutableStateOf(false) }
 
@@ -690,13 +692,43 @@ fun PushGitScreen(
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             items(diff.addedFiles, key = { "add_${it.relativePath}" }) { f ->
-                                DiffRowItem("新增", Color(0xFF1B8E3E), f.relativePath)
+                                val isChecked = f.relativePath in selectedUploadPaths
+                                DiffRowItem(
+                                    label = "新增",
+                                    badgeColor = Color(0xFF1B8E3E),
+                                    path = f.relativePath,
+                                    checked = isChecked,
+                                    onCheckedChange = { checked ->
+                                        selectedUploadPaths = if (checked) selectedUploadPaths + f.relativePath
+                                        else selectedUploadPaths - f.relativePath
+                                    }
+                                )
                             }
                             items(diff.modifiedFiles, key = { "mod_${it.relativePath}" }) { f ->
-                                DiffRowItem("修改", Color(0xFFD97706), f.relativePath)
+                                val isChecked = f.relativePath in selectedUploadPaths
+                                DiffRowItem(
+                                    label = "修改",
+                                    badgeColor = Color(0xFFD97706),
+                                    path = f.relativePath,
+                                    checked = isChecked,
+                                    onCheckedChange = { checked ->
+                                        selectedUploadPaths = if (checked) selectedUploadPaths + f.relativePath
+                                        else selectedUploadPaths - f.relativePath
+                                    }
+                                )
                             }
                             items(diff.deletedPaths, key = { "del_$it" }) { p ->
-                                DiffRowItem("删除", Color(0xFFDC2626), p)
+                                val isChecked = p in selectedDeletePaths
+                                DiffRowItem(
+                                    label = "删除",
+                                    badgeColor = Color(0xFFDC2626),
+                                    path = p,
+                                    checked = isChecked,
+                                    onCheckedChange = { checked ->
+                                        selectedDeletePaths = if (checked) selectedDeletePaths + p
+                                        else selectedDeletePaths - p
+                                    }
+                                )
                             }
                         }
                     } else if (selectedFiles.isNotEmpty()) {
@@ -762,8 +794,10 @@ fun PushGitScreen(
         // Bottom Action Button: First Inspect Diff, then Push Changes
         val currentDiff = diffSummary
         val readyToPushCount = if (currentDiff != null) {
-            val uploadCnt = if (forceFullPush) selectedFiles.size else currentDiff.uploadFiles.size
-            uploadCnt + if (syncDeletions) currentDiff.deletedPaths.size else 0
+            val uploadCnt = if (forceFullPush) selectedFiles.size
+            else currentDiff.uploadFiles.count { it.relativePath in selectedUploadPaths }
+            val deleteCnt = if (syncDeletions) currentDiff.deletedPaths.count { it in selectedDeletePaths } else 0
+            uploadCnt + deleteCnt
         } else 0
 
         Button(
@@ -779,6 +813,8 @@ fun PushGitScreen(
                         engine.inspectChanges(pat, targetRepo, branch, selectedFiles)
                             .onSuccess { diff ->
                                 diffSummary = diff
+                                selectedUploadPaths = diff.uploadFiles.map { it.relativePath }.toSet()
+                                selectedDeletePaths = diff.deletedPaths.toSet()
                                 pushStatus = if (diff.uploadFiles.isEmpty() && diff.deletedPaths.isEmpty()) {
                                     "与仓库完全一致，无需推送"
                                 } else {
@@ -798,7 +834,12 @@ fun PushGitScreen(
                         isPushing = true
                         pushDone = 0
                         shouldStickBottom = true
-                        pushTotal = if (forceFullPush) selectedFiles.size else currentDiff.uploadFiles.size
+                        val filteredDiff = currentDiff.copy(
+                            addedFiles = currentDiff.addedFiles.filter { it.relativePath in selectedUploadPaths },
+                            modifiedFiles = currentDiff.modifiedFiles.filter { it.relativePath in selectedUploadPaths },
+                            deletedPaths = currentDiff.deletedPaths.filter { it in selectedDeletePaths }
+                        )
+                        pushTotal = if (forceFullPush) selectedFiles.size else filteredDiff.uploadFiles.size
                         delay(60)
                         mainScrollState.animateScrollTo(mainScrollState.maxValue)
                         engine.pushDiff(
@@ -806,7 +847,7 @@ fun PushGitScreen(
                             ownerRepoInput = targetRepo,
                             branchInput = branch,
                             commitMessageInput = commitMessage,
-                            diff = currentDiff,
+                            diff = filteredDiff,
                             syncDeletions = syncDeletions,
                             overrideFiles = if (forceFullPush) selectedFiles else null
                         ) { done, total, cur ->
@@ -1677,16 +1718,28 @@ fun PushGitScreen(
 }
 
 @Composable
-private fun DiffRowItem(label: String, badgeColor: Color, path: String) {
+private fun DiffRowItem(
+    label: String,
+    badgeColor: Color,
+    path: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-            .padding(horizontal = 8.dp, vertical = 5.dp),
+            .clickable { onCheckedChange(!checked) }
+            .padding(start = 2.dp, end = 8.dp, top = 2.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
+        Checkbox(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.size(32.dp)
+        )
         Surface(shape = RoundedCornerShape(6.dp), color = badgeColor.copy(alpha = 0.16f)) {
             Text(
                 text = label,

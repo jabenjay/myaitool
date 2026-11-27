@@ -74,6 +74,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -453,17 +454,19 @@ fun BuiltInVideoPlayerOverlay(
                     .background(Color.Black)
                     .pointerInput(screenWidthPx, screenHeightPx) {
                         awaitEachGesture {
-                            awaitFirstDown(requireUnconsumed = false)
+                            val firstDown = awaitFirstDown(requireUnconsumed = false)
+                            var childConsumed = firstDown.isConsumed
                             var moved = false
                             var wasMultiTouch = false
                             var totalPanDist = 0f
                             val downTime = System.currentTimeMillis()
-                            do {
-                                val event = awaitPointerEvent()
-                                // If child (e.g. ExpressiveSlimSeekBar) already consumed the gesture, do not drag window!
-                                if (event.changes.any { it.isConsumed }) {
-                                    break
-                                }
+                            if (!childConsumed) {
+                                do {
+                                    val event = awaitPointerEvent()
+                                    if (event.changes.any { it.isConsumed }) {
+                                        childConsumed = true
+                                        break
+                                    }
                                 if (event.changes.size > 1) wasMultiTouch = true
                                 val zoomChange = event.calculateZoom()
                                 val panChange = event.calculatePan()
@@ -495,7 +498,12 @@ fun BuiltInVideoPlayerOverlay(
                                         event.changes.forEach { it.consume() }
                                     }
                                 }
-                            } while (event.changes.any { it.pressed })
+                                } while (event.changes.any { it.pressed })
+                            }
+
+                            if (childConsumed) {
+                                return@awaitEachGesture
+                            }
 
                             if (!moved && !wasMultiTouch && (System.currentTimeMillis() - downTime) < 350L) {
                                 controlsVisible = !controlsVisible
@@ -614,6 +622,13 @@ fun BuiltInVideoPlayerOverlay(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .align(Alignment.TopCenter)
+                                .pointerInput(Unit) {
+                                    awaitEachGesture {
+                                        val d = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
+                                        d.consume()
+                                        controlInteractionTick++
+                                    }
+                                }
                                 .background(
                                     Brush.verticalGradient(
                                         listOf(Color.Black.copy(alpha = 0.72f), Color.Transparent)
@@ -715,6 +730,13 @@ fun BuiltInVideoPlayerOverlay(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .align(Alignment.BottomCenter)
+                                .pointerInput(Unit) {
+                                    awaitEachGesture {
+                                        val d = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
+                                        d.consume()
+                                        controlInteractionTick++
+                                    }
+                                }
                                 .background(
                                     Brush.verticalGradient(
                                         listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f))
