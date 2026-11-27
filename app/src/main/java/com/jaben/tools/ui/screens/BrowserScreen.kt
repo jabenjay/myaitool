@@ -257,6 +257,7 @@ fun BrowserScreen(
     var detectedVideoUrl by remember { mutableStateOf<String?>(null) }
     var detectedVideoPosMs by remember { mutableStateOf(0L) }
     var activeBuiltInVideoUrl by remember { mutableStateOf<String?>(null) }
+    var userDismissedFloatingForPage by remember { mutableStateOf(false) }
     var webViewUserAgent by remember { mutableStateOf("Mozilla/5.0") }
 
     LaunchedEffect(Unit) {
@@ -576,6 +577,25 @@ fun BrowserScreen(
                                     }
                                 }
                             }
+
+                            @JavascriptInterface
+                            fun onVideoPlayRequested(src: String?, posSec: Double) {
+                                val clean = src?.trim().orEmpty()
+                                if (clean.startsWith("http://") || clean.startsWith("https://")) {
+                                    post {
+                                        detectedVideoUrl = clean
+                                        val posMs = (posSec * 1000.0).toLong().coerceAtLeast(0L)
+                                        detectedVideoPosMs = posMs
+                                        if (!userDismissedFloatingForPage && activeBuiltInVideoUrl == null) {
+                                            evaluateJavascript(
+                                                "document.querySelectorAll('video').forEach(function(v){v.pause();});",
+                                                null
+                                            )
+                                            activeBuiltInVideoUrl = clean
+                                        }
+                                    }
+                                }
+                            }
                         }, "JoolsVideoBridge")
                         clipToOutline = true
                         setBackgroundColor(barBg.toArgb())
@@ -612,6 +632,8 @@ fun BrowserScreen(
                                 isLoading = true
                                 detectedVideoUrl = null
                                 detectedVideoPosMs = 0L
+                                userDismissedFloatingForPage = false
+                                activeBuiltInVideoUrl = null
                                 if (!url.isNullOrEmpty() && (url.startsWith("http://") || url.startsWith("https://"))) {
                                     urlInput = url
                                 }
@@ -774,12 +796,13 @@ fun BrowserScreen(
                     .zIndex(1f)
             ) {
                 Surface(
-                    shape = RoundedCornerShape(24.dp),
+                    shape = CircleShape,
                     color = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     shadowElevation = 6.dp,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(24.dp))
+                        .size(44.dp)
+                        .clip(CircleShape)
                         .clickable {
                             val vUrl = detectedVideoUrl ?: return@clickable
                             runCatching {
@@ -791,20 +814,11 @@ fun BrowserScreen(
                             activeBuiltInVideoUrl = vUrl
                         }
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                         Icon(
                             imageVector = Icons.Rounded.PlayCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "内置播放器",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
+                            contentDescription = "内置播放器",
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
@@ -1292,7 +1306,6 @@ fun BrowserScreen(
 
     if (showMenuSheet) {
         val activeDownloadCount = downloadItems.count { it.status == DownloadStatus.DOWNLOADING }
-        val totalRuleCount = compiledAdRules.totalCount
         ModalBottomSheet(
             onDismissRequest = { showMenuSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1301,116 +1314,134 @@ fun BrowserScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Text(
-                    text = "浏览器菜单",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
-
-                // 1. 下载管理
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable {
-                            showMenuSheet = false
-                            showDownloadsDialog = true
-                        }
+                // Row 1 (4 columns: 下载管理, 屏蔽广告, 预留空位 x2)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
+                    // 1. 下载管理
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Download,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("下载管理", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                text = if (activeDownloadCount > 0) "正在下载 $activeDownloadCount 个任务" else "查看与管理下载文件",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                // 2. 屏蔽广告（点击开关，长按管理订阅与自定义屏蔽域名）
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .combinedClickable(
-                            onClick = {
-                                val next = !adBlockEnabled
-                                adBlockEnabled = next
-                                adBlockManager.setEnabled(next)
-                                Toast.makeText(
-                                    context,
-                                    if (next) "已开启广告屏蔽" else "已关闭广告屏蔽",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                                runCatching { webViewRef?.reload() }
-                            },
-                            onLongClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            .weight(1f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable {
                                 showMenuSheet = false
-                                showAdBlockRulesDialog = true
+                                showDownloadsDialog = true
                             }
-                        )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(vertical = 10.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Block,
-                            contentDescription = null,
-                            tint = if (adBlockEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("屏蔽广告", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                text = "点击开关 · 长按管理订阅与域名 (${totalRuleCount} 条)",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = adBlockEnabled,
-                            onCheckedChange = { next ->
-                                adBlockEnabled = next
-                                adBlockManager.setEnabled(next)
-                                Toast.makeText(
-                                    context,
-                                    if (next) "已开启广告屏蔽" else "已关闭广告屏蔽",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                                runCatching { webViewRef?.reload() }
+                        Box(contentAlignment = Alignment.Center) {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                                modifier = Modifier.size(46.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Download,
+                                        contentDescription = "下载管理",
+                                        tint = if (activeDownloadCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
                             }
+                            if (activeDownloadCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "下载管理",
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
+
+                    // 2. 屏蔽广告（点击开关，长按管理订阅与域名）
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .combinedClickable(
+                                onClick = {
+                                    val next = !adBlockEnabled
+                                    adBlockEnabled = next
+                                    adBlockManager.setEnabled(next)
+                                    Toast.makeText(
+                                        context,
+                                        if (next) "已开启广告屏蔽" else "已关闭广告屏蔽",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    runCatching { webViewRef?.reload() }
+                                },
+                                onLongClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    showMenuSheet = false
+                                    showAdBlockRulesDialog = true
+                                }
+                            )
+                            .padding(vertical = 10.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (adBlockEnabled) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                            },
+                            modifier = Modifier.size(46.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Block,
+                                    contentDescription = "屏蔽广告",
+                                    tint = if (adBlockEnabled) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = if (adBlockEnabled) "屏蔽广告·开" else "屏蔽广告·关",
+                            fontSize = 12.sp,
+                            color = if (adBlockEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.weight(1f))
+                    Spacer(modifier = Modifier.weight(1f))
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                // Row 2 (4 columns reserved)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(74.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Spacer(modifier = Modifier.weight(1f))
+                    Spacer(modifier = Modifier.weight(1f))
+                    Spacer(modifier = Modifier.weight(1f))
+                    Spacer(modifier = Modifier.weight(1f))
+                }
             }
         }
     }
@@ -1685,7 +1716,17 @@ fun BrowserScreen(
             pageTitle = pageTitle,
             userAgent = webViewUserAgent,
             initialPositionMs = detectedVideoPosMs,
-            onClose = { activeBuiltInVideoUrl = null }
+            onDownloadVideo = { downloadUrl ->
+                onStartDownload(downloadUrl, webViewUserAgent, null, "video/mp4", -1L)
+                Toast.makeText(context, "开始下载", Toast.LENGTH_SHORT).show()
+            },
+            onClose = {
+                activeBuiltInVideoUrl = null
+                userDismissedFloatingForPage = true
+                runCatching {
+                    webViewRef?.evaluateJavascript("window.__joolsAutoHijack = false;", null)
+                }
+            }
         )
     }
 
@@ -2051,25 +2092,42 @@ private const val VIDEO_DETECTOR_JS = """
     return;
   }
   window.__joolsVideoHooked = true;
+  if (window.__joolsAutoHijack === undefined) {
+    window.__joolsAutoHijack = true;
+  }
+  function getVideoSrc(v) {
+    var src = v.currentSrc || v.src || '';
+    if (!src) {
+      var s = v.querySelector('source');
+      if (s) src = s.src || '';
+    }
+    return src;
+  }
   function scanVideos() {
     try {
       var vids = document.querySelectorAll('video');
       for (var i = 0; i < vids.length; i++) {
-        var v = vids[i];
-        var src = v.currentSrc || v.src || '';
-        if (!src) {
-          var s = v.querySelector('source');
-          if (s) src = s.src || '';
-        }
+        var src = getVideoSrc(vids[i]);
         if (src && (src.indexOf('http://') === 0 || src.indexOf('https://') === 0)) {
-          window.JoolsVideoBridge && window.JoolsVideoBridge.onVideoFound(src, v.currentTime || 0);
+          window.JoolsVideoBridge && window.JoolsVideoBridge.onVideoFound(src, vids[i].currentTime || 0);
           break;
         }
       }
     } catch (e) {}
   }
   document.addEventListener('play', function(e) {
-    if (e.target && e.target.tagName === 'VIDEO') scanVideos();
+    var v = e.target;
+    if (v && v.tagName === 'VIDEO') {
+      var src = getVideoSrc(v);
+      if (src && (src.indexOf('http://') === 0 || src.indexOf('https://') === 0)) {
+        if (window.__joolsAutoHijack !== false && window.JoolsVideoBridge) {
+          v.pause();
+          window.JoolsVideoBridge.onVideoPlayRequested(src, v.currentTime || 0);
+        } else if (window.JoolsVideoBridge) {
+          window.JoolsVideoBridge.onVideoFound(src, v.currentTime || 0);
+        }
+      }
+    }
   }, true);
   setTimeout(scanVideos, 800);
   setTimeout(scanVideos, 2500);

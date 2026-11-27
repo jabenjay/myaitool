@@ -14,15 +14,18 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -30,13 +33,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Forward10
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Replay10
-import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,11 +58,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -79,6 +84,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -88,12 +94,13 @@ fun BuiltInVideoPlayerOverlay(
     pageTitle: String,
     userAgent: String,
     initialPositionMs: Long = 0L,
+    onDownloadVideo: (String) -> Unit,
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findHostActivity() }
 
-    var isLandscape by remember { mutableStateOf(true) }
+    var isFullscreen by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
     var isPlaying by remember { mutableStateOf(true) }
     var isBuffering by remember { mutableStateOf(true) }
@@ -104,7 +111,10 @@ fun BuiltInVideoPlayerOverlay(
     var playbackSpeed by remember { mutableFloatStateOf(1f) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    val speeds = remember { listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f) }
+    var floatOffsetX by remember { mutableFloatStateOf(0f) }
+    var floatOffsetY by remember { mutableFloatStateOf(180f) }
+
+    val speeds = remember { listOf(0.5f, 0.75f, 1.0f, 1.28f, 1.5f, 2.0f) }
 
     val exoPlayer = remember(videoUrl, pageUrl) {
         val cookie = runCatching { CookieManager.getInstance().getCookie(pageUrl) }.getOrNull().orEmpty()
@@ -128,33 +138,46 @@ fun BuiltInVideoPlayerOverlay(
             }
     }
 
-    fun closePlayer() {
+    fun applyFullscreenSystemUi(fullscreen: Boolean) {
         activity?.let { act ->
             val window = act.window
             if (window != null) {
-                WindowCompat.getInsetsController(window, window.decorView)
-                    .show(WindowInsetsCompat.Type.systemBars())
+                val controller = WindowCompat.getInsetsController(window, window.decorView)
+                if (fullscreen) {
+                    controller.systemBarsBehavior =
+                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    controller.hide(WindowInsetsCompat.Type.systemBars())
+                } else {
+                    controller.show(WindowInsetsCompat.Type.systemBars())
+                }
             }
-            act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            act.requestedOrientation = if (fullscreen) {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } else {
+                ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
         }
+    }
+
+    fun closePlayer() {
+        applyFullscreenSystemUi(false)
         onClose()
     }
 
     BackHandler(enabled = true) {
-        closePlayer()
+        if (isFullscreen) {
+            isFullscreen = false
+            applyFullscreenSystemUi(false)
+        } else {
+            closePlayer()
+        }
+    }
+
+    LaunchedEffect(isFullscreen) {
+        applyFullscreenSystemUi(isFullscreen)
     }
 
     DisposableEffect(exoPlayer) {
-        activity?.let { act ->
-            act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            val window = act.window
-            if (window != null) {
-                val controller = WindowCompat.getInsetsController(window, window.decorView)
-                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                controller.hide(WindowInsetsCompat.Type.systemBars())
-            }
-        }
-
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 isBuffering = state == Player.STATE_BUFFERING
@@ -169,7 +192,7 @@ fun BuiltInVideoPlayerOverlay(
 
             override fun onPlayerError(error: PlaybackException) {
                 isBuffering = false
-                errorMessage = "无法直接播放该视频流（${error.errorCodeName}）"
+                errorMessage = "无法播放该视频（${error.errorCodeName}）"
             }
         }
         exoPlayer.addListener(listener)
@@ -177,14 +200,7 @@ fun BuiltInVideoPlayerOverlay(
         onDispose {
             exoPlayer.removeListener(listener)
             exoPlayer.release()
-            activity?.let { act ->
-                val window = act.window
-                if (window != null) {
-                    WindowCompat.getInsetsController(window, window.decorView)
-                        .show(WindowInsetsCompat.Type.systemBars())
-                }
-                act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            }
+            applyFullscreenSystemUi(false)
         }
     }
 
@@ -208,261 +224,259 @@ fun BuiltInVideoPlayerOverlay(
         }
     }
 
-    Box(
-        modifier = Modifier
+    val containerModifier = if (isFullscreen) {
+        Modifier
             .fillMaxSize()
             .background(Color.Black)
             .zIndex(25f)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) {
-                controlsVisible = !controlsVisible
-            }
-    ) {
-        AndroidView(
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    player = exoPlayer
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+    } else {
+        Modifier
+            .fillMaxSize()
+            .zIndex(25f)
+    }
 
-        if (isBuffering && errorMessage == null) {
-            CircularProgressIndicator(
-                color = Color.White,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(44.dp)
-            )
+    // In floating mode, outer Box does NOT intercept touches outside the floating window
+    Box(modifier = containerModifier) {
+        val playerBoxModifier = if (isFullscreen) {
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { controlsVisible = !controlsVisible }
+        } else {
+            Modifier
+                .align(Alignment.TopCenter)
+                .offset { IntOffset(floatOffsetX.roundToInt(), floatOffsetY.roundToInt()) }
+                .fillMaxWidth(0.92f)
+                .aspectRatio(16f / 9f)
+                .shadow(12.dp, RoundedCornerShape(14.dp))
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color.Black)
+                .pointerInput(Unit) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        floatOffsetX += dragAmount.x
+                        floatOffsetY += dragAmount.y
+                    }
+                }
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { controlsVisible = !controlsVisible }
         }
 
-        errorMessage?.let { msg ->
-            Column(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(msg, color = Color.White, fontSize = 14.sp)
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = Color.White.copy(alpha = 0.2f),
-                    modifier = Modifier.clickable { closePlayer() }
-                ) {
-                    Text(
-                        text = "返回网页",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
-                    )
-                }
-            }
-        }
-
-        AnimatedVisibility(
-            visible = controlsVisible,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Top bar
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.TopCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Black.copy(alpha = 0.72f), Color.Transparent)
-                            )
-                        )
-                        .statusBarsPadding()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = { closePlayer() }) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                            contentDescription = "返回网页",
-                            tint = Color.White
+        Box(modifier = playerBoxModifier) {
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        player = exoPlayer
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
                         )
                     }
-                    Text(
-                        text = pageTitle.ifBlank { "内置视频播放器" },
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            if (isBuffering && errorMessage == null) {
+                CircularProgressIndicator(
+                    color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(34.dp)
+                )
+            }
+
+            errorMessage?.let { msg ->
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(msg, color = Color.White, fontSize = 12.sp)
                     Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color.White.copy(alpha = 0.18f),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable {
-                                val nextIdx = (speeds.indexOf(playbackSpeed) + 1) % speeds.size
-                                val nextSpeed = speeds[nextIdx]
-                                playbackSpeed = nextSpeed
-                                exoPlayer.setPlaybackSpeed(nextSpeed)
-                            }
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.White.copy(alpha = 0.22f),
+                        modifier = Modifier.clickable { closePlayer() }
                     ) {
                         Text(
-                            text = "${playbackSpeed}x",
+                            text = "关闭",
                             color = Color.White,
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
-                    IconButton(
-                        onClick = {
-                            val next = !isLandscape
-                            isLandscape = next
-                            activity?.requestedOrientation = if (next) {
-                                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                            } else {
-                                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                            }
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.ScreenRotation,
-                            contentDescription = "旋转屏幕",
-                            tint = Color.White
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                         )
                     }
                 }
+            }
 
-                // Center play/pause & seek +/-10s
-                if (errorMessage == null) {
+            AnimatedVisibility(
+                visible = controlsVisible,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    // Top bar: Top-left X + Video Name, Top-right Speed
                     Row(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalArrangement = Arrangement.spacedBy(28.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.TopCenter)
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Black.copy(alpha = 0.72f), Color.Transparent)
+                                )
+                            )
+                            .then(if (isFullscreen) Modifier.statusBarsPadding() else Modifier)
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(
-                            onClick = {
-                                exoPlayer.seekTo((exoPlayer.currentPosition - 10_000L).coerceAtLeast(0L))
-                            },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.45f))
+                            onClick = { closePlayer() },
+                            modifier = Modifier.size(32.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Rounded.Replay10,
-                                contentDescription = "快退10秒",
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "关闭播放器",
                                 tint = Color.White,
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = pageTitle.ifBlank { "视频播放" },
+                            color = Color.White,
+                            fontSize = if (isFullscreen) 14.sp else 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color.White.copy(alpha = 0.2f),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    val nextIdx = (speeds.indexOf(playbackSpeed) + 1) % speeds.size
+                                    val nextSpeed = speeds[nextIdx]
+                                    playbackSpeed = nextSpeed
+                                    exoPlayer.setPlaybackSpeed(nextSpeed)
+                                }
+                        ) {
+                            val speedLabel = if (playbackSpeed == 1.0f) "1x" else "${playbackSpeed}x"
+                            Text(
+                                text = speedLabel,
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
 
+                    // Center Play/Pause
+                    if (errorMessage == null) {
                         IconButton(
                             onClick = {
                                 if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
                             },
                             modifier = Modifier
-                                .size(62.dp)
+                                .align(Alignment.Center)
+                                .size(if (isFullscreen) 56.dp else 44.dp)
                                 .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.55f))
+                                .background(Color.Black.copy(alpha = 0.5f))
                         ) {
                             Icon(
                                 imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                 contentDescription = if (isPlaying) "暂停" else "播放",
                                 tint = Color.White,
-                                modifier = Modifier.size(36.dp)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = {
-                                val target = exoPlayer.currentPosition + 10_000L
-                                val maxDur = exoPlayer.duration.takeIf { it > 0L } ?: target
-                                exoPlayer.seekTo(target.coerceAtMost(maxDur))
-                            },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.45f))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Forward10,
-                                contentDescription = "快进10秒",
-                                tint = Color.White,
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(if (isFullscreen) 32.dp else 26.dp)
                             )
                         }
                     }
-                }
 
-                // Bottom seekbar
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f))
+                    // Middle-Right: Download current video (Icon only)
+                    if (errorMessage == null) {
+                        IconButton(
+                            onClick = { onDownloadVideo(videoUrl) },
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = if (isFullscreen) 16.dp else 8.dp)
+                                .size(if (isFullscreen) 42.dp else 34.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.5f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Download,
+                                contentDescription = "下载视频",
+                                tint = Color.White,
+                                modifier = Modifier.size(if (isFullscreen) 22.dp else 18.dp)
                             )
-                        )
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = formatVideoTime(currentPositionMs),
-                        color = Color.White,
-                        fontSize = 12.sp
-                    )
-                    Slider(
-                        value = sliderPosition,
-                        onValueChange = { ratio ->
-                            isSeeking = true
-                            sliderPosition = ratio
-                            if (durationMs > 0L) {
-                                currentPositionMs = (ratio * durationMs).toLong()
-                            }
-                        },
-                        onValueChangeFinished = {
-                            if (durationMs > 0L) {
-                                exoPlayer.seekTo((sliderPosition * durationMs).toLong())
-                            }
-                            isSeeking = false
-                        },
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color.White,
-                            activeTrackColor = Color.White,
-                            inactiveTrackColor = Color.White.copy(alpha = 0.35f)
-                        ),
+                        }
+                    }
+
+                    // Bottom bar: Left time/total, Center seekbar, Right fullscreen toggle
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 10.dp)
-                    )
-                    Text(
-                        text = formatVideoTime(durationMs),
-                        color = Color.White,
-                        fontSize = 12.sp
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    IconButton(onClick = { closePlayer() }, modifier = Modifier.size(34.dp)) {
-                        Icon(
-                            imageVector = Icons.Rounded.FullscreenExit,
-                            contentDescription = "退出播放器",
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
+                            .fillMaxWidth()
+                            .align(Alignment.BottomCenter)
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f))
+                                )
+                            )
+                            .then(if (isFullscreen) Modifier.navigationBarsPadding() else Modifier)
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${formatVideoTime(currentPositionMs)}/${formatVideoTime(durationMs)}",
+                            color = Color.White,
+                            fontSize = if (isFullscreen) 12.sp else 10.sp
                         )
+                        Slider(
+                            value = sliderPosition,
+                            onValueChange = { ratio ->
+                                isSeeking = true
+                                sliderPosition = ratio
+                                if (durationMs > 0L) {
+                                    currentPositionMs = (ratio * durationMs).toLong()
+                                }
+                            },
+                            onValueChangeFinished = {
+                                if (durationMs > 0L) {
+                                    exoPlayer.seekTo((sliderPosition * durationMs).toLong())
+                                }
+                                isSeeking = false
+                            },
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color.White,
+                                activeTrackColor = Color.White,
+                                inactiveTrackColor = Color.White.copy(alpha = 0.35f)
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 6.dp)
+                        )
+                        IconButton(
+                            onClick = { isFullscreen = !isFullscreen },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isFullscreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
+                                contentDescription = if (isFullscreen) "退出全屏" else "全屏播放",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
