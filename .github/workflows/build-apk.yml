@@ -51,8 +51,9 @@ jobs:
 
           if [ -n "$INPUT_CHANGELOG" ]; then
             FORMATTED=$(printf '%s' "$INPUT_CHANGELOG" | sed 's/；/;/g; s/;/\n- /g')
+            NL=$(printf '\n')
             case "$FORMATTED" in
-              -*|#*|"$(printf '*\n*')") ;;
+              -*|\#*|*"$NL"*) ;;
               *) FORMATTED="- $FORMATTED" ;;
             esac
             {
