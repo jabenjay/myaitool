@@ -168,7 +168,7 @@ class AdBlockManager(private val context: Context) {
         val sub = getSubscriptions().firstOrNull { it.id == id }
             ?: return@withContext Result.failure(IllegalArgumentException("未找到该订阅"))
 
-        val urlsToTry = listOfNotNull(sub.url, sub.fallbackUrl)
+        val urlsToTry = listOfNotNull(sub.url, sub.fallbackUrl).flatMap { GitHubMirrorHelper.buildCandidateUrls(context, it) }.distinct()
         var downloadedText: String? = null
         var lastErr: Throwable? = null
 

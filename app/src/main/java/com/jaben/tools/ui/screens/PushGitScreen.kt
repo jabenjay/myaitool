@@ -60,6 +60,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -917,6 +921,21 @@ fun PushGitScreen(
                         modifier = Modifier.weight(1f)
                     )
                     val isRunning = run.status != "completed"
+                    var nowMs by remember(run.id) { mutableLongStateOf(System.currentTimeMillis()) }
+                    LaunchedEffect(run.id, isRunning) {
+                        while (isRunning) {
+                            nowMs = System.currentTimeMillis()
+                            delay(1000)
+                        }
+                    }
+                    val createdMs = remember(run.createdAt) {
+                        runCatching {
+                            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                                timeZone = TimeZone.getTimeZone("UTC")
+                            }.parse(run.createdAt)?.time ?: 0L
+                        }.getOrDefault(0L)
+                    }
+                    val elapsedSec = if (createdMs > 0L) ((nowMs - createdMs) / 1000L).coerceAtLeast(0L) else 0L
                     val spinAngle = if (isRunning) {
                         val inf = rememberInfiniteTransition(label = "wfSpin")
                         inf.animateFloat(
@@ -930,6 +949,15 @@ fun PushGitScreen(
                         ).value
                     } else {
                         0f
+                    }
+                    if (isRunning && createdMs > 0L) {
+                        Text(
+                            text = "${elapsedSec}s",
+                            color = badgeColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(end = 6.dp)
+                        )
                     }
                     IconButton(
                         onClick = {

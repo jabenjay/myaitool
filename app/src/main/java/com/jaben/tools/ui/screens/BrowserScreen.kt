@@ -18,6 +18,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import com.jaben.tools.data.AdBlockManager
+import com.jaben.tools.data.GitHubMirrorHelper
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material3.Checkbox
 import com.jaben.tools.data.BrowserHistoryItem
@@ -651,7 +652,7 @@ fun BrowserScreen(
                         setBackgroundColor(barBg.toArgb())
                         setDownloadListener { url, userAgent, contentDisposition, mimetype, contentLength ->
                             if (!url.isNullOrBlank()) {
-                                onStartDownload(url, userAgent, contentDisposition, mimetype, contentLength)
+                                onStartDownload(GitHubMirrorHelper.accelerateUrl(context, url), userAgent, contentDisposition, mimetype, contentLength)
                                 Toast.makeText(context, "开始下载", Toast.LENGTH_SHORT).show()
                             }
                         }

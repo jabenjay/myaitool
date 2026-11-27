@@ -111,7 +111,8 @@ object AppUpdateChecker {
                 val cleanVer = latestVersion.removePrefix("v").removePrefix("V").ifBlank { "update" }
                 val fileName = "Jools-release-$cleanVer.apk"
                 val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                val req = DownloadManager.Request(Uri.parse(downloadUrl)).apply {
+                val targetUrl = GitHubMirrorHelper.accelerateUrl(context, downloadUrl)
+                val req = DownloadManager.Request(Uri.parse(targetUrl)).apply {
                     setTitle("Jools $latestVersion")
                     setDescription("正在下载更新安装包...")
                     setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)

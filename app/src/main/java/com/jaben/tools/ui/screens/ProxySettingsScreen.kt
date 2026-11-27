@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.VpnKey
@@ -41,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jaben.tools.data.GfwRuleState
+import com.jaben.tools.data.GitHubMirrorHelper
 import com.jaben.tools.data.ProxyLatency
 import com.jaben.tools.data.ProxyNode
 import com.jaben.tools.data.ProxyProtocol
@@ -79,6 +82,8 @@ fun ProxySettingsScreen(
     modifier: Modifier = Modifier
 ) {
     val visuals = LocalAppThemeVisuals.current
+    val context = LocalContext.current
+    var mirrorEnabled by remember { mutableStateOf(GitHubMirrorHelper.isEnabled(context)) }
     var showAddDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -204,6 +209,57 @@ fun ProxySettingsScreen(
                                 )
                             }
                         }
+                    }
+                }
+            }
+
+            item {
+                Surface(
+                    shape = MaterialTheme.shapes.large,
+                    color = visuals.cardContainerColor,
+                    contentColor = visuals.cardContentColor,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.large)
+                        .liquidGlassSurface(26.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Bolt,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "镜像加速",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "用于给Github资源进行加速",
+                                fontSize = 11.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Switch(
+                            checked = mirrorEnabled,
+                            onCheckedChange = { checked ->
+                                mirrorEnabled = checked
+                                GitHubMirrorHelper.setEnabled(context, checked)
+                            }
+                        )
                     }
                 }
             }
