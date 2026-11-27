@@ -441,7 +441,9 @@ fun BrowserScreen(
                                     ),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .onFocusChanged { focusState -> isAddressFocused = focusState.isFocused; if (!focusState.isFocused) hasTypedInAddress = false; focusState ->
+                                        .onFocusChanged { focusState ->
+                                            isAddressFocused = focusState.isFocused
+                                            if (!focusState.isFocused) hasTypedInAddress = false
                                             if (focusState.isFocused) {
                                                 showBookmarks = true
                                             }
