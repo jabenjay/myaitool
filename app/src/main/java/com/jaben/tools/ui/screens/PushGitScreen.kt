@@ -68,6 +68,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -118,6 +125,7 @@ fun PushGitScreen(
     var commitMessage by remember { mutableStateOf(engine.loadSavedMessage()) }
 
     var selectedFiles by remember { mutableStateOf<List<PushFileEntry>>(emptyList()) }
+    var lastPickerMode by remember { mutableStateOf(engine.loadLastPickerMode()) }
     var diffSummary by remember { mutableStateOf<GitDiffSummary?>(null) }
     var syncDeletions by remember { mutableStateOf(false) }
     var forceFullPush by remember { mutableStateOf(false) }
@@ -212,6 +220,8 @@ fun PushGitScreen(
         if (uri != null) {
             scope.launch {
                 engine.readZipUri(uri).onSuccess { list ->
+                    lastPickerMode = "zip"
+                    engine.saveLastPickerMode("zip")
                     selectedFiles = list
                     diffSummary = null
                     pushStatus = ""
@@ -229,6 +239,8 @@ fun PushGitScreen(
         if (uri != null) {
             scope.launch {
                 engine.readFolderUri(uri).onSuccess { list ->
+                    lastPickerMode = "folder"
+                    engine.saveLastPickerMode("folder")
                     selectedFiles = list
                     diffSummary = null
                     pushStatus = ""
@@ -246,6 +258,8 @@ fun PushGitScreen(
         if (uris.isNotEmpty()) {
             scope.launch {
                 engine.readFileUris(uris, "").onSuccess { list ->
+                    lastPickerMode = "files"
+                    engine.saveLastPickerMode("files")
                     selectedFiles = list
                     diffSummary = null
                     pushStatus = ""
@@ -532,39 +546,33 @@ fun PushGitScreen(
                     modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("选择上传内容（调用系统文件管理器）", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("选择上传内容", fontSize = 14.sp, fontWeight = FontWeight.Bold)
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Button(
+                        PickerModeButton(
+                            label = "ZIP",
+                            icon = Icons.Rounded.FolderZip,
+                            selected = lastPickerMode == "zip",
                             onClick = { zipPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*")) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
                             modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Rounded.FolderZip, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("ZIP", fontSize = 13.sp, maxLines = 1)
-                        }
-                        OutlinedButton(
+                        )
+                        PickerModeButton(
+                            label = "文件夹",
+                            icon = Icons.Rounded.Folder,
+                            selected = lastPickerMode == "folder",
                             onClick = { folderPicker.launch(null) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
                             modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("文件夹", fontSize = 13.sp, maxLines = 1)
-                        }
-                        OutlinedButton(
+                        )
+                        PickerModeButton(
+                            label = "文件",
+                            icon = Icons.Rounded.InsertDriveFile,
+                            selected = lastPickerMode == "files",
                             onClick = { filesPicker.launch(arrayOf("*/*")) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
                             modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Rounded.InsertDriveFile, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("文件", fontSize = 13.sp, maxLines = 1)
-                        }
+                        )
                     }
 
                     val diff = diffSummary
@@ -897,6 +905,21 @@ fun PushGitScreen(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
+                    val isRunning = run.status != "completed"
+                    val spinAngle = if (isRunning) {
+                        val inf = rememberInfiniteTransition(label = "wfSpin")
+                        inf.animateFloat(
+                            initialValue = 0f,
+                            targetValue = 360f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(durationMillis = 1000, easing = LinearEasing),
+                                repeatMode = RepeatMode.Restart
+                            ),
+                            label = "wfSpinAngle"
+                        ).value
+                    } else {
+                        0f
+                    }
                     IconButton(
                         onClick = {
                             scope.launch {
@@ -905,7 +928,14 @@ fun PushGitScreen(
                         },
                         modifier = Modifier.size(22.dp)
                     ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新状态", tint = badgeColor, modifier = Modifier.size(15.dp))
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "刷新状态",
+                            tint = badgeColor,
+                            modifier = Modifier
+                                .size(15.dp)
+                                .graphicsLayer { rotationZ = spinAngle }
+                        )
                     }
                 }
 
@@ -1164,5 +1194,36 @@ private fun DiffRowItem(label: String, badgeColor: Color, path: String) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
+    }
+}
+
+@Composable
+private fun PickerModeButton(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (selected) {
+        Button(
+            onClick = onClick,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+            modifier = modifier
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(label, fontSize = 13.sp, maxLines = 1)
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+            modifier = modifier
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(label, fontSize = 13.sp, maxLines = 1)
+        }
     }
 }

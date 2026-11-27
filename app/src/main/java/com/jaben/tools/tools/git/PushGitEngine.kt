@@ -78,6 +78,10 @@ class PushGitEngine(private val context: Context) {
     fun loadSavedRepo(): String = prefs.getString(KEY_REPO, "jabenjay/myaitool").orEmpty()
     fun loadSavedBranch(): String = prefs.getString(KEY_BRANCH, "main").orEmpty()
     fun loadSavedMessage(): String = prefs.getString(KEY_MSG, "Sync project files via PushGit").orEmpty()
+    fun loadLastPickerMode(): String = prefs.getString(KEY_PICKER_MODE, "zip").orEmpty().ifBlank { "zip" }
+    fun saveLastPickerMode(mode: String) {
+        prefs.edit().putString(KEY_PICKER_MODE, mode).apply()
+    }
 
     fun saveConfig(pat: String, repo: String, branch: String, message: String) {
         prefs.edit()
@@ -707,5 +711,6 @@ class PushGitEngine(private val context: Context) {
         private const val KEY_BRANCH = "branch"
         private const val KEY_MSG = "commit_msg"
         private const val KEY_SAVED_TOKENS = "saved_tokens"
+        private const val KEY_PICKER_MODE = "last_picker_mode"
     }
 }
