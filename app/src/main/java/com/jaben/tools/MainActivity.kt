@@ -80,6 +80,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import android.content.Intent
+import android.app.PictureInPictureParams
+import android.content.res.Configuration
+import android.os.Build
+import android.util.Rational
+import com.jaben.tools.service.VideoPipState
 import com.jaben.tools.data.AppShortcutHelper
 import com.jaben.tools.data.AppUpdateChecker
 import com.jaben.tools.data.PendingNoticeItem
@@ -148,6 +153,19 @@ class MainActivity : ComponentActivity() {
                 ThemeMode.DARK -> true
             }
 
+            LaunchedEffect(VideoPipState.isFloatingPlayerActive, VideoPipState.isPlaying) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    runCatching {
+                        setPictureInPictureParams(
+                            PictureInPictureParams.Builder()
+                                .setAspectRatio(Rational(16, 9))
+                                .setAutoEnterEnabled(VideoPipState.isFloatingPlayerActive && VideoPipState.isPlaying)
+                                .build()
+                        )
+                    }
+                }
+            }
+
             LaunchedEffect(isDark) {
                 enableEdgeToEdge(
                     statusBarStyle = if (isDark) {
@@ -182,6 +200,26 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (VideoPipState.isFloatingPlayerActive && VideoPipState.isPlaying &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !isInPictureInPictureMode
+        ) {
+            runCatching {
+                enterPictureInPictureMode(
+                    PictureInPictureParams.Builder()
+                        .setAspectRatio(Rational(16, 9))
+                        .build()
+                )
+            }
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        VideoPipState.isInPipMode = isInPictureInPictureMode
     }
 }
 

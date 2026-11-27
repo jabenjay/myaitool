@@ -99,6 +99,7 @@ import androidx.media3.session.SessionToken
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.jaben.tools.service.VideoPlaybackService
+import com.jaben.tools.service.VideoPipState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -169,6 +170,8 @@ fun BuiltInVideoPlayerOverlay(
     }
 
     fun closePlayer() {
+        VideoPipState.isFloatingPlayerActive = false
+        VideoPipState.isPlaying = false
         applyFullscreenSystemUi(false)
         runCatching {
             mediaController?.stop()
@@ -195,6 +198,8 @@ fun BuiltInVideoPlayerOverlay(
     }
 
     DisposableEffect(videoUrl) {
+        VideoPipState.isFloatingPlayerActive = true
+        VideoPipState.isPlaying = true
         val cookie = runCatching { CookieManager.getInstance().getCookie(pageUrl) }.getOrNull().orEmpty()
         VideoPlaybackService.updateHttpHeaders(userAgent = userAgent, referer = pageUrl, cookie = cookie)
 
@@ -217,6 +222,7 @@ fun BuiltInVideoPlayerOverlay(
 
                 override fun onIsPlayingChanged(playing: Boolean) {
                     isPlaying = playing
+                    VideoPipState.isPlaying = playing
                 }
 
                 override fun onPlayerError(error: PlaybackException) {
@@ -244,6 +250,9 @@ fun BuiltInVideoPlayerOverlay(
         }, ContextCompat.getMainExecutor(context))
 
         onDispose {
+            VideoPipState.isFloatingPlayerActive = false
+            VideoPipState.isPlaying = false
+            VideoPipState.isInPipMode = false
             attachedListener?.let { l -> mediaController?.removeListener(l) }
             playerViewRef?.player = null
             MediaController.releaseFuture(controllerFuture)
@@ -325,7 +334,35 @@ fun BuiltInVideoPlayerOverlay(
         val minimizedHeightPx = with(density) { minimizedHeightDp.toPx() }
         var minimizedY by remember { mutableFloatStateOf(screenHeightPx * 0.42f) }
 
-        if (isMinimized && !isFullscreen) {
+        val inPip = VideoPipState.isInPipMode
+        if (inPip) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            player = mediaController
+                            useController = false
+                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            playerViewRef = this
+                        }
+                    },
+                    update = { view ->
+                        if (view.player !== mediaController) {
+                            view.player = mediaController
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        } else if (isMinimized && !isFullscreen) {
             val snapX = if (minimizedOnLeft) 0 else (screenWidthPx - minimizedWidthPx).roundToInt()
             val tabShape = if (minimizedOnLeft) {
                 RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp)

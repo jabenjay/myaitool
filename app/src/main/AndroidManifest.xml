@@ -30,6 +30,7 @@
             android:exported="true"
             android:launchMode="singleTop"
             android:hardwareAccelerated="true"
+            android:supportsPictureInPicture="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
