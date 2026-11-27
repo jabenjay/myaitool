@@ -1,14 +1,12 @@
 name: Build Android APK & iOS IPA
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
     inputs:
       release_version:
-        description: '填写版本号（如 1.0.1）将构建 Release 版 APK + IPA 并发布到 GitHub Release；留空则仅构建测试包'
-        required: false
-        default: ''
+        description: '填写发布版本号（如 0.2.6），将构建 Release 版 APK + IPA 并发布到 GitHub Release'
+        required: true
+        default: '0.2.6'
       changelog:
         description: '单行快捷更新日志（留空则自动读取仓库根目录的 CHANGELOG.md 多行文件）'
         required: false
@@ -22,7 +20,6 @@ jobs:
     name: Build Android APK
     runs-on: ubuntu-latest
     outputs:
-      is_release: ${{ steps.ver.outputs.is_release }}
       tag: ${{ steps.ver.outputs.tag }}
       version_name: ${{ steps.ver.outputs.version_name }}
       version_code: ${{ steps.ver.outputs.version_code }}
@@ -44,24 +41,18 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Resolve Build Mode & Version
+      - name: Resolve Build Version & Changelog
         id: ver
         env:
           INPUT_VERSION: ${{ github.event.inputs.release_version }}
           INPUT_CHANGELOG: ${{ github.event.inputs.changelog }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$INPUT_VERSION" ]; then
-            RAW="${INPUT_VERSION#v}"
-            RAW="${RAW#V}"
-            TAG="v${RAW}"
-            echo "is_release=true" >> "$GITHUB_OUTPUT"
-            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-            echo "version_name=${RAW}" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_release=false" >> "$GITHUB_OUTPUT"
-            echo "tag=" >> "$GITHUB_OUTPUT"
-            echo "version_name=1.0.0" >> "$GITHUB_OUTPUT"
-          fi
+          RAW="${INPUT_VERSION#v}"
+          RAW="${RAW#V}"
+          RAW="${RAW:-1.0.0}"
+          TAG="v${RAW}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version_name=${RAW}" >> "$GITHUB_OUTPUT"
           echo "version_code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
           if [ -n "$INPUT_CHANGELOG" ]; then
@@ -90,7 +81,6 @@ jobs:
           fi
 
       - name: Prepare CI Signing Key
-        if: steps.ver.outputs.is_release == 'true'
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
         run: |
@@ -108,27 +98,13 @@ jobs:
               -dname "CN=Jools, OU=CI, O=Jools, L=Local, ST=Local, C=CN"
           fi
 
-      - name: Build Debug APK (on push)
-        if: steps.ver.outputs.is_release != 'true'
-        run: gradle assembleDebug --no-daemon --stacktrace
-
-      - name: Upload Debug APK Artifact
-        if: steps.ver.outputs.is_release != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Jools-Debug-APK
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-
-      - name: Build Release APK (on manual Run workflow)
-        if: steps.ver.outputs.is_release == 'true'
+      - name: Build Release APK
         run: >
           gradle assembleRelease --no-daemon --stacktrace
           -PappVersionName=${{ steps.ver.outputs.version_name }}
           -PappVersionCode=${{ steps.ver.outputs.version_code }}
 
       - name: Rename Release APK
-        if: steps.ver.outputs.is_release == 'true'
         run: |
           APK_SRC=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
           APK_DST="app/build/outputs/apk/release/Jools-release-${{ steps.ver.outputs.version_name }}.apk"
@@ -136,7 +112,6 @@ jobs:
           echo "Renamed APK to $APK_DST"
 
       - name: Upload Release APK Artifact
-        if: steps.ver.outputs.is_release == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: Jools-Release-APK
@@ -239,7 +214,6 @@ jobs:
   publish_release:
     name: Publish GitHub Release (APK + IPA)
     needs: [ build, build_ios ]
-    if: needs.build.outputs.is_release == 'true'
     runs-on: ubuntu-latest
 
     steps:

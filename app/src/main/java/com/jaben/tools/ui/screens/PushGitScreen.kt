@@ -107,7 +107,6 @@ fun PushGitScreen(
     var branch by remember { mutableStateOf(engine.loadSavedBranch()) }
     var branches by remember { mutableStateOf(listOf("main")) }
     var commitMessage by remember { mutableStateOf(engine.loadSavedMessage()) }
-    var targetSubpath by remember { mutableStateOf("") }
 
     var selectedFiles by remember { mutableStateOf<List<PushFileEntry>>(emptyList()) }
     var diffSummary by remember { mutableStateOf<GitDiffSummary?>(null) }
@@ -188,7 +187,7 @@ fun PushGitScreen(
     ) { uris ->
         if (uris.isNotEmpty()) {
             scope.launch {
-                engine.readFileUris(uris, targetSubpath).onSuccess { list ->
+                engine.readFileUris(uris, "").onSuccess { list ->
                     selectedFiles = list
                     diffSummary = null
                     pushStatus = ""
@@ -476,14 +475,6 @@ fun PushGitScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text("选择上传内容（调用系统文件管理器）", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-
-                    OutlinedTextField(
-                        value = targetSubpath,
-                        onValueChange = { targetSubpath = it },
-                        label = { Text("单文件目标路径前缀（可选）") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),

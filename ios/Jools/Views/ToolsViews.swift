@@ -445,7 +445,6 @@ struct PushGitView: View {
     @State private var repoText: String = UserDefaults.standard.string(forKey: "jools_pushgit_repo") ?? "jabenjay/myaitool"
     @State private var branch: String = UserDefaults.standard.string(forKey: "jools_pushgit_branch") ?? "main"
     @State private var commitMessage: String = UserDefaults.standard.string(forKey: "jools_pushgit_msg") ?? "Sync project files via PushGit"
-    @State private var targetSubpath: String = ""
     @State private var repos: [String] = []
     @State private var branches: [String] = ["main"]
 
@@ -528,9 +527,6 @@ struct PushGitView: View {
             }
 
             Section("选择上传内容（调用系统文件）") {
-                TextField("单文件目标路径前缀（可选）", text: $targetSubpath)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
                 HStack(spacing: 10) {
                     Button("ZIP") { showZipImporter = true }
                         .buttonStyle(.borderedProminent)
@@ -770,14 +766,12 @@ struct PushGitView: View {
     }
 
     private func loadFiles(_ urls: [URL]) {
-        let prefix = targetSubpath.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
         var out: [PushFile] = []
         for u in urls {
             let accessed = u.startAccessingSecurityScopedResource()
             defer { if accessed { u.stopAccessingSecurityScopedResource() } }
             if let d = try? Data(contentsOf: u) {
-                let rel = prefix.isEmpty ? u.lastPathComponent : "\(prefix)/\(u.lastPathComponent)"
-                out.append(PushFile(path: rel, data: d))
+                out.append(PushFile(path: u.lastPathComponent, data: d))
             }
         }
         selectedFiles = out
