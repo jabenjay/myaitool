@@ -1361,11 +1361,11 @@ fun PushGitScreen(
 
                                     if (isExpanded) {
                                         val previewLines = remember(cachedLog) {
-                                            if (cachedLog.isBlank()) emptyList() else cachedLog.lines().takeLast(200)
+                                            if (cachedLog.isBlank()) emptyList() else cachedLog.lines()
                                         }
                                         Surface(
                                             shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
-                                            color = Color(0xFF1E1E1E),
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
                                             Column(
@@ -1379,7 +1379,7 @@ fun PushGitScreen(
                                                     Text(
                                                         text = if (isFetchingThisLog) "正在拉取日志..."
                                                         else "日志 (${cachedLog.lines().size} 行)",
-                                                        color = Color(0xFF93C5FD),
+                                                        color = MaterialTheme.colorScheme.primary,
                                                         fontSize = 11.sp,
                                                         fontWeight = FontWeight.SemiBold,
                                                         modifier = Modifier.weight(1f)
@@ -1393,7 +1393,7 @@ fun PushGitScreen(
                                                             },
                                                             modifier = Modifier.height(26.dp)
                                                         ) {
-                                                            Text("复制", color = Color(0xFFA7F3D0), fontSize = 11.sp)
+                                                            Text("复制", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp)
                                                         }
                                                         TextButton(
                                                             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
@@ -1414,7 +1414,7 @@ fun PushGitScreen(
                                                             },
                                                             modifier = Modifier.height(26.dp)
                                                         ) {
-                                                            Text("保存 .txt", color = Color(0xFF93C5FD), fontSize = 11.sp)
+                                                            Text("保存 .txt", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp)
                                                         }
                                                     }
                                                 }
@@ -1439,7 +1439,7 @@ fun PushGitScreen(
                                                                             fontSize = 9.5.sp,
                                                                             lineHeight = 14.sp,
                                                                             textAlign = TextAlign.End,
-                                                                            color = Color(0xFF6B7280),
+                                                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                                                             modifier = Modifier.width(numWidth)
                                                                         )
                                                                     }
@@ -1447,7 +1447,7 @@ fun PushGitScreen(
                                                                     Text(
                                                                         text = lineText,
                                                                         fontFamily = FontFamily.Monospace,
-                                                                        color = Color(0xFFE5E7EB),
+                                                                        color = MaterialTheme.colorScheme.onSurface,
                                                                         fontSize = 10.sp,
                                                                         lineHeight = 14.sp,
                                                                         modifier = Modifier.weight(1f)
