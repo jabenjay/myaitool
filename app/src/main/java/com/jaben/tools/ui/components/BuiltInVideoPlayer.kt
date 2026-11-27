@@ -101,6 +101,13 @@ import com.jaben.tools.service.VideoPlaybackService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlin.math.roundToInt
 
 @OptIn(UnstableApi::class)
@@ -109,6 +116,7 @@ fun BuiltInVideoPlayerOverlay(
     videoUrl: String,
     pageUrl: String,
     pageTitle: String,
+    posterUrl: String = "",
     userAgent: String,
     initialPositionMs: Long = 0L,
     onDownloadVideo: (String) -> Unit,
@@ -217,14 +225,15 @@ fun BuiltInVideoPlayerOverlay(
             attachedListener = listener
             controller.addListener(listener)
 
+            val metaBuilder = MediaMetadata.Builder()
+                .setTitle(pageTitle.ifBlank { "网页视频" })
+                .setArtist("Jools 浏览器")
+            if (posterUrl.startsWith("http://") || posterUrl.startsWith("https://")) {
+                metaBuilder.setArtworkUri(Uri.parse(posterUrl))
+            }
             val item = MediaItem.Builder()
                 .setUri(Uri.parse(videoUrl))
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(pageTitle.ifBlank { "网页视频" })
-                        .setArtist("Jools 浏览器")
-                        .build()
-                )
+                .setMediaMetadata(metaBuilder.build())
                 .build()
             controller.setMediaItem(item)
             if (initialPositionMs > 0L) controller.seekTo(initialPositionMs)
@@ -239,6 +248,24 @@ fun BuiltInVideoPlayerOverlay(
             mediaController = null
             applyFullscreenSystemUi(false)
         }
+    }
+
+    LaunchedEffect(mediaController, posterUrl, pageTitle) {
+        val controller = mediaController ?: return@LaunchedEffect
+        if (!posterUrl.startsWith("http://") && !posterUrl.startsWith("https://")) return@LaunchedEffect
+        val artBytes = withContext(Dispatchers.IO) {
+            fetchArtworkBytes(posterUrl, pageUrl, userAgent)
+        } ?: return@LaunchedEffect
+        val curItem = controller.currentMediaItem ?: return@LaunchedEffect
+        val updatedMeta = curItem.mediaMetadata.buildUpon()
+            .setTitle(pageTitle.ifBlank { "网页视频" })
+            .setArtist("Jools 浏览器")
+            .setArtworkData(artBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+            .build()
+        controller.replaceMediaItem(
+            controller.currentMediaItemIndex,
+            curItem.buildUpon().setMediaMetadata(updatedMeta).build()
+        )
     }
 
     LaunchedEffect(mediaController, isSeeking) {
@@ -777,4 +804,42 @@ private tailrec fun Context.findHostActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findHostActivity()
     else -> null
+}
+
+private fun fetchArtworkBytes(posterUrl: String, pageUrl: String, userAgent: String): ByteArray? {
+    return runCatching {
+        val cookie = CookieManager.getInstance().getCookie(pageUrl).orEmpty()
+        val conn = (URL(posterUrl).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 8000
+            readTimeout = 10000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", userAgent.ifBlank { "Mozilla/5.0" })
+            if (pageUrl.isNotBlank()) setRequestProperty("Referer", pageUrl)
+            if (cookie.isNotBlank()) setRequestProperty("Cookie", cookie)
+        }
+        try {
+            if (conn.responseCode !in 200..299) return@runCatching null
+            val rawBytes = conn.inputStream.use { it.readBytes() }
+            val bmp = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size) ?: return@runCatching null
+            val maxDim = 512
+            val scale = minOf(maxDim.toFloat() / bmp.width, maxDim.toFloat() / bmp.height, 1f)
+            val scaled = if (scale < 1f) {
+                Bitmap.createScaledBitmap(
+                    bmp,
+                    (bmp.width * scale).toInt().coerceAtLeast(1),
+                    (bmp.height * scale).toInt().coerceAtLeast(1),
+                    true
+                )
+            } else {
+                bmp
+            }
+            val baos = ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.JPEG, 85, baos)
+            if (scaled !== bmp) scaled.recycle()
+            bmp.recycle()
+            baos.toByteArray()
+        } finally {
+            conn.disconnect()
+        }
+    }.getOrNull()
 }

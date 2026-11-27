@@ -1,6 +1,9 @@
 package com.jaben.tools.data
 
 import android.app.DownloadManager
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -115,7 +118,36 @@ object AppUpdateChecker {
                     setMimeType("application/vnd.android.package-archive")
                     setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "Jools/$fileName")
                 }
-                dm.enqueue(req)
+                val downloadId = dm.enqueue(req)
+                val appCtx = context.applicationContext
+                val receiver = object : BroadcastReceiver() {
+                    override fun onReceive(ctx: Context?, intent: Intent?) {
+                        val completedId = intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L) ?: -1L
+                        if (completedId != downloadId) return
+                        runCatching { appCtx.unregisterReceiver(this) }
+                        val query = DownloadManager.Query().setFilterById(downloadId)
+                        dm.query(query)?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                val statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                                val status = if (statusIdx >= 0) cursor.getInt(statusIdx) else -1
+                                if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                                    val apkUri = dm.getUriForDownloadedFile(downloadId) ?: return
+                                    val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(apkUri, "application/vnd.android.package-archive")
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    runCatching { appCtx.startActivity(installIntent) }
+                                }
+                            }
+                        }
+                    }
+                }
+                ContextCompat.registerReceiver(
+                    appCtx,
+                    receiver,
+                    IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+                    ContextCompat.RECEIVER_EXPORTED
+                )
                 true
             } else {
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl)).apply {
