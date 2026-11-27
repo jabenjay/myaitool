@@ -25,6 +25,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.DisableSelection
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -76,7 +78,10 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -108,6 +113,7 @@ fun PushGitScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val mainScrollState = rememberScrollState()
     var shouldStickBottom by remember { mutableStateOf(false) }
@@ -165,6 +171,7 @@ fun PushGitScreen(
     var isFetchingRuns by remember { mutableStateOf(false) }
     var failedRunLog by remember { mutableStateOf("") }
     var fetchedLogRunId by remember { mutableStateOf<Long?>(null) }
+    var expandedFailedLogRunId by remember { mutableStateOf<Long?>(null) }
     var isFetchingFailedLog by remember { mutableStateOf(false) }
     var pendingCancelRun by remember { mutableStateOf<WorkflowRunInfo?>(null) }
 
@@ -947,12 +954,13 @@ fun PushGitScreen(
                 }
             }
 
-            val displayRuns = activeRuns
+            val latestFailedRun = workflowRuns.firstOrNull { it.status == "completed" }?.takeIf { it.conclusion == "failure" }
+            val displayRuns = (activeRuns + listOfNotNull(latestFailedRun)).distinctBy { it.id }
             if (displayRuns.isNotEmpty()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 220.dp)
+                        .heightIn(max = 320.dp)
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -1030,6 +1038,41 @@ fun PushGitScreen(
                                         Text("取消", color = Color(0xFFDC2626), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                     }
                                     Spacer(modifier = Modifier.width(4.dp))
+                                } else if (run.conclusion == "failure") {
+                                    val isExpanded = expandedFailedLogRunId == run.id
+                                    TextButton(
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                        onClick = {
+                                            if (isExpanded) {
+                                                expandedFailedLogRunId = null
+                                            } else {
+                                                expandedFailedLogRunId = run.id
+                                                if (fetchedLogRunId != run.id && pat.isNotBlank()) {
+                                                    scope.launch {
+                                                        isFetchingFailedLog = true
+                                                        engine.fetchFailedRunLog(pat, targetRepo, run.id)
+                                                            .onSuccess { logText ->
+                                                                failedRunLog = logText
+                                                                fetchedLogRunId = run.id
+                                                            }
+                                                            .onFailure { err ->
+                                                                failedRunLog = "获取日志失败: ${err.message}"
+                                                            }
+                                                        isFetchingFailedLog = false
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.height(24.dp)
+                                    ) {
+                                        Text(
+                                            text = if (isExpanded) "收起" else "日志",
+                                            color = Color(0xFFDC2626),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
                                 }
                                 IconButton(
                                     onClick = {
@@ -1050,69 +1093,103 @@ fun PushGitScreen(
                                 }
                             }
 
-                            if (run.conclusion == "failure") {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFF1E1E1E),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = if (isFetchingFailedLog) "正在拉取失败日志..." else "失败日志摘要",
-                                    color = Color(0xFFF87171),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                if (failedRunLog.isNotBlank()) {
-                                    TextButton(
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                        onClick = {
-                                            val fileName = "workflow_run_${run.runNumber}_error.txt"
-                                            val uri = OutputStorageHelper.saveStream(
-                                                context = context,
-                                                subFolder = OutputStorageHelper.SUB_FILES,
-                                                fileName = fileName,
-                                                mimeType = "text/plain",
-                                                inputStream = ByteArrayInputStream(failedRunLog.toByteArray(Charsets.UTF_8))
-                                            )
-                                            Toast.makeText(
-                                                context,
-                                                if (uri != null) "已保存 $fileName" else "保存失败",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        }
+                            if (run.conclusion == "failure" && expandedFailedLogRunId == run.id) {
+                                val previewLines = remember(failedRunLog) { failedRunLog.lines().takeLast(120) }
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFF1E1E1E),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Text("保存 .txt", color = Color(0xFF93C5FD), fontSize = 11.sp)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = if (isFetchingFailedLog) "正在拉取失败日志..."
+                                                else "失败日志 (${previewLines.size} 行)",
+                                                color = Color(0xFFF87171),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            if (failedRunLog.isNotBlank()) {
+                                                TextButton(
+                                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                                    onClick = {
+                                                        clipboardManager.setText(AnnotatedString(failedRunLog))
+                                                        Toast.makeText(context, "已复制日志", Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    modifier = Modifier.height(26.dp)
+                                                ) {
+                                                    Text("复制", color = Color(0xFFA7F3D0), fontSize = 11.sp)
+                                                }
+                                                TextButton(
+                                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                                    onClick = {
+                                                        val fileName = "workflow_run_${run.runNumber}_error.txt"
+                                                        val uri = OutputStorageHelper.saveStream(
+                                                            context = context,
+                                                            subFolder = OutputStorageHelper.SUB_FILES,
+                                                            fileName = fileName,
+                                                            mimeType = "text/plain",
+                                                            inputStream = ByteArrayInputStream(failedRunLog.toByteArray(Charsets.UTF_8))
+                                                        )
+                                                        Toast.makeText(
+                                                            context,
+                                                            if (uri != null) "已保存 $fileName" else "保存失败",
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    },
+                                                    modifier = Modifier.height(26.dp)
+                                                ) {
+                                                    Text("保存 .txt", color = Color(0xFF93C5FD), fontSize = 11.sp)
+                                                }
+                                            }
+                                        }
+                                        if (failedRunLog.isNotBlank()) {
+                                            SelectionContainer {
+                                                Column(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .heightIn(max = 180.dp)
+                                                        .verticalScroll(rememberScrollState()),
+                                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                                ) {
+                                                    val numWidth = (previewLines.size.toString().length.coerceAtLeast(2) * 7 + 4).dp
+                                                    previewLines.forEachIndexed { idx, lineText ->
+                                                        Row(modifier = Modifier.fillMaxWidth()) {
+                                                            DisableSelection {
+                                                                Text(
+                                                                    text = "${idx + 1}",
+                                                                    fontFamily = FontFamily.Monospace,
+                                                                    fontSize = 9.5.sp,
+                                                                    lineHeight = 14.sp,
+                                                                    textAlign = TextAlign.End,
+                                                                    color = Color(0xFF6B7280),
+                                                                    modifier = Modifier.width(numWidth)
+                                                                )
+                                                            }
+                                                            Spacer(modifier = Modifier.width(6.dp))
+                                                            Text(
+                                                                text = lineText,
+                                                                fontFamily = FontFamily.Monospace,
+                                                                color = Color(0xFFE5E7EB),
+                                                                fontSize = 10.sp,
+                                                                lineHeight = 14.sp,
+                                                                modifier = Modifier.weight(1f)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
-                            if (failedRunLog.isNotBlank()) {
-                                val preview = failedRunLog.lines().takeLast(45).joinToString("\n")
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 140.dp)
-                                        .verticalScroll(rememberScrollState())
-                                ) {
-                                    Text(
-                                        text = preview,
-                                        color = Color(0xFFE5E7EB),
-                                        fontSize = 10.sp,
-                                        lineHeight = 14.sp
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
                         }
                     }
                 }
