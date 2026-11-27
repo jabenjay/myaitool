@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 data class GfwRuleState(
     val ruleCount: Int = 0,
@@ -80,7 +81,7 @@ class GfwRuleManager(context: Context) {
             runCatching {
                 cacheFile.writeText(fetched.joinToString("\n"), StandardCharsets.UTF_8)
             }
-            val nowStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
+            val nowStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).apply { timeZone = TimeZone.getDefault() }.format(Date())
             prefs.edit().putString(KEY_LAST_UPDATE, nowStr).apply()
             _state.value = GfwRuleState(
                 ruleCount = fetched.size,

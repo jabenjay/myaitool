@@ -182,6 +182,7 @@ private data class BrowserTabState(
 )
 
 private const val DEFAULT_HOME_URL = "https://cn.pornhub.com/"
+private const val BLANK_TAB_URL = "about:blank"
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
@@ -353,6 +354,7 @@ fun BrowserScreen(
             else -> "https://www.bing.com/search?q=${android.net.Uri.encode(trimmed)}"
         }
         urlInput = target
+        tabs = tabs.map { t -> if (t.id == activeTabId) t.copy(url = target) else t }
         hasTypedInAddress = false
         showBookmarks = false
         runCatching {
@@ -379,8 +381,8 @@ fun BrowserScreen(
         val wv = tabWebViews[tabId]
         webViewRef = wv
         val tabMeta = tabs.firstOrNull { it.id == tabId }
-        val targetUrl = wv?.url?.takeIf { it.isNotBlank() } ?: tabMeta?.url.orEmpty()
-        if (targetUrl.isNotBlank()) urlInput = targetUrl
+        val rawUrl = wv?.url?.takeIf { it.isNotBlank() && it != BLANK_TAB_URL } ?: tabMeta?.url.orEmpty()
+        urlInput = if (rawUrl == BLANK_TAB_URL) "" else rawUrl
         pageTitle = wv?.title?.takeIf { it.isNotBlank() } ?: tabMeta?.title.orEmpty()
         canGoBack = wv?.canGoBack() == true
         canGoForward = wv?.canGoForward() == true
@@ -388,16 +390,16 @@ fun BrowserScreen(
         showTabsSheet = false
     }
 
-    fun openNewTab(targetUrl: String = homeUrl) {
+    fun openNewTab(targetUrl: String = BLANK_TAB_URL) {
         val newId = java.util.UUID.randomUUID().toString()
         val newTab = BrowserTabState(id = newId, title = "新标签页", url = targetUrl)
         tabs = tabs + newTab
         activeTabId = newId
-        urlInput = targetUrl
+        urlInput = if (targetUrl == BLANK_TAB_URL) "" else targetUrl
         pageTitle = ""
         canGoBack = false
         canGoForward = false
-        isLoading = true
+        isLoading = targetUrl != BLANK_TAB_URL
         showTabsSheet = false
     }
 
@@ -891,8 +893,10 @@ fun BrowserScreen(
                             }
                         }
 
-                        AppLogManager.log("BROWSER", "初始化WebView并加载页面: $initialTabUrl")
-                        loadUrl(initialTabUrl)
+                        if (initialTabUrl != BLANK_TAB_URL) {
+                            AppLogManager.log("BROWSER", "初始化WebView并加载页面: $initialTabUrl")
+                            loadUrl(initialTabUrl)
+                        }
                     }
             }
 
@@ -927,9 +931,77 @@ fun BrowserScreen(
                 modifier = Modifier.fillMaxSize()
             )
 
+            // Clean Blank Page (New Tab) with Browser Icon + Input Box
+            val isBlankTab = tabs.firstOrNull { it.id == activeTabId }?.url == BLANK_TAB_URL
+            if (isBlankTab) {
+                var blankInput by remember(activeTabId) { mutableStateOf("") }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(22.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(24.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                            modifier = Modifier.size(72.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Public,
+                                    contentDescription = "浏览器",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(38.dp)
+                                )
+                            }
+                        }
+
+                        androidx.compose.material3.OutlinedTextField(
+                            value = blankInput,
+                            onValueChange = { blankInput = it },
+                            placeholder = { Text("搜索或输入网址", fontSize = 14.sp) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.Search,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                if (blankInput.isNotBlank()) {
+                                    androidx.compose.material3.IconButton(
+                                        onClick = { navigateTo(blankInput) }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                                            contentDescription = "前往"
+                                        )
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(26.dp),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                imeAction = androidx.compose.ui.text.input.ImeAction.Go
+                            ),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                                onGo = { navigateTo(blankInput) }
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+
             // Themed loading animation page while WebView prepares first paint
             androidx.compose.animation.AnimatedVisibility(
-                visible = showLoadingOverlay,
+                visible = showLoadingOverlay && !isBlankTab,
                 enter = fadeIn(tween(150)),
                 exit = fadeOut(tween(260))
             ) {
@@ -1632,7 +1704,7 @@ fun BrowserScreen(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
                     )
-                    TextButton(onClick = { openNewTab(homeUrl) }) {
+                    TextButton(onClick = { openNewTab(BLANK_TAB_URL) }) {
                         Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("新建标签页", fontSize = 13.sp)
@@ -1669,7 +1741,7 @@ fun BrowserScreen(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = tab.url,
+                                        text = if (tab.url == BLANK_TAB_URL) "空白页" else tab.url,
                                         fontSize = 11.sp,
                                         color = barFg.copy(alpha = 0.6f),
                                         maxLines = 1,
@@ -2000,7 +2072,7 @@ fun BrowserScreen(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
-                                        val timeStr = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                                        val timeStr = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).apply { timeZone = java.util.TimeZone.getDefault() }
                                             .format(Date(hItem.visitedAtMs))
                                         Text(
                                             text = "$timeStr · ${hItem.url}",
@@ -2143,7 +2215,7 @@ fun BrowserScreen(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                             val timeText = if (sub.lastUpdatedMs > 0L) {
-                                                SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(sub.lastUpdatedMs))
+                                                SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).apply { timeZone = java.util.TimeZone.getDefault() }.format(Date(sub.lastUpdatedMs))
                                             } else {
                                                 "未更新(内置基础)"
                                             }

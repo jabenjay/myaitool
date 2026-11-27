@@ -782,7 +782,7 @@ class PushGitEngine(private val context: Context) {
         val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }
-        val formatter = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+        val formatter = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).apply { timeZone = TimeZone.getDefault() }
         coroutineScope {
             paths.map { itemPath ->
                 async {

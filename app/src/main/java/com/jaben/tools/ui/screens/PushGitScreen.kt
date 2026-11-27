@@ -1340,7 +1340,25 @@ fun PushGitScreen(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                             Text(
-                                                text = "${run.branch} · ${run.createdAt.replace("T", " ").removeSuffix("Z")}",
+                                                text = "${run.branch} · ${
+                                                    remember(run.createdAt) {
+                                                        runCatching {
+                                                            val p = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                                                                timeZone = TimeZone.getTimeZone("UTC")
+                                                            }
+                                                            val d = p.parse(run.createdAt)
+                                                            if (d != null) {
+                                                                SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).apply {
+                                                                    timeZone = TimeZone.getDefault()
+                                                                }.format(d)
+                                                            } else {
+                                                                run.createdAt.replace("T", " ").removeSuffix("Z")
+                                                            }
+                                                        }.getOrElse {
+                                                            run.createdAt.replace("T", " ").removeSuffix("Z")
+                                                        }
+                                                    }
+                                                }",
                                                 fontSize = 10.5.sp,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
