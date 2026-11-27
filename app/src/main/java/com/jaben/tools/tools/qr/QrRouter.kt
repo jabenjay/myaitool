@@ -39,7 +39,7 @@ object QrRouter {
             if (tryStartActivity(context, appIntent)) {
                 return
             } else {
-                Toast.makeText(context, "未安装对应应用，将尝试在浏览器中打开", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "改用浏览器打开", Toast.LENGTH_SHORT).show()
                 openInBuiltInBrowser(text)
                 return
             }

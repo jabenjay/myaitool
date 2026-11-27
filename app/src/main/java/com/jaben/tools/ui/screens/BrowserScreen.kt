@@ -18,6 +18,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import com.jaben.tools.data.AdBlockManager
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material3.Checkbox
+import com.jaben.tools.data.BrowserHistoryItem
+import com.jaben.tools.data.BrowserHistoryManager
 import android.webkit.JavascriptInterface
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material3.Tab
@@ -237,6 +241,13 @@ fun BrowserScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var showProxyDialog by remember { mutableStateOf(false) }
     var showDownloadsDialog by remember { mutableStateOf(false) }
+    var showHistoryDialog by remember { mutableStateOf(false) }
+    var isHistoryMultiSelect by remember { mutableStateOf(false) }
+    var selectedHistoryIds by remember { mutableStateOf(setOf<String>()) }
+    var hasTypedInAddress by remember { mutableStateOf(false) }
+    var isAddressFocused by remember { mutableStateOf(false) }
+    val historyManager = remember(context) { BrowserHistoryManager(context) }
+    var historyItems by remember { mutableStateOf(historyManager.getHistory()) }
     var showMenuSheet by remember { mutableStateOf(false) }
     var showAdBlockRulesDialog by remember { mutableStateOf(false) }
     var adBlockDialogTab by remember { mutableIntStateOf(0) }
@@ -311,6 +322,7 @@ fun BrowserScreen(
             else -> "https://www.bing.com/search?q=${android.net.Uri.encode(trimmed)}"
         }
         urlInput = target
+        hasTypedInAddress = false
         showBookmarks = false
         runCatching {
             webViewRef?.stopLoading()
@@ -409,7 +421,11 @@ fun BrowserScreen(
                                 }
                                 BasicTextField(
                                     value = urlInput,
-                                    onValueChange = { urlInput = it },
+                                    onValueChange = {
+                                        urlInput = it
+                                        hasTypedInAddress = true
+                                        if (it.isNotBlank()) showBookmarks = false
+                                    },
                                     singleLine = true,
                                     textStyle = TextStyle(
                                         color = barFg,
@@ -425,7 +441,7 @@ fun BrowserScreen(
                                     ),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .onFocusChanged { focusState ->
+                                        .onFocusChanged { focusState -> isAddressFocused = focusState.isFocused; if (!focusState.isFocused) hasTypedInAddress = false; focusState ->
                                             if (focusState.isFocused) {
                                                 showBookmarks = true
                                             }
@@ -632,7 +648,7 @@ fun BrowserScreen(
                         setDownloadListener { url, userAgent, contentDisposition, mimetype, contentLength ->
                             if (!url.isNullOrBlank()) {
                                 onStartDownload(url, userAgent, contentDisposition, mimetype, contentLength)
-                                Toast.makeText(context, "已添加到下载队列", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "开始下载", Toast.LENGTH_SHORT).show()
                             }
                         }
 
@@ -702,6 +718,7 @@ fun BrowserScreen(
                                 activeBuiltInVideoUrl = null
                                 if (!url.isNullOrEmpty() && (url.startsWith("http://") || url.startsWith("https://"))) {
                                     urlInput = url
+                                    historyItems = historyManager.recordVisit(view?.title.orEmpty(), url)
                                 }
                                 canGoBack = view?.canGoBack() == true
                                 canGoForward = view?.canGoForward() == true
@@ -891,6 +908,76 @@ fun BrowserScreen(
                 }
             }
 
+            // Live history keyword suggestions when typing in address bar
+            val matchedHistory = remember(urlInput, hasTypedInAddress, isAddressFocused, historyItems) {
+                if (isAddressFocused && hasTypedInAddress && urlInput.isNotBlank()) {
+                    historyManager.search(urlInput)
+                } else {
+                    emptyList()
+                }
+            }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = matchedHistory.isNotEmpty(),
+                enter = fadeIn(tween(120)),
+                exit = fadeOut(tween(120)),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .zIndex(3f)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = menuBg,
+                    contentColor = barFg,
+                    shadowElevation = 8.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 260.dp)
+                    ) {
+                        itemsIndexed(matchedHistory, key = { _, h -> h.id }) { _, hItem ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        hasTypedInAddress = false
+                                        navigateTo(hItem.url)
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.History,
+                                    contentDescription = null,
+                                    tint = barFg.copy(alpha = 0.65f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = hItem.title,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = hItem.url,
+                                        fontSize = 11.sp,
+                                        color = barFg.copy(alpha = 0.55f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Smooth Bookmark Dropdown Menu right below the address bar
             androidx.compose.animation.AnimatedVisibility(
                 visible = showBookmarks,
@@ -914,7 +1001,7 @@ fun BrowserScreen(
                     onSelectBookmark = { navigateTo(it.url) },
                     onSetHome = { item ->
                         onSetHomeUrl(item.url)
-                        Toast.makeText(context, "已设为浏览器主页", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "已设为主页", Toast.LENGTH_SHORT).show()
                     },
                     onEditBookmark = { editingBookmark = it },
                     onMoveBookmark = onMoveBookmark,
@@ -1185,7 +1272,7 @@ fun BrowserScreen(
                                                         }
                                                         context.startActivity(viewIntent)
                                                     }.onFailure {
-                                                        Toast.makeText(context, "未找到可打开该文件的应用", Toast.LENGTH_SHORT).show()
+                                                        Toast.makeText(context, "无法打开该文件", Toast.LENGTH_SHORT).show()
                                                     }
                                                 }
                                             ) {
@@ -1502,7 +1589,44 @@ fun BrowserScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.weight(1f))
+                    // 3. 历史记录
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable {
+                                showMenuSheet = false
+                                isHistoryMultiSelect = false
+                                selectedHistoryIds = emptySet()
+                                historyItems = historyManager.getHistory()
+                                showHistoryDialog = true
+                            }
+                            .padding(vertical = 10.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                            modifier = Modifier.size(46.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Rounded.History,
+                                    contentDescription = "历史记录",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "历史记录",
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
                     Spacer(modifier = Modifier.weight(1f))
                 }
 
@@ -1520,6 +1644,169 @@ fun BrowserScreen(
                 }
             }
         }
+    }
+
+    if (showHistoryDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showHistoryDialog = false
+                isHistoryMultiSelect = false
+                selectedHistoryIds = emptySet()
+            },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isHistoryMultiSelect) "已选 ${selectedHistoryIds.size} 条" else "历史记录 (14天)",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (isHistoryMultiSelect) {
+                        TextButton(
+                            enabled = selectedHistoryIds.isNotEmpty(),
+                            onClick = {
+                                historyItems = historyManager.deleteItems(selectedHistoryIds)
+                                isHistoryMultiSelect = false
+                                selectedHistoryIds = emptySet()
+                            }
+                        ) {
+                            Text("删除所选", color = MaterialTheme.colorScheme.error)
+                        }
+                    } else if (historyItems.isNotEmpty()) {
+                        TextButton(
+                            onClick = {
+                                historyItems = historyManager.clearAll()
+                                Toast.makeText(context, "已清空历史记录", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Text("全部删除", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            },
+            text = {
+                if (historyItems.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("暂无历史记录", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 360.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        itemsIndexed(historyItems, key = { _, item -> item.id }) { _, hItem ->
+                            val isSelected = hItem.id in selectedHistoryIds
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (isHistoryMultiSelect) {
+                                                selectedHistoryIds = if (isSelected) {
+                                                    selectedHistoryIds - hItem.id
+                                                } else {
+                                                    selectedHistoryIds + hItem.id
+                                                }
+                                            } else {
+                                                showHistoryDialog = false
+                                                navigateTo(hItem.url)
+                                            }
+                                        },
+                                        onLongClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            isHistoryMultiSelect = true
+                                            selectedHistoryIds = selectedHistoryIds + hItem.id
+                                        }
+                                    )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (isHistoryMultiSelect) {
+                                        Checkbox(
+                                            checked = isSelected,
+                                            onCheckedChange = { checked ->
+                                                selectedHistoryIds = if (checked) {
+                                                    selectedHistoryIds + hItem.id
+                                                } else {
+                                                    selectedHistoryIds - hItem.id
+                                                }
+                                            }
+                                        )
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = hItem.title,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        val timeStr = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                                            .format(Date(hItem.visitedAtMs))
+                                        Text(
+                                            text = "$timeStr · ${hItem.url}",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    if (!isHistoryMultiSelect) {
+                                        IconButton(
+                                            onClick = {
+                                                historyItems = historyManager.deleteItem(hItem.id)
+                                            },
+                                            modifier = Modifier.size(30.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Close,
+                                                contentDescription = "删除记录",
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (isHistoryMultiSelect) {
+                            isHistoryMultiSelect = false
+                            selectedHistoryIds = emptySet()
+                        } else {
+                            showHistoryDialog = false
+                        }
+                    }
+                ) {
+                    Text(if (isHistoryMultiSelect) "取消多选" else "关闭")
+                }
+            }
+        )
     }
 
     if (showAdBlockRulesDialog) {
@@ -1773,7 +2060,7 @@ fun BrowserScreen(
                             isRefreshingSubs = false
                             Toast.makeText(
                                 context,
-                                if (ok > 0) "已更新 $ok 个订阅" else "更新失败，请检查网络",
+                                if (ok > 0) "已更新 $ok 个订阅" else "更新失败",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }

@@ -806,7 +806,7 @@ fun FormatFactoryScreen(
                                             FormatFactoryEngine.clearCache(context)
                                             Toast.makeText(context, "已保存到 $saveDirLabel", Toast.LENGTH_SHORT).show()
                                         } else {
-                                            Toast.makeText(context, "保存失败，请检查存储权限", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "保存失败", Toast.LENGTH_SHORT).show()
                                         }
                                     },
                                     enabled = savedUri == null,

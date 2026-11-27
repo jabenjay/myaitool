@@ -840,6 +840,8 @@ private struct FloatingVideoPlayerOverlay: View {
     @State private var minimizedOnLeft: Bool = false
     @State private var minimizedY: CGFloat = 260
     @State private var controlsVisible: Bool = true
+    @State private var isSeeking: Bool = false
+    @State private var interactionTick: Int = 0
     @State private var currentTimeSec: Double = 0
     @State private var durationSec: Double = 0
     @State private var playbackRate: Float = 1.0
@@ -855,8 +857,10 @@ private struct FloatingVideoPlayerOverlay: View {
         GeometryReader { geo in
             let screenW = geo.size.width
             let screenH = geo.size.height
+            let edgeMargin: CGFloat = 8.0
             let baseW = screenW * 0.86
-            let maxRestScale = max(1.0, screenW / baseW)
+            let maxRestW = max(baseW, screenW - edgeMargin * 2)
+            let maxRestScale = max(1.0, maxRestW / baseW)
 
             if isMinimized && !isFullscreen {
                 let snapX = minimizedOnLeft ? 11.0 : screenW - 11.0
@@ -928,7 +932,7 @@ private struct FloatingVideoPlayerOverlay: View {
                                     minimizedY = curH / 2 + offset.height
                                     withAnimation(.spring()) { isMinimized = true }
                                 } else {
-                                    let maxOffX = max(0, (screenW - curW) / 2)
+                                    let maxOffX = max(0, (screenW - curW) / 2 - edgeMargin)
                                     let clampedX = min(max(offset.width, -maxOffX), maxOffX)
                                     let clampedY = min(max(offset.height, 28), max(28, screenH - curH - 56))
                                     withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
@@ -956,6 +960,14 @@ private struct FloatingVideoPlayerOverlay: View {
         }
         .onAppear { startPlayback() }
         .onDisappear { stopPlayback() }
+        .task(id: "\(controlsVisible)_\(isPlaying)_\(isSeeking)_\(interactionTick)") {
+            if controlsVisible && isPlaying && !isSeeking {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                if !Task.isCancelled && !isSeeking {
+                    withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = false }
+                }
+            }
+        }
     }
 
     private var playerControlsOverlay: some View {
@@ -1021,10 +1033,16 @@ private struct FloatingVideoPlayerOverlay: View {
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { val in
+                                    isSeeking = true
+                                    interactionTick += 1
                                     let r = min(max(val.location.x / max(1, barGeo.size.width), 0), 1)
                                     let target = r * durationSec
                                     currentTimeSec = target
                                     player?.seek(to: CMTime(seconds: target, preferredTimescale: 600))
+                                }
+                                .onEnded { _ in
+                                    isSeeking = false
+                                    interactionTick += 1
                                 }
                         )
                     }

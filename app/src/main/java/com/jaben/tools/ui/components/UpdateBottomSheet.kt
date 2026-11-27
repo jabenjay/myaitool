@@ -123,7 +123,7 @@ fun UpdateBottomSheet(
                         if (ok) {
                             Toast.makeText(context, "开始下载", Toast.LENGTH_SHORT).show()
                         } else {
-                            Toast.makeText(context, "启动系统下载器失败", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "下载启动失败", Toast.LENGTH_SHORT).show()
                         }
                     },
                     shape = RoundedCornerShape(16.dp),

@@ -347,9 +347,9 @@ fun AboutScreen(
                                 )
                                 if (uri != null) {
                                     val path = OutputStorageHelper.getDisplayPath(context, OutputStorageHelper.SUB_PICTURES)
-                                    Toast.makeText(context, "已保存收款码到 $path", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "已保存收款码", Toast.LENGTH_SHORT).show()
                                 } else {
-                                    Toast.makeText(context, "保存失败，请检查存储权限", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "保存失败", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
@@ -378,7 +378,7 @@ fun AboutScreen(
                                         true
                                     }.getOrDefault(false)
                                     if (!launched) {
-                                        Toast.makeText(context, "未检测到支付宝，请扫码捐赠", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "未安装支付宝", Toast.LENGTH_SHORT).show()
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = brandColor),

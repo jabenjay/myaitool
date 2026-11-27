@@ -131,6 +131,7 @@ fun BuiltInVideoPlayerOverlay(
     var isMinimized by remember { mutableStateOf(false) }
     var minimizedOnLeft by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
+    var controlInteractionTick by remember { mutableIntStateOf(0) }
     var isPlaying by remember { mutableStateOf(true) }
     var isBuffering by remember { mutableStateOf(true) }
     var currentPositionMs by remember { mutableLongStateOf(initialPositionMs) }
@@ -282,9 +283,9 @@ fun BuiltInVideoPlayerOverlay(
         }
     }
 
-    LaunchedEffect(controlsVisible, isPlaying) {
-        if (controlsVisible && isPlaying) {
-            delay(3500)
+    LaunchedEffect(controlsVisible, isPlaying, isSeeking, controlInteractionTick) {
+        if (controlsVisible && isPlaying && !isSeeking) {
+            delay(5000)
             controlsVisible = false
         }
     }
@@ -297,8 +298,10 @@ fun BuiltInVideoPlayerOverlay(
     ) {
         val screenWidthPx = with(density) { maxWidth.toPx() }
         val screenHeightPx = with(density) { maxHeight.toPx() }
+        val edgeMarginPx = with(density) { 8.dp.toPx() }
         val baseWidthPx = screenWidthPx * 0.86f
-        val maxRestingScale = (screenWidthPx / baseWidthPx).coerceAtLeast(1f)
+        val maxRestingWidthPx = (screenWidthPx - edgeMarginPx * 2f).coerceAtLeast(baseWidthPx)
+        val maxRestingScale = (maxRestingWidthPx / baseWidthPx).coerceAtLeast(1f)
         val minScale = 0.25f
 
         val scaleAnim = remember { Animatable(0.88f) }
@@ -450,6 +453,7 @@ fun BuiltInVideoPlayerOverlay(
                                         }
                                     }
                                     if (moved) {
+                                        controlInteractionTick++
                                         event.changes.forEach { it.consume() }
                                     }
                                 }
@@ -486,9 +490,9 @@ fun BuiltInVideoPlayerOverlay(
                                 )
                                 isMinimized = true
                             } else {
-                                val maxX = (screenWidthPx - finalW).coerceAtLeast(0f)
+                                val maxX = (screenWidthPx - finalW - edgeMarginPx).coerceAtLeast(edgeMarginPx)
                                 val maxY = (screenHeightPx - finalH - safeBottomPx).coerceAtLeast(safeTopPx)
-                                val clampedX = targetX.coerceIn(0f, maxX)
+                                val clampedX = targetX.coerceIn(edgeMarginPx, maxX)
                                 val clampedY = targetY.coerceIn(safeTopPx, maxY)
 
                                 val bounceSpec = spring<Float>(
@@ -691,6 +695,7 @@ fun BuiltInVideoPlayerOverlay(
                                 value = sliderPosition,
                                 onValueChange = { ratio ->
                                     isSeeking = true
+                                    controlInteractionTick++
                                     sliderPosition = ratio
                                     if (durationMs > 0L) {
                                         currentPositionMs = (ratio * durationMs).toLong()
@@ -701,6 +706,7 @@ fun BuiltInVideoPlayerOverlay(
                                         mediaController?.seekTo((sliderPosition * durationMs).toLong())
                                     }
                                     isSeeking = false
+                                    controlInteractionTick++
                                 },
                                 modifier = Modifier
                                     .weight(1f)
