@@ -17,6 +17,17 @@ on:
         description: '填写发布版本号（如 0.3.5）'
         required: true
         default: '0.3.5'
+      runner:
+        description: '选择 macOS 构建节点（arm64 拥堵时选 intel）'
+        type: choice
+        required: true
+        default: 'macos-26-intel'
+        options:
+          - macos-26-intel
+          - macos-15-intel
+          - macos-latest
+          - macos-26
+          - macos-15
 
 permissions:
   contents: write
@@ -24,7 +35,7 @@ permissions:
 jobs:
   build_ios:
     name: Build iOS IPA
-    runs-on: macos-latest
+    runs-on: ${{ github.event.inputs.runner || 'macos-26-intel' }}
 
     steps:
       - name: Checkout repository
