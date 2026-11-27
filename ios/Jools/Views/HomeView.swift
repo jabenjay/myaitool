@@ -75,6 +75,7 @@ struct ToolboxHomeView: View {
             case .qrTool: QrToolView()
             case .formatFactory: FormatFactoryView()
             case .compressor: FileCompressorView()
+            case .pushGit: PushGitView()
             }
         }
     }

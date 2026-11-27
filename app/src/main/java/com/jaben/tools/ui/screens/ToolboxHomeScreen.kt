@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.QrCodeScanner
+import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.Compress
 import androidx.compose.material.icons.rounded.Transform
 import androidx.compose.material3.IconButton
@@ -127,6 +128,12 @@ fun ToolboxHomeScreen(
                 title = "文件压缩",
                 subtitle = "视频、图片、音频及文件压缩",
                 icon = Icons.Rounded.Compress
+            ),
+            "pushgit" to ToolboxModule(
+                id = "pushgit",
+                title = "PushGit",
+                subtitle = "上传压缩包、文件夹或文件至 GitHub",
+                icon = Icons.Rounded.CloudUpload
             )
         )
     }

@@ -36,7 +36,7 @@ data class AppSettings(
     val defaultShowLineNumbers: Boolean = true,
     val defaultSoftWrap: Boolean = true,
     val homeColumns: Int = 1,
-    val toolOrder: List<String> = listOf("browser", "base64", "qr", "format_factory", "compressor"),
+    val toolOrder: List<String> = listOf("browser", "base64", "qr", "format_factory", "compressor", "pushgit"),
     val backgroundImagePath: String? = null,
     val backgroundBlurDp: Float = 12f,
     val backgroundVersion: Int = 0,
@@ -275,7 +275,7 @@ class ThemePreferences(private val context: Context) {
         const val KEY_LINE_NUMBERS = "default_line_numbers"
         const val KEY_SOFT_WRAP = "default_soft_wrap"
         const val KEY_HOME_COLUMNS = "home_columns"
-        val ALL_TOOL_IDS = listOf("browser", "base64", "qr", "format_factory", "compressor")
+        val ALL_TOOL_IDS = listOf("browser", "base64", "qr", "format_factory", "compressor", "pushgit")
         const val KEY_TOOL_ORDER = "tool_order"
         const val KEY_OUTPUT_ROOT_URI = "output_root_uri"
         const val KEY_OUTPUT_ROOT_LABEL = "output_root_label"

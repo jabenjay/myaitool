@@ -15,6 +15,7 @@ enum ToolRoute: String, CaseIterable, Identifiable, Codable {
     case qrTool = "qr_tool"
     case formatFactory = "format_factory"
     case compressor = "compressor"
+    case pushGit = "pushgit"
 
     var id: String { rawValue }
 
@@ -26,6 +27,7 @@ enum ToolRoute: String, CaseIterable, Identifiable, Codable {
         case .qrTool: return "二维码工具"
         case .formatFactory: return "格式工厂"
         case .compressor: return "文件压缩"
+        case .pushGit: return "PushGit"
         }
     }
 
@@ -37,6 +39,7 @@ enum ToolRoute: String, CaseIterable, Identifiable, Codable {
         case .qrTool: return "自定义样式生成与保存"
         case .formatFactory: return "图片格式转换与尺寸缩放"
         case .compressor: return "图片/视频体积无损或有损压缩"
+        case .pushGit: return "上传压缩包、文件夹或文件至 GitHub"
         }
     }
 
@@ -48,8 +51,16 @@ enum ToolRoute: String, CaseIterable, Identifiable, Codable {
         case .qrTool: return "qrcode"
         case .formatFactory: return "wand.and.stars"
         case .compressor: return "archivebox"
+        case .pushGit: return "icloud.and.arrow.up"
         }
     }
+}
+
+struct BrowserHistoryItem: Identifiable, Codable, Equatable {
+    let id: String
+    var title: String
+    var url: String
+    var visitedAtMs: Double
 }
 
 struct BookmarkItem: Identifiable, Codable, Equatable {
@@ -135,6 +146,7 @@ final class AppState: ObservableObject {
     @Published var activeUpdateInfo: UpdateInfo?
     @Published var showUpdateSheet: Bool = false
     @Published var downloads: [DownloadTaskItem] = []
+    @Published var historyItems: [BrowserHistoryItem] = []
 
     var preferredColorScheme: ColorScheme? {
         switch themePreference {
@@ -169,6 +181,61 @@ final class AppState: ObservableObject {
         } else {
             bookmarks = Self.defaultBookmarks
         }
+        loadHistory()
+    }
+
+    private static let historyRetentionMs: Double = 14 * 24 * 60 * 60 * 1000
+
+    func loadHistory() {
+        let cutoff = Date().timeIntervalSince1970 * 1000 - Self.historyRetentionMs
+        if let data = UserDefaults.standard.data(forKey: "jools_ios_history"),
+           let saved = try? JSONDecoder().decode([BrowserHistoryItem].self, from: data) {
+            historyItems = saved.filter { $0.visitedAtMs >= cutoff }.sorted { $0.visitedAtMs > $1.visitedAtMs }
+        }
+    }
+
+    private func saveHistory() {
+        let cutoff = Date().timeIntervalSince1970 * 1000 - Self.historyRetentionMs
+        let valid = Array(historyItems.filter { $0.visitedAtMs >= cutoff }.prefix(500))
+        historyItems = valid
+        if let data = try? JSONEncoder().encode(valid) {
+            UserDefaults.standard.set(data, forKey: "jools_ios_history")
+        }
+    }
+
+    func recordHistory(title: String, url: String) {
+        let clean = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clean.hasPrefix("http://") || clean.hasPrefix("https://") else { return }
+        let now = Date().timeIntervalSince1970 * 1000
+        historyItems.removeAll { $0.url.caseInsensitiveCompare(clean) == .orderedSame }
+        historyItems.insert(
+            BrowserHistoryItem(id: UUID().uuidString, title: title.isEmpty ? clean : title, url: clean, visitedAtMs: now),
+            at: 0
+        )
+        saveHistory()
+    }
+
+    func searchHistory(_ keyword: String) -> [BrowserHistoryItem] {
+        let q = keyword.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return [] }
+        return Array(historyItems.filter {
+            $0.title.lowercased().contains(q) || $0.url.lowercased().contains(q)
+        }.prefix(15))
+    }
+
+    func deleteHistory(id: String) {
+        historyItems.removeAll { $0.id == id }
+        saveHistory()
+    }
+
+    func deleteHistory(ids: Set<String>) {
+        historyItems.removeAll { ids.contains($0.id) }
+        saveHistory()
+    }
+
+    func clearHistory() {
+        historyItems.removeAll()
+        UserDefaults.standard.removeObject(forKey: "jools_ios_history")
     }
 
     static let defaultBookmarks: [BookmarkItem] = [

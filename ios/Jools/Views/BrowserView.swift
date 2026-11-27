@@ -19,6 +19,10 @@ struct BrowserView: View {
     @State private var showBookmarks: Bool = false
     @State private var showMenuSheet: Bool = false
     @State private var showDownloadsSheet: Bool = false
+    @State private var showHistorySheet: Bool = false
+    @State private var hasTypedInAddress: Bool = false
+    @State private var isHistoryMultiSelect: Bool = false
+    @State private var selectedHistoryIds: Set<String> = []
     @State private var showAdBlockDialog: Bool = false
     @State private var editingBookmark: BookmarkItem?
     @State private var showAddBookmarkDialog: Bool = false
@@ -54,7 +58,16 @@ struct BrowserView: View {
                             .autocorrectionDisabled()
                             .keyboardType(.URL)
                             .submitLabel(.go)
-                            .onSubmit { navigateTo(urlInput) }
+                            .onChange(of: urlInput) { val in
+                                hasTypedInAddress = true
+                                if !val.trimmingCharacters(in: .whitespaces).isEmpty {
+                                    showBookmarks = false
+                                }
+                            }
+                            .onSubmit {
+                                hasTypedInAddress = false
+                                navigateTo(urlInput)
+                            }
                         if !urlInput.isEmpty {
                             Button {
                                 urlInput = ""
@@ -130,6 +143,9 @@ struct BrowserView: View {
                         onProgressChanged: { p in
                             self.progress = p
                             self.isLoading = p < 1.0
+                            if p >= 1.0 && !self.urlInput.isEmpty {
+                                appState.recordHistory(title: self.pageTitle, url: self.urlInput)
+                            }
                         },
                         onNavStateChanged: { back, fwd in
                             self.canGoBack = back
@@ -172,7 +188,38 @@ struct BrowserView: View {
                         .padding(.bottom, 14)
                     }
 
-                    if showBookmarks {
+                    let matchedHistory = hasTypedInAddress ? appState.searchHistory(urlInput) : []
+                    if !matchedHistory.isEmpty {
+                        VStack(spacing: 0) {
+                            List(matchedHistory) { item in
+                                Button {
+                                    hasTypedInAddress = false
+                                    navigateTo(item.url)
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "clock.arrow.circlepath")
+                                            .foregroundColor(.secondary)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.title)
+                                                .font(.system(size: 13, weight: .medium))
+                                                .lineLimit(1)
+                                            Text(item.url)
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                }
+                            }
+                            .listStyle(.plain)
+                            .frame(maxHeight: 240)
+                        }
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .shadow(radius: 10)
+                        .padding(12)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                    } else if showBookmarks {
                         bookmarkOverlay
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
@@ -273,6 +320,9 @@ struct BrowserView: View {
         .sheet(isPresented: $showDownloadsSheet) {
             downloadsSheet
         }
+        .sheet(isPresented: $showHistorySheet) {
+            historySheet
+        }
         .sheet(isPresented: $showAdBlockDialog) {
             adBlockManagerSheet
         }
@@ -341,7 +391,27 @@ struct BrowserView: View {
                     showAdBlockDialog = true
                 }
 
-                Spacer().frame(maxWidth: .infinity)
+                Button {
+                    showMenuSheet = false
+                    isHistoryMultiSelect = false
+                    selectedHistoryIds = []
+                    showHistorySheet = true
+                } label: {
+                    VStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color(.secondarySystemBackground))
+                            .frame(width: 48, height: 48)
+                            .overlay(
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.system(size: 20))
+                            )
+                        Text("历史记录")
+                            .font(.system(size: 12))
+                            .foregroundColor(.primary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+
                 Spacer().frame(maxWidth: .infinity)
             }
 
@@ -504,6 +574,88 @@ struct BrowserView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("关闭") { showDownloadsSheet = false }
+                }
+            }
+        }
+    }
+
+    private var historySheet: some View {
+        NavigationStack {
+            List {
+                if appState.historyItems.isEmpty {
+                    Text("暂无历史记录").foregroundColor(.secondary)
+                } else {
+                    ForEach(appState.historyItems) { item in
+                        let isSelected = selectedHistoryIds.contains(item.id)
+                        HStack(spacing: 10) {
+                            if isHistoryMultiSelect {
+                                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                    .foregroundColor(isSelected ? .accentColor : .secondary)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.title)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .lineLimit(1)
+                                Text(item.url)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            if !isHistoryMultiSelect {
+                                Button {
+                                    appState.deleteHistory(id: item.id)
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if isHistoryMultiSelect {
+                                if isSelected { selectedHistoryIds.remove(item.id) }
+                                else { selectedHistoryIds.insert(item.id) }
+                            } else {
+                                showHistorySheet = false
+                                navigateTo(item.url)
+                            }
+                        }
+                        .onLongPressGesture {
+                            isHistoryMultiSelect = true
+                            selectedHistoryIds.insert(item.id)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(isHistoryMultiSelect ? "已选 \(selectedHistoryIds.count) 条" : "历史记录 (14天)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(isHistoryMultiSelect ? "取消多选" : "关闭") {
+                        if isHistoryMultiSelect {
+                            isHistoryMultiSelect = false
+                            selectedHistoryIds = []
+                        } else {
+                            showHistorySheet = false
+                        }
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isHistoryMultiSelect {
+                        Button("删除所选", role: .destructive) {
+                            appState.deleteHistory(ids: selectedHistoryIds)
+                            isHistoryMultiSelect = false
+                            selectedHistoryIds = []
+                        }
+                        .disabled(selectedHistoryIds.isEmpty)
+                    } else if !appState.historyItems.isEmpty {
+                        Button("全部删除", role: .destructive) {
+                            appState.clearHistory()
+                        }
+                    }
                 }
             }
         }

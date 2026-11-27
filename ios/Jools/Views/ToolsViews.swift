@@ -2,6 +2,8 @@ import SwiftUI
 import AVFoundation
 import PhotosUI
 import CoreImage.CIFilterBuiltins
+import UniformTypeIdentifiers
+import Compression
 
 // MARK: - 1. Base64 Tool
 struct Base64ToolView: View {
@@ -404,5 +406,349 @@ struct FileCompressorView: View {
         }
         .padding(16)
         .navigationTitle("文件压缩")
+    }
+}
+
+
+// MARK: - 6. PushGit Tool
+struct PushGitView: View {
+    struct PushFile: Identifiable {
+        let id = UUID()
+        let path: String
+        let data: Data
+    }
+
+    @State private var pat: String = UserDefaults.standard.string(forKey: "jools_pushgit_pat") ?? ""
+    @State private var showPat: Bool = false
+    @State private var connectedUser: String?
+    @State private var repoText: String = UserDefaults.standard.string(forKey: "jools_pushgit_repo") ?? "jabenjay/myaitool"
+    @State private var branch: String = UserDefaults.standard.string(forKey: "jools_pushgit_branch") ?? "main"
+    @State private var commitMessage: String = UserDefaults.standard.string(forKey: "jools_pushgit_msg") ?? "Sync project files via PushGit"
+    @State private var targetSubpath: String = ""
+    @State private var repos: [String] = []
+    @State private var branches: [String] = ["main"]
+
+    @State private var selectedFiles: [PushFile] = []
+    @State private var showZipImporter = false
+    @State private var showFolderImporter = false
+    @State private var showFilesImporter = false
+
+    @State private var isPushing = false
+    @State private var statusText = ""
+
+    var body: some View {
+        Form {
+            Section("目标仓库与认证") {
+                if !repos.isEmpty {
+                    Picker("选择仓库", selection: $repoText) {
+                        ForEach(repos, id: \.self) { Text($0).tag($0) }
+                    }
+                }
+                TextField("owner/repo（如 jabenjay/myaitool）", text: $repoText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                HStack {
+                    if showPat {
+                        TextField("Personal Access Token (ghp_...)", text: $pat)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } else {
+                        SecureField("Personal Access Token (ghp_...)", text: $pat)
+                    }
+                    Button { showPat.toggle() } label: {
+                        Image(systemName: showPat ? "eye.slash" : "eye")
+                    }
+                }
+                if let user = connectedUser {
+                    Label("Connected as @\(user)", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(.green)
+                }
+                Button("验证 Token 并拉取仓库") {
+                    Task { await fetchMeta() }
+                }
+                .disabled(pat.isEmpty)
+            }
+
+            Section("分支与提交信息") {
+                TextField("Branch", text: $branch)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if !branches.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack {
+                            ForEach(branches, id: \.self) { b in
+                                Button(b) { branch = b }
+                                    .buttonStyle(.bordered)
+                                    .tint(branch == b ? .accentColor : .secondary)
+                            }
+                        }
+                    }
+                }
+                TextField("Commit Message", text: $commitMessage)
+            }
+
+            Section("选择上传内容（调用系统文件）") {
+                TextField("单文件目标路径前缀（可选）", text: $targetSubpath)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                HStack(spacing: 10) {
+                    Button("ZIP") { showZipImporter = true }
+                        .buttonStyle(.borderedProminent)
+                        .frame(maxWidth: .infinity)
+                    Button("文件夹") { showFolderImporter = true }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+                    Button("文件") { showFilesImporter = true }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+                }
+                if !selectedFiles.isEmpty {
+                    Text("已就绪 \(selectedFiles.count) 个文件")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.accentColor)
+                    ForEach(selectedFiles) { f in
+                        Text(f.path)
+                            .font(.system(size: 12))
+                            .lineLimit(1)
+                    }
+                    .onDelete { idxs in selectedFiles.remove(atOffsets: idxs) }
+                }
+            }
+
+            Section {
+                Button {
+                    Task { await pushAll() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        Text(isPushing ? "正在推送..." : "Push 到 GitHub")
+                            .fontWeight(.semibold)
+                        Spacer()
+                    }
+                }
+                .disabled(isPushing || pat.isEmpty || selectedFiles.isEmpty)
+
+                if !statusText.isEmpty {
+                    Text(statusText)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .navigationTitle("PushGit")
+        .task {
+            if !pat.isEmpty { await fetchMeta() }
+        }
+        .fileImporter(isPresented: $showZipImporter, allowedContentTypes: [.zip], allowsMultipleSelection: false) { res in
+            if case .success(let urls) = res, let u = urls.first {
+                loadZip(u)
+            }
+        }
+        .fileImporter(isPresented: $showFolderImporter, allowedContentTypes: [.folder], allowsMultipleSelection: false) { res in
+            if case .success(let urls) = res, let u = urls.first {
+                loadFolder(u)
+            }
+        }
+        .fileImporter(isPresented: $showFilesImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { res in
+            if case .success(let urls) = res {
+                loadFiles(urls)
+            }
+        }
+    }
+
+    private func cleanRepoName(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "https://github.com/", with: "")
+            .replacingOccurrences(of: "http://github.com/", with: "")
+            .replacingOccurrences(of: ".git", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private func fetchMeta() async {
+        if let uJson = try? await ghRequest(method: "GET", urlStr: "https://api.github.com/user", body: nil) as? [String: Any],
+           let login = uJson["login"] as? String {
+            connectedUser = login
+        }
+        if let arr = try? await ghRequest(method: "GET", urlStr: "https://api.github.com/user/repos?per_page=100&sort=updated", body: nil) as? [[String: Any]] {
+            repos = arr.compactMap { $0["full_name"] as? String }
+        }
+        let repo = cleanRepoName(repoText)
+        if let bArr = try? await ghRequest(method: "GET", urlStr: "https://api.github.com/repos/\(repo)/branches?per_page=100", body: nil) as? [[String: Any]] {
+            let names = bArr.compactMap { $0["name"] as? String }
+            if !names.isEmpty { branches = names }
+        }
+    }
+
+    private func loadZip(_ url: URL) {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else {
+            statusText = "读取压缩包失败"
+            return
+        }
+        let entries = parseZipEntries(data)
+        selectedFiles = entries
+        statusText = "已解析 \(entries.count) 个文件"
+    }
+
+    private func loadFolder(_ url: URL) {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        var out: [PushFile] = []
+        if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey]) {
+            for case let fileUrl as URL in enumerator {
+                let isDir = (try? fileUrl.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                if isDir { continue }
+                let rel = fileUrl.path.replacingOccurrences(of: url.path + "/", with: "")
+                if rel.hasPrefix(".git/") || rel.contains("/.DS_Store") || rel.hasSuffix(".DS_Store") { continue }
+                if let d = try? Data(contentsOf: fileUrl) {
+                    out.append(PushFile(path: rel, data: d))
+                }
+            }
+        }
+        selectedFiles = out
+        statusText = "已读取 \(out.count) 个文件"
+    }
+
+    private func loadFiles(_ urls: [URL]) {
+        let prefix = targetSubpath.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        var out: [PushFile] = []
+        for u in urls {
+            let accessed = u.startAccessingSecurityScopedResource()
+            defer { if accessed { u.stopAccessingSecurityScopedResource() } }
+            if let d = try? Data(contentsOf: u) {
+                let rel = prefix.isEmpty ? u.lastPathComponent : "\(prefix)/\(u.lastPathComponent)"
+                out.append(PushFile(path: rel, data: d))
+            }
+        }
+        selectedFiles = out
+        statusText = "已选择 \(out.count) 个文件"
+    }
+
+    private func pushAll() async {
+        UserDefaults.standard.set(pat, forKey: "jools_pushgit_pat")
+        UserDefaults.standard.set(repoText, forKey: "jools_pushgit_repo")
+        UserDefaults.standard.set(branch, forKey: "jools_pushgit_branch")
+        UserDefaults.standard.set(commitMessage, forKey: "jools_pushgit_msg")
+
+        isPushing = true
+        defer { isPushing = false }
+        let repo = cleanRepoName(repoText)
+        let br = branch.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            guard let refObj = try await ghRequest(method: "GET", urlStr: "https://api.github.com/repos/\(repo)/git/ref/heads/\(br)", body: nil) as? [String: Any],
+                  let obj = refObj["object"] as? [String: Any],
+                  let headSha = obj["sha"] as? String else {
+                statusText = "无法读取分支信息"
+                return
+            }
+            guard let commitObj = try await ghRequest(method: "GET", urlStr: "https://api.github.com/repos/\(repo)/git/commits/\(headSha)", body: nil) as? [String: Any],
+                  let treeObj = commitObj["tree"] as? [String: Any],
+                  let baseTreeSha = treeObj["sha"] as? String else {
+                statusText = "无法读取基线树"
+                return
+            }
+
+            var treeEntries: [[String: Any]] = []
+            for (idx, file) in selectedFiles.enumerated() {
+                statusText = "推送中 (\(idx + 1)/\(selectedFiles.count)): \(file.path)"
+                let blobBody: [String: Any] = ["content": file.data.base64EncodedString(), "encoding": "base64"]
+                if let bResp = try await ghRequest(method: "POST", urlStr: "https://api.github.com/repos/\(repo)/git/blobs", body: blobBody) as? [String: Any],
+                   let bSha = bResp["sha"] as? String {
+                    treeEntries.append(["path": file.path, "mode": "100644", "type": "blob", "sha": bSha])
+                }
+            }
+
+            let treeBody: [String: Any] = ["base_tree": baseTreeSha, "tree": treeEntries]
+            guard let newTree = try await ghRequest(method: "POST", urlStr: "https://api.github.com/repos/\(repo)/git/trees", body: treeBody) as? [String: Any],
+                  let newTreeSha = newTree["sha"] as? String else {
+                statusText = "创建 Tree 失败"
+                return
+            }
+
+            let commitBody: [String: Any] = ["message": commitMessage, "tree": newTreeSha, "parents": [headSha]]
+            guard let newCommit = try await ghRequest(method: "POST", urlStr: "https://api.github.com/repos/\(repo)/git/commits", body: commitBody) as? [String: Any],
+                  let newCommitSha = newCommit["sha"] as? String else {
+                statusText = "创建 Commit 失败"
+                return
+            }
+
+            _ = try await ghRequest(method: "PATCH", urlStr: "https://api.github.com/repos/\(repo)/git/refs/heads/\(br)", body: ["sha": newCommitSha, "force": false])
+            statusText = "推送成功: \(selectedFiles.count) 个文件 (\(newCommitSha.prefix(7)))"
+        } catch {
+            statusText = "推送失败: \(error.localizedDescription)"
+        }
+    }
+
+    private func ghRequest(method: String, urlStr: String, body: [String: Any]?) async throws -> Any {
+        guard let url = URL(string: urlStr) else { throw URLError(.badURL) }
+        var req = URLRequest(url: url, timeoutInterval: 25)
+        req.httpMethod = method
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("Bearer \(pat.trimmingCharacters(in: .whitespacesAndNewlines))", forHTTPHeaderField: "Authorization")
+        if let body {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw NSError(domain: "GitHub", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
+        }
+        return try JSONSerialization.jsonObject(with: data)
+    }
+
+    private func parseZipEntries(_ data: Data) -> [PushFile] {
+        var result: [PushFile] = []
+        var idx = 0
+        let bytes = [UInt8](data)
+        func u16(_ o: Int) -> Int { Int(bytes[o]) | (Int(bytes[o + 1]) << 8) }
+        func u32(_ o: Int) -> Int { Int(bytes[o]) | (Int(bytes[o + 1]) << 8) | (Int(bytes[o + 2]) << 16) | (Int(bytes[o + 3]) << 24) }
+
+        while idx + 30 <= bytes.count {
+            if u32(idx) != 0x04034B50 { break }
+            let method = u16(idx + 8)
+            let compSize = u32(idx + 18)
+            let uncompSize = u32(idx + 22)
+            let nameLen = u16(idx + 26)
+            let extraLen = u16(idx + 28)
+            let dataStart = idx + 30 + nameLen + extraLen
+            let dataEnd = dataStart + compSize
+            if dataEnd > bytes.count { break }
+
+            let nameData = Data(bytes[(idx + 30)..<(idx + 30 + nameLen)])
+            let rawName = String(data: nameData, encoding: .utf8) ?? ""
+            let name = rawName.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            if !name.isEmpty && !rawName.hasSuffix("/") && !name.hasPrefix("__MACOSX/") && !name.hasSuffix(".DS_Store") && !name.hasPrefix(".git/") {
+                let slice = Data(bytes[dataStart..<dataEnd])
+                if method == 0 {
+                    result.append(PushFile(path: name, data: slice))
+                } else if method == 8 && uncompSize > 0 {
+                    if let decompressed = inflateRaw(slice, expectedSize: uncompSize) {
+                        result.append(PushFile(path: name, data: decompressed))
+                    }
+                }
+            }
+            idx = dataEnd
+        }
+        return result
+    }
+
+    private func inflateRaw(_ compressed: Data, expectedSize: Int) -> Data? {
+        var dest = Data(count: expectedSize + 64)
+        let decodedCount = dest.withUnsafeMutableBytes { destPtr in
+            compressed.withUnsafeBytes { srcPtr in
+                compression_decode_buffer(
+                    destPtr.bindMemory(to: UInt8.self).baseAddress!,
+                    expectedSize + 64,
+                    srcPtr.bindMemory(to: UInt8.self).baseAddress!,
+                    compressed.count,
+                    nil,
+                    COMPRESSION_ZLIB
+                )
+            }
+        }
+        guard decodedCount > 0 else { return nil }
+        return dest.prefix(decodedCount)
     }
 }

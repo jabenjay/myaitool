@@ -95,6 +95,7 @@ import com.jaben.tools.ui.screens.AboutScreen
 import com.jaben.tools.ui.screens.Base64Screen
 import com.jaben.tools.ui.screens.BrowserScreen
 import com.jaben.tools.ui.screens.FileCompressorScreen
+import com.jaben.tools.ui.screens.PushGitScreen
 import com.jaben.tools.ui.screens.FormatFactoryScreen
 import com.jaben.tools.ui.screens.StorageSettingsScreen
 import com.jaben.tools.ui.screens.LayoutSettingsScreen
@@ -361,6 +362,7 @@ fun PocketToolboxApp(
                                         "qr" -> navController.navigate("tool/qr")
                                         "format_factory" -> navController.navigate("tool/format_factory")
                                         "compressor" -> navController.navigate("tool/compressor")
+                                        "pushgit" -> navController.navigate("tool/pushgit")
                                     }
                                 }
                             )
@@ -446,6 +448,9 @@ fun PocketToolboxApp(
                 }
                 composable("tool/compressor") {
                     FileCompressorScreen(onBack = { navController.popBackStack() })
+                }
+                composable("tool/pushgit") {
+                    PushGitScreen(onBack = { navController.popBackStack() })
                 }
                 composable("tool/format_factory") {
                     FormatFactoryScreen(onBack = { navController.popBackStack() })
