@@ -12,6 +12,7 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.zip.ZipInputStream
@@ -59,6 +60,14 @@ data class WorkflowInputField(
     val required: Boolean,
     val defaultValue: String,
     val options: List<String> = emptyList()
+)
+
+data class RepoContentItem(
+    val name: String,
+    val path: String,
+    val type: String,
+    val sha: String,
+    val size: Long
 )
 
 data class WorkflowRunInfo(
@@ -702,6 +711,113 @@ class PushGitEngine(private val context: Context) {
                 conn.disconnect()
             }
             fullLog
+        }
+    }
+
+
+    private fun encodeGitHubPath(path: String): String {
+        return path.trim('/').split('/').filter { it.isNotEmpty() }.joinToString("/") { seg ->
+            URLEncoder.encode(seg, "UTF-8").replace("+", "%20")
+        }
+    }
+
+    suspend fun listRepoContents(
+        pat: String,
+        ownerRepoInput: String,
+        branch: String,
+        path: String
+    ): Result<List<RepoContentItem>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = parseOwnerRepo(ownerRepoInput)
+            val encodedPath = encodeGitHubPath(path)
+            val ref = URLEncoder.encode(branch.trim().ifBlank { "main" }, "UTF-8")
+            val url = if (encodedPath.isEmpty()) {
+                "https://api.github.com/repos/$repo/contents?ref=$ref"
+            } else {
+                "https://api.github.com/repos/$repo/contents/$encodedPath?ref=$ref"
+            }
+            val resp = apiRequest("GET", url, pat, null)
+            val arr = JSONArray(resp)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    add(
+                        RepoContentItem(
+                            name = obj.optString("name"),
+                            path = obj.optString("path"),
+                            type = obj.optString("type"),
+                            sha = obj.optString("sha"),
+                            size = obj.optLong("size")
+                        )
+                    )
+                }
+            }.sortedWith(compareBy<RepoContentItem> { it.type != "dir" }.thenBy { it.name.lowercase() })
+        }
+    }
+
+    suspend fun fetchRepoFileText(
+        pat: String,
+        ownerRepoInput: String,
+        branch: String,
+        path: String
+    ): Result<Pair<String, String>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = parseOwnerRepo(ownerRepoInput)
+            val encodedPath = encodeGitHubPath(path)
+            val ref = URLEncoder.encode(branch.trim().ifBlank { "main" }, "UTF-8")
+            val resp = apiRequest("GET", "https://api.github.com/repos/$repo/contents/$encodedPath?ref=$ref", pat, null)
+            val obj = JSONObject(resp)
+            val size = obj.optLong("size")
+            require(size <= 512L * 1024L) { "文件过大 (>512KB)，暂不支持在线编辑" }
+            val sha = obj.optString("sha")
+            val b64 = obj.optString("content").replace("\n", "")
+            val text = String(Base64.decode(b64, Base64.DEFAULT), Charsets.UTF_8)
+            sha to text
+        }
+    }
+
+    suspend fun updateRepoFile(
+        pat: String,
+        ownerRepoInput: String,
+        branch: String,
+        path: String,
+        sha: String?,
+        content: String,
+        message: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = parseOwnerRepo(ownerRepoInput)
+            val encodedPath = encodeGitHubPath(path)
+            val encodedContent = Base64.encodeToString(content.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+            val body = JSONObject().apply {
+                put("message", message.trim().ifBlank { "Update $path via PushGit" })
+                put("content", encodedContent)
+                put("branch", branch.trim().ifBlank { "main" })
+                if (!sha.isNullOrBlank()) put("sha", sha)
+            }.toString()
+            val resp = apiRequest("PUT", "https://api.github.com/repos/$repo/contents/$encodedPath", pat, body)
+            JSONObject(resp).optJSONObject("commit")?.optString("sha").orEmpty().ifBlank { "committed" }
+        }
+    }
+
+    suspend fun deleteRepoFile(
+        pat: String,
+        ownerRepoInput: String,
+        branch: String,
+        path: String,
+        sha: String,
+        message: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = parseOwnerRepo(ownerRepoInput)
+            val encodedPath = encodeGitHubPath(path)
+            val body = JSONObject().apply {
+                put("message", message.trim().ifBlank { "Delete $path via PushGit" })
+                put("sha", sha)
+                put("branch", branch.trim().ifBlank { "main" })
+            }.toString()
+            apiRequest("DELETE", "https://api.github.com/repos/$repo/contents/$encodedPath", pat, body)
+            Unit
         }
     }
 

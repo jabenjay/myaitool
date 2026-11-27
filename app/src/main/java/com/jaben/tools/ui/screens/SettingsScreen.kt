@@ -23,6 +23,8 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
@@ -32,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.jaben.tools.data.AppUpdateChecker
+import com.jaben.tools.data.UpdateChannel
 import com.jaben.tools.data.UpdateCheckResult
 import kotlinx.coroutines.launch
 import java.net.Proxy
@@ -48,6 +51,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.sp
 import com.jaben.tools.data.AppSettings
 import com.jaben.tools.data.ProxyState
@@ -79,6 +83,8 @@ fun SettingsScreen(
     val currentVersion = remember { AppUpdateChecker.getCurrentVersionName(context) }
     var isCheckingUpdate by remember { mutableStateOf(false) }
     var updateResult by remember { mutableStateOf<UpdateCheckResult?>(null) }
+    var selectedChannel by remember { mutableStateOf(AppUpdateChecker.getSelectedChannel(context)) }
+    var channelMenuExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -148,20 +154,102 @@ fun SettingsScreen(
             }
 
             item {
-                SettingsEntryCard(
-                    icon = Icons.Rounded.SystemUpdate,
-                    title = "检查更新",
-                    subtitle = if (isCheckingUpdate) "正在检查更新..." else "当前版本 v$currentVersion",
-                    onClick = {
-                        if (!isCheckingUpdate) {
-                            isCheckingUpdate = true
-                            scope.launch {
-                                updateResult = AppUpdateChecker.checkLatestRelease(context, activeJavaProxy())
-                                isCheckingUpdate = false
+                val visuals = LocalAppThemeVisuals.current
+                Surface(
+                    shape = MaterialTheme.shapes.large,
+                    color = visuals.cardContainerColor,
+                    contentColor = visuals.cardContentColor,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .liquidPress(pressedScale = 0.98f)
+                        .clip(MaterialTheme.shapes.large)
+                        .liquidGlassSurface(26.dp)
+                        .clickable {
+                            if (!isCheckingUpdate) {
+                                isCheckingUpdate = true
+                                scope.launch {
+                                    updateResult = AppUpdateChecker.checkLatestRelease(
+                                        context = context,
+                                        proxy = activeJavaProxy(),
+                                        channel = selectedChannel
+                                    )
+                                    isCheckingUpdate = false
+                                }
+                            }
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(visuals.cardContentColor.copy(alpha = 0.08f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.SystemUpdate,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "检查更新",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = visuals.cardContentColor
+                            )
+                            Text(
+                                text = if (isCheckingUpdate) "正在检查更新..." else "当前版本 v$currentVersion",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = visuals.cardContentColor.copy(alpha = 0.65f)
+                            )
+                        }
+                        Box {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { channelMenuExpanded = true }
+                            ) {
+                                Text(
+                                    text = "${selectedChannel.label} ▾",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = channelMenuExpanded,
+                                onDismissRequest = { channelMenuExpanded = false }
+                            ) {
+                                UpdateChannel.entries.forEach { ch ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = ch.label,
+                                                fontWeight = if (ch == selectedChannel) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        onClick = {
+                                            selectedChannel = ch
+                                            AppUpdateChecker.setSelectedChannel(context, ch)
+                                            channelMenuExpanded = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
-                )
+                }
             }
 
             item {

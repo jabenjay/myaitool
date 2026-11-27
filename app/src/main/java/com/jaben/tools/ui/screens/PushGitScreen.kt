@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -78,18 +79,24 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.jaben.tools.tools.git.GitDiffSummary
 import com.jaben.tools.tools.git.PushFileEntry
 import com.jaben.tools.data.OutputStorageHelper
 import com.jaben.tools.tools.git.PushGitEngine
 import java.io.ByteArrayInputStream
 import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.runtime.mutableStateMapOf
+import com.jaben.tools.tools.git.RepoContentItem
 import com.jaben.tools.tools.git.WorkflowInfo
 import com.jaben.tools.tools.git.WorkflowInputField
 import com.jaben.tools.tools.git.WorkflowRunInfo
@@ -104,6 +111,7 @@ fun PushGitScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val mainScrollState = rememberScrollState()
     val engine = remember(context) { PushGitEngine(context) }
 
     var pat by remember { mutableStateOf(engine.loadSavedToken()) }
@@ -112,6 +120,7 @@ fun PushGitScreen(
     var savedTokens by remember { mutableStateOf(engine.getSavedTokens()) }
     var accountMenuExpanded by remember { mutableStateOf(false) }
     var showTokenManagerDialog by remember { mutableStateOf(false) }
+    var showRepoEditorDialog by remember { mutableStateOf(false) }
     var newTokenInput by remember { mutableStateOf("") }
 
     var targetRepo by remember { mutableStateOf(engine.loadSavedRepo()) }
@@ -149,6 +158,7 @@ fun PushGitScreen(
     var failedRunLog by remember { mutableStateOf("") }
     var fetchedLogRunId by remember { mutableStateOf<Long?>(null) }
     var isFetchingFailedLog by remember { mutableStateOf(false) }
+    var pendingCancelRun by remember { mutableStateOf<WorkflowRunInfo?>(null) }
 
     fun refreshGitHubMeta(tokenToUse: String = pat) {
         if (tokenToUse.isBlank()) return
@@ -253,6 +263,8 @@ fun PushGitScreen(
                     diffSummary = null
                     pushStatus = ""
                     Toast.makeText(context, "已解析 ${list.size} 个文件", Toast.LENGTH_SHORT).show()
+                    delay(60)
+                    mainScrollState.animateScrollTo(mainScrollState.maxValue)
                 }.onFailure {
                     Toast.makeText(context, "读取压缩包失败", Toast.LENGTH_SHORT).show()
                 }
@@ -272,6 +284,8 @@ fun PushGitScreen(
                     diffSummary = null
                     pushStatus = ""
                     Toast.makeText(context, "已读取 ${list.size} 个文件", Toast.LENGTH_SHORT).show()
+                    delay(60)
+                    mainScrollState.animateScrollTo(mainScrollState.maxValue)
                 }.onFailure {
                     Toast.makeText(context, "读取文件夹失败", Toast.LENGTH_SHORT).show()
                 }
@@ -291,6 +305,8 @@ fun PushGitScreen(
                     diffSummary = null
                     pushStatus = ""
                     Toast.makeText(context, "已选择 ${list.size} 个文件", Toast.LENGTH_SHORT).show()
+                    delay(60)
+                    mainScrollState.animateScrollTo(mainScrollState.maxValue)
                 }.onFailure {
                     Toast.makeText(context, "读取文件失败", Toast.LENGTH_SHORT).show()
                 }
@@ -349,7 +365,7 @@ fun PushGitScreen(
         Column(
             modifier = Modifier
                 .weight(1f)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(mainScrollState)
                 .padding(horizontal = 16.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -415,48 +431,73 @@ fun PushGitScreen(
                         }
                     }
 
-                    // Target Repository Dropdown
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { if (repos.isNotEmpty()) repoMenuExpanded = true }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                    // Target Repository Dropdown (left) + Edit Repo Button (right)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { if (repos.isNotEmpty()) repoMenuExpanded = true }
                             ) {
-                                Text(
-                                    text = targetRepo.ifBlank { "选择目标仓库" },
-                                    fontSize = 14.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Text(if (repos.isEmpty()) "待拉取" else "▾ (${repos.size})", fontSize = 12.sp)
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = targetRepo.ifBlank { "选择目标仓库" },
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(if (repos.isEmpty()) "待拉取" else "▾ (${repos.size})", fontSize = 12.sp)
+                                }
                             }
-                        }
-                        DropdownMenu(
-                            expanded = repoMenuExpanded,
-                            onDismissRequest = { repoMenuExpanded = false }
-                        ) {
-                            repos.forEach { r ->
-                                DropdownMenuItem(
-                                    text = { Text(r) },
-                                    onClick = {
-                                        repoMenuExpanded = false
-                                        targetRepo = r
-                                        diffSummary = null
-                                        scope.launch {
-                                            engine.listBranches(pat, r).onSuccess {
-                                                if (it.isNotEmpty()) branches = it
+                            DropdownMenu(
+                                expanded = repoMenuExpanded,
+                                onDismissRequest = { repoMenuExpanded = false }
+                            ) {
+                                repos.forEach { r ->
+                                    DropdownMenuItem(
+                                        text = { Text(r) },
+                                        onClick = {
+                                            repoMenuExpanded = false
+                                            targetRepo = r
+                                            diffSummary = null
+                                            scope.launch {
+                                                engine.listBranches(pat, r).onSuccess {
+                                                    if (it.isNotEmpty()) branches = it
+                                                }
                                             }
                                         }
-                                    }
-                                )
+                                    )
+                                }
                             }
+                        }
+
+                        FilledTonalButton(
+                            onClick = { showRepoEditorDialog = true },
+                            enabled = pat.isNotBlank() && targetRepo.isNotBlank(),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier.height(44.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Edit,
+                                contentDescription = "编辑仓库",
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("编辑", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
 
@@ -856,7 +897,7 @@ fun PushGitScreen(
                 }
             }
 
-            val displayRuns = if (activeRuns.isNotEmpty()) activeRuns else listOfNotNull(latestRun)
+            val displayRuns = activeRuns
             if (displayRuns.isNotEmpty()) {
                 Column(
                     modifier = Modifier
@@ -933,19 +974,7 @@ fun PushGitScreen(
                                     }
                                     TextButton(
                                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                                        onClick = {
-                                            scope.launch {
-                                                engine.cancelWorkflowRun(pat, targetRepo, run.id)
-                                                    .onSuccess {
-                                                        Toast.makeText(context, "已取消构建", Toast.LENGTH_SHORT).show()
-                                                        delay(1000)
-                                                        engine.listWorkflowRuns(pat, targetRepo).onSuccess { workflowRuns = it }
-                                                    }
-                                                    .onFailure {
-                                                        Toast.makeText(context, "取消失败", Toast.LENGTH_SHORT).show()
-                                                    }
-                                            }
-                                        },
+                                        onClick = { pendingCancelRun = run },
                                         modifier = Modifier.height(24.dp)
                                     ) {
                                         Text("取消", color = Color(0xFFDC2626), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
@@ -1159,6 +1188,53 @@ fun PushGitScreen(
         )
     }
 
+    if (showRepoEditorDialog) {
+        RepoBrowserEditorDialog(
+            engine = engine,
+            pat = pat,
+            repo = targetRepo,
+            branch = branch,
+            onDismiss = { showRepoEditorDialog = false }
+        )
+    }
+
+    val cancelTarget = pendingCancelRun
+    if (cancelTarget != null) {
+        AlertDialog(
+            onDismissRequest = { pendingCancelRun = null },
+            title = { Text("确认取消构建", fontSize = 17.sp, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "确定要取消 #${cancelTarget.runNumber} · ${cancelTarget.name} 吗？",
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingCancelRun = null
+                        scope.launch {
+                            engine.cancelWorkflowRun(pat, targetRepo, cancelTarget.id)
+                                .onSuccess {
+                                    Toast.makeText(context, "已取消构建", Toast.LENGTH_SHORT).show()
+                                    delay(1000)
+                                    engine.listWorkflowRuns(pat, targetRepo).onSuccess { workflowRuns = it }
+                                }
+                                .onFailure {
+                                    Toast.makeText(context, "取消失败", Toast.LENGTH_SHORT).show()
+                                }
+                        }
+                    }
+                ) {
+                    Text("确认取消")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingCancelRun = null }) { Text("暂不取消") }
+            }
+        )
+    }
+
     if (showRunWorkflowDialog) {
         val wf = selectedWorkflow
         AlertDialog(
@@ -1357,5 +1433,403 @@ private fun PickerModeButton(
             Spacer(modifier = Modifier.width(4.dp))
             Text(label, fontSize = 13.sp, maxLines = 1)
         }
+    }
+}
+
+@Composable
+private fun RepoBrowserEditorDialog(
+    engine: PushGitEngine,
+    pat: String,
+    repo: String,
+    branch: String,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var currentPath by remember { mutableStateOf("") }
+    var items by remember { mutableStateOf<List<RepoContentItem>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+
+    var editingPath by remember { mutableStateOf<String?>(null) }
+    var editingSha by remember { mutableStateOf<String?>(null) }
+    var editingText by remember { mutableStateOf("") }
+    var commitMsg by remember { mutableStateOf("") }
+    var isSaving by remember { mutableStateOf(false) }
+
+    var showNewFileDialog by remember { mutableStateOf(false) }
+    var newFileName by remember { mutableStateOf("") }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    fun loadDirectory(path: String) {
+        scope.launch {
+            isLoading = true
+            errorMsg = null
+            engine.listRepoContents(pat, repo, branch, path)
+                .onSuccess {
+                    currentPath = path
+                    items = it
+                }
+                .onFailure { err ->
+                    errorMsg = err.message ?: "拉取目录失败"
+                }
+            isLoading = false
+        }
+    }
+
+    fun openFile(path: String) {
+        scope.launch {
+            isLoading = true
+            errorMsg = null
+            engine.fetchRepoFileText(pat, repo, branch, path)
+                .onSuccess { (sha, text) ->
+                    editingPath = path
+                    editingSha = sha
+                    editingText = text
+                    val name = path.substringAfterLast('/')
+                    commitMsg = "Update $name via PushGit"
+                }
+                .onFailure { err ->
+                    Toast.makeText(context, err.message ?: "读取失败", Toast.LENGTH_SHORT).show()
+                }
+            isLoading = false
+        }
+    }
+
+    LaunchedEffect(repo, branch) {
+        loadDirectory("")
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .fillMaxHeight(0.84f)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = repo,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "分支: $branch",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (editingPath == null) {
+                        IconButton(
+                            onClick = {
+                                newFileName = ""
+                                showNewFileDialog = true
+                            },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(Icons.Rounded.Add, contentDescription = "新建文件", modifier = Modifier.size(20.dp))
+                        }
+                        IconButton(
+                            onClick = { loadDirectory(currentPath) },
+                            enabled = !isLoading,
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "刷新", modifier = Modifier.size(19.dp))
+                        }
+                    }
+                    TextButton(
+                        onClick = onDismiss,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
+                        Text("关闭", fontSize = 13.sp)
+                    }
+                }
+
+                if (editingPath == null) {
+                    // Breadcrumb / Back bar
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (currentPath.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    val parent = currentPath.substringBeforeLast('/', "")
+                                    loadDirectory(parent)
+                                },
+                                modifier = Modifier.size(26.dp)
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.ArrowBack,
+                                    contentDescription = "返回上级",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                        }
+                        Text(
+                            text = if (currentPath.isEmpty()) "/ (根目录)" else "/$currentPath",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    if (isLoading) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+
+                    if (!errorMsg.isNullOrBlank()) {
+                        Text(
+                            text = errorMsg.orEmpty(),
+                            color = Color(0xFFDC2626),
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(items, key = { it.path }) { item ->
+                            val isDir = item.type == "dir"
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                                    .clickable {
+                                        if (isDir) loadDirectory(item.path) else openFile(item.path)
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isDir) Icons.Rounded.Folder else Icons.Rounded.InsertDriveFile,
+                                    contentDescription = null,
+                                    tint = if (isDir) Color(0xFFD97706) else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = item.name,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isDir) FontWeight.SemiBold else FontWeight.Normal,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (!isDir) {
+                                    val sizeLabel = if (item.size < 1024) "${item.size} B"
+                                    else String.format("%.1f KB", item.size / 1024.0)
+                                    Text(
+                                        text = sizeLabel,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // File Editor View
+                    val curFile = editingPath.orEmpty()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        IconButton(
+                            onClick = { editingPath = null },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回目录", modifier = Modifier.size(18.dp))
+                        }
+                        Text(
+                            text = curFile,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = editingText,
+                        onValueChange = { editingText = it },
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    )
+
+                    OutlinedTextField(
+                        value = commitMsg,
+                        onValueChange = { commitMsg = it },
+                        label = { Text("Commit Message", fontSize = 12.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (!editingSha.isNullOrBlank()) {
+                            OutlinedButton(
+                                onClick = { showDeleteConfirm = true },
+                                enabled = !isSaving,
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("删除", color = Color(0xFFDC2626), fontSize = 13.sp)
+                            }
+                        }
+                        Spacer(modifier = Modifier.weight(1f))
+                        OutlinedButton(
+                            onClick = { editingPath = null },
+                            enabled = !isSaving,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("返回", fontSize = 13.sp)
+                        }
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    isSaving = true
+                                    engine.updateRepoFile(
+                                        pat = pat,
+                                        ownerRepoInput = repo,
+                                        branch = branch,
+                                        path = curFile,
+                                        sha = editingSha,
+                                        content = editingText,
+                                        message = commitMsg
+                                    ).onSuccess {
+                                        Toast.makeText(context, "已提交修改", Toast.LENGTH_SHORT).show()
+                                        editingPath = null
+                                        loadDirectory(currentPath)
+                                    }.onFailure { err ->
+                                        Toast.makeText(context, "提交失败: ${err.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                    isSaving = false
+                                }
+                            },
+                            enabled = !isSaving,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(if (isSaving) "提交中..." else "保存提交", fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showNewFileDialog) {
+        AlertDialog(
+            onDismissRequest = { showNewFileDialog = false },
+            title = { Text("新建文件", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+            text = {
+                OutlinedTextField(
+                    value = newFileName,
+                    onValueChange = { newFileName = it },
+                    label = { Text("文件名 (可含子路径)", fontSize = 12.sp) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    enabled = newFileName.trim().isNotEmpty(),
+                    onClick = {
+                        val cleanName = newFileName.trim().trimStart('/')
+                        val fullPath = if (currentPath.isEmpty()) cleanName else "$currentPath/$cleanName"
+                        showNewFileDialog = false
+                        editingPath = fullPath
+                        editingSha = null
+                        editingText = ""
+                        commitMsg = "Create $cleanName via PushGit"
+                    }
+                ) {
+                    Text("确定")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewFileDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
+    if (showDeleteConfirm && editingPath != null && !editingSha.isNullOrBlank()) {
+        val targetPath = editingPath.orEmpty()
+        val targetSha = editingSha.orEmpty()
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("确认删除文件", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+            text = { Text("确定要从分支 $branch 中删除 $targetPath 吗？", fontSize = 13.sp) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirm = false
+                        scope.launch {
+                            isSaving = true
+                            engine.deleteRepoFile(
+                                pat = pat,
+                                ownerRepoInput = repo,
+                                branch = branch,
+                                path = targetPath,
+                                sha = targetSha,
+                                message = "Delete ${targetPath.substringAfterLast('/')} via PushGit"
+                            ).onSuccess {
+                                Toast.makeText(context, "已删除", Toast.LENGTH_SHORT).show()
+                                editingPath = null
+                                loadDirectory(currentPath)
+                            }.onFailure { err ->
+                                Toast.makeText(context, "删除失败: ${err.message}", Toast.LENGTH_SHORT).show()
+                            }
+                            isSaving = false
+                        }
+                    }
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
+            }
+        )
     }
 }

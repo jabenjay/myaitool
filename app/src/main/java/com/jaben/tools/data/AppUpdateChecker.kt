@@ -2,18 +2,32 @@ package com.jaben.tools.data
 
 import android.app.DownloadManager
 import android.content.BroadcastReceiver
-import android.content.IntentFilter
-import androidx.core.content.ContextCompat
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import android.os.Environment
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.Proxy
 import java.net.URL
+
+enum class UpdateChannel(val key: String, val label: String) {
+    ALL("all", "全部"),
+    RELEASE("release", "release"),
+    PRERELEASE("prerelease", "prerelease"),
+    BETA("beta", "beta"),
+    DEBUG("debug", "debug");
+
+    companion object {
+        fun fromKey(key: String?): UpdateChannel =
+            entries.firstOrNull { it.key == key } ?: ALL
+    }
+}
 
 sealed class UpdateCheckResult {
     data class UpToDate(val currentVersion: String) : UpdateCheckResult()
@@ -29,7 +43,21 @@ sealed class UpdateCheckResult {
 
 object AppUpdateChecker {
     const val REPO_URL = "https://github.com/jabenjay/myaitool"
-    private const val LATEST_RELEASE_API = "https://api.github.com/repos/jabenjay/myaitool/releases/latest"
+    private const val RELEASES_LIST_API = "https://api.github.com/repos/jabenjay/myaitool/releases?per_page=20"
+    private const val PREFS_NAME = "jools_update_prefs"
+    private const val KEY_CHANNEL = "update_channel"
+
+    fun getSelectedChannel(context: Context): UpdateChannel {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return UpdateChannel.fromKey(prefs.getString(KEY_CHANNEL, UpdateChannel.ALL.key))
+    }
+
+    fun setSelectedChannel(context: Context, channel: UpdateChannel) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_CHANNEL, channel.key)
+            .apply()
+    }
 
     fun getCurrentVersionName(context: Context): String {
         return runCatching {
@@ -38,12 +66,29 @@ object AppUpdateChecker {
         }.getOrDefault("1.0.0")
     }
 
-    suspend fun checkLatestRelease(context: Context, proxy: Proxy? = null): UpdateCheckResult =
+    private fun matchesChannel(release: JSONObject, channel: UpdateChannel): Boolean {
+        if (release.optBoolean("draft", false)) return false
+        val tag = release.optString("tag_name", "").lowercase()
+        val isPre = release.optBoolean("prerelease", false)
+        return when (channel) {
+            UpdateChannel.ALL -> true
+            UpdateChannel.RELEASE -> !isPre && !tag.contains("-beta") && !tag.contains("-pre") && !tag.contains("-debug")
+            UpdateChannel.PRERELEASE -> tag.contains("-pre") || (isPre && !tag.contains("beta") && !tag.contains("debug"))
+            UpdateChannel.BETA -> tag.contains("beta")
+            UpdateChannel.DEBUG -> tag.contains("debug")
+        }
+    }
+
+    suspend fun checkLatestRelease(
+        context: Context,
+        proxy: Proxy? = null,
+        channel: UpdateChannel = getSelectedChannel(context)
+    ): UpdateCheckResult =
         withContext(Dispatchers.IO) {
             val current = getCurrentVersionName(context)
             var conn: HttpURLConnection? = null
             try {
-                val url = URL(LATEST_RELEASE_API)
+                val url = URL(RELEASES_LIST_API)
                 conn = (if (proxy != null) url.openConnection(proxy) else url.openConnection()) as HttpURLConnection
                 conn.requestMethod = "GET"
                 conn.connectTimeout = 12_000
@@ -60,7 +105,17 @@ object AppUpdateChecker {
                 }
 
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(body)
+                val arr = JSONArray(body)
+                var matched: JSONObject? = null
+                for (i in 0 until arr.length()) {
+                    val item = arr.optJSONObject(i) ?: continue
+                    if (matchesChannel(item, channel)) {
+                        matched = item
+                        break
+                    }
+                }
+                val json = matched ?: return@withContext UpdateCheckResult.UpToDate(current)
+
                 val tagName = json.optString("tag_name", "").trim()
                 val releaseName = json.optString("name", tagName).trim().ifBlank { tagName }
                 val rawNotes = json.optString("body", "").trim()
@@ -104,12 +159,11 @@ object AppUpdateChecker {
             }
         }
 
-
     fun startSystemDownload(context: Context, downloadUrl: String, latestVersion: String): Boolean {
         return runCatching {
             if (downloadUrl.endsWith(".apk", ignoreCase = true)) {
                 val cleanVer = latestVersion.removePrefix("v").removePrefix("V").ifBlank { "update" }
-                val fileName = "Jools-release-$cleanVer.apk"
+                val fileName = "Jools-$cleanVer.apk"
                 val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
                 val targetUrl = GitHubMirrorHelper.accelerateUrl(context, downloadUrl)
                 val req = DownloadManager.Request(Uri.parse(targetUrl)).apply {
