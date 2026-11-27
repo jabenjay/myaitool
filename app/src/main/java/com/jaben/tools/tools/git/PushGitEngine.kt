@@ -47,6 +47,30 @@ data class PushGitResult(
     val commitUrl: String
 )
 
+data class WorkflowInfo(
+    val id: Long,
+    val name: String,
+    val path: String
+)
+
+data class WorkflowInputField(
+    val key: String,
+    val description: String,
+    val required: Boolean,
+    val defaultValue: String
+)
+
+data class WorkflowRunInfo(
+    val id: Long,
+    val runNumber: Int,
+    val name: String,
+    val status: String,
+    val conclusion: String,
+    val branch: String,
+    val createdAt: String,
+    val htmlUrl: String
+)
+
 class PushGitEngine(private val context: Context) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -392,6 +416,161 @@ class PushGitEngine(private val context: Context) {
                 fileCount = filesToUpload.size + if (syncDeletions) diff.deletedPaths.size else 0,
                 commitUrl = "https://github.com/$repo/commit/$newCommitSha"
             )
+        }
+    }
+
+    suspend fun listWorkflows(pat: String, ownerRepoInput: String): Result<List<WorkflowInfo>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = parseOwnerRepo(ownerRepoInput)
+            val resp = apiRequest("GET", "https://api.github.com/repos/$repo/actions/workflows", pat, null)
+            val arr = JSONObject(resp).optJSONArray("workflows") ?: JSONArray()
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    if (obj.optString("state") == "active") {
+                        add(
+                            WorkflowInfo(
+                                id = obj.optLong("id"),
+                                name = obj.optString("name"),
+                                path = obj.optString("path")
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    suspend fun fetchWorkflowInputs(
+        pat: String,
+        ownerRepoInput: String,
+        workflowPath: String,
+        branch: String
+    ): Result<List<WorkflowInputField>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = parseOwnerRepo(ownerRepoInput)
+            val resp = apiRequest("GET", "https://api.github.com/repos/$repo/contents/$workflowPath?ref=${branch.trim()}", pat, null)
+            val b64 = JSONObject(resp).optString("content").replace("\n", "")
+            val yamlText = String(Base64.decode(b64, Base64.DEFAULT), Charsets.UTF_8)
+            parseWorkflowDispatchInputs(yamlText)
+        }
+    }
+
+    private fun parseWorkflowDispatchInputs(yamlText: String): List<WorkflowInputField> {
+        val lines = yamlText.lines()
+        val result = ArrayList<WorkflowInputField>()
+        var inDispatch = false
+        var inInputs = false
+        var inputsIndent = -1
+        var currentKey: String? = null
+        var keyIndent = -1
+        var desc = ""
+        var req = false
+        var defVal = ""
+
+        fun flushCurrent() {
+            val k = currentKey ?: return
+            result.add(WorkflowInputField(k, desc, req, defVal))
+            currentKey = null
+            desc = ""
+            req = false
+            defVal = ""
+        }
+
+        for (raw in lines) {
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
+            val indent = raw.indexOfFirst { !it.isWhitespace() }.let { if (it < 0) 0 else it }
+
+            if (trimmed.startsWith("workflow_dispatch:")) {
+                inDispatch = true
+                inInputs = false
+                continue
+            }
+            if (!inDispatch) continue
+
+            if (trimmed.startsWith("inputs:") && !inInputs) {
+                inInputs = true
+                inputsIndent = indent
+                continue
+            }
+            if (inInputs && indent <= inputsIndent) {
+                flushCurrent()
+                break
+            }
+            if (!inInputs) continue
+
+            if (keyIndent == -1 || indent == keyIndent) {
+                if (trimmed.endsWith(":")) {
+                    flushCurrent()
+                    keyIndent = indent
+                    currentKey = trimmed.removeSuffix(":").trim()
+                }
+            } else if (indent > keyIndent && currentKey != null) {
+                when {
+                    trimmed.startsWith("description:") -> {
+                        desc = trimmed.removePrefix("description:").trim().trim('\'', '"')
+                    }
+                    trimmed.startsWith("required:") -> {
+                        req = trimmed.removePrefix("required:").trim().equals("true", ignoreCase = true)
+                    }
+                    trimmed.startsWith("default:") -> {
+                        defVal = trimmed.removePrefix("default:").trim().trim('\'', '"')
+                    }
+                }
+            }
+        }
+        flushCurrent()
+        return result
+    }
+
+    suspend fun dispatchWorkflow(
+        pat: String,
+        ownerRepoInput: String,
+        workflowId: Long,
+        branch: String,
+        inputs: Map<String, String>
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = parseOwnerRepo(ownerRepoInput)
+            val inputsJson = JSONObject()
+            inputs.forEach { (k, v) -> inputsJson.put(k, v) }
+            val body = JSONObject().apply {
+                put("ref", branch.trim().ifBlank { "main" })
+                put("inputs", inputsJson)
+            }.toString()
+            apiRequest(
+                "POST",
+                "https://api.github.com/repos/$repo/actions/workflows/$workflowId/dispatches",
+                pat,
+                body
+            )
+            Unit
+        }
+    }
+
+    suspend fun listWorkflowRuns(pat: String, ownerRepoInput: String): Result<List<WorkflowRunInfo>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = parseOwnerRepo(ownerRepoInput)
+            val resp = apiRequest("GET", "https://api.github.com/repos/$repo/actions/runs?per_page=15", pat, null)
+            val arr = JSONObject(resp).optJSONArray("workflow_runs") ?: JSONArray()
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    add(
+                        WorkflowRunInfo(
+                            id = obj.optLong("id"),
+                            runNumber = obj.optInt("run_number"),
+                            name = obj.optString("name"),
+                            status = obj.optString("status"),
+                            conclusion = obj.optString("conclusion"),
+                            branch = obj.optString("head_branch"),
+                            createdAt = obj.optString("created_at"),
+                            htmlUrl = obj.optString("html_url")
+                        )
+                    )
+                }
+            }
         }
     }
 

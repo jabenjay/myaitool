@@ -78,6 +78,13 @@ import androidx.compose.ui.unit.sp
 import com.jaben.tools.tools.git.GitDiffSummary
 import com.jaben.tools.tools.git.PushFileEntry
 import com.jaben.tools.tools.git.PushGitEngine
+import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.runtime.mutableStateMapOf
+import com.jaben.tools.tools.git.WorkflowInfo
+import com.jaben.tools.tools.git.WorkflowInputField
+import com.jaben.tools.tools.git.WorkflowRunInfo
+import kotlinx.coroutines.delay
 import com.jaben.tools.ui.theme.liquidGlassSurface
 import kotlinx.coroutines.launch
 
@@ -119,6 +126,17 @@ fun PushGitScreen(
     var pushTotal by remember { mutableIntStateOf(0) }
     var pushStatus by remember { mutableStateOf("") }
 
+    var workflows by remember { mutableStateOf<List<WorkflowInfo>>(emptyList()) }
+    var selectedWorkflow by remember { mutableStateOf<WorkflowInfo?>(null) }
+    var workflowInputs by remember { mutableStateOf<List<WorkflowInputField>>(emptyList()) }
+    val workflowInputValues = remember { mutableStateMapOf<String, String>() }
+    var showRunWorkflowDialog by remember { mutableStateOf(false) }
+    var isLoadingWorkflowInputs by remember { mutableStateOf(false) }
+    var isDispatchingWorkflow by remember { mutableStateOf(false) }
+    var workflowRuns by remember { mutableStateOf<List<WorkflowRunInfo>>(emptyList()) }
+    var showRunHistoryMenu by remember { mutableStateOf(false) }
+    var isFetchingRuns by remember { mutableStateOf(false) }
+
     fun refreshGitHubMeta(tokenToUse: String = pat) {
         if (tokenToUse.isBlank()) return
         scope.launch {
@@ -140,12 +158,32 @@ fun PushGitScreen(
             engine.listBranches(tokenToUse, targetRepo).onSuccess { bList ->
                 if (bList.isNotEmpty()) branches = bList
             }
+            engine.listWorkflows(tokenToUse, targetRepo).onSuccess { wfList ->
+                workflows = wfList
+                if (selectedWorkflow == null || wfList.none { it.id == selectedWorkflow?.id }) {
+                    selectedWorkflow = wfList.firstOrNull()
+                }
+            }
+            engine.listWorkflowRuns(tokenToUse, targetRepo).onSuccess { runs ->
+                workflowRuns = runs
+            }
             isFetchingMeta = false
         }
     }
 
     LaunchedEffect(Unit) {
         if (pat.isNotBlank()) refreshGitHubMeta(pat)
+    }
+
+    val latestRun = workflowRuns.firstOrNull()
+    LaunchedEffect(latestRun?.id, latestRun?.status, pat, targetRepo) {
+        val status = latestRun?.status
+        if (pat.isNotBlank() && (status == "queued" || status == "in_progress" || status == "waiting")) {
+            delay(5000)
+            engine.listWorkflowRuns(pat, targetRepo).onSuccess { runs ->
+                workflowRuns = runs
+            }
+        }
     }
 
     val zipPicker = rememberLauncherForActivityResult(
@@ -665,8 +703,8 @@ fun PushGitScreen(
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
-                .height(50.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .height(48.dp)
         ) {
             Icon(
                 imageVector = if (currentDiff == null) Icons.Rounded.ManageSearch else Icons.Rounded.CloudUpload,
@@ -683,6 +721,154 @@ fun PushGitScreen(
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold
             )
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = {
+                        scope.launch {
+                            isLoadingWorkflowInputs = true
+                            val wf = selectedWorkflow ?: workflows.firstOrNull() ?: run {
+                                engine.listWorkflows(pat, targetRepo).getOrNull()?.firstOrNull()?.also {
+                                    selectedWorkflow = it
+                                }
+                            }
+                            if (wf == null) {
+                                Toast.makeText(context, "未找到可用 Workflow", Toast.LENGTH_SHORT).show()
+                                isLoadingWorkflowInputs = false
+                                return@launch
+                            }
+                            selectedWorkflow = wf
+                            engine.fetchWorkflowInputs(pat, targetRepo, wf.path, branch)
+                                .onSuccess { fields ->
+                                    workflowInputs = fields
+                                    workflowInputValues.clear()
+                                    fields.forEach { f -> workflowInputValues[f.key] = f.defaultValue }
+                                    showRunWorkflowDialog = true
+                                }
+                                .onFailure {
+                                    workflowInputs = emptyList()
+                                    showRunWorkflowDialog = true
+                                }
+                            isLoadingWorkflowInputs = false
+                        }
+                    },
+                    enabled = pat.isNotBlank() && targetRepo.isNotBlank() && !isLoadingWorkflowInputs && !isDispatchingWorkflow,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isLoadingWorkflowInputs) "读取参数..." else "Run Workflow",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Box {
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                isFetchingRuns = true
+                                engine.listWorkflowRuns(pat, targetRepo).onSuccess { runs ->
+                                    workflowRuns = runs
+                                }
+                                isFetchingRuns = false
+                                showRunHistoryMenu = true
+                            }
+                        },
+                        enabled = pat.isNotBlank() && targetRepo.isNotBlank() && !isFetchingRuns,
+                        contentPadding = PaddingValues(horizontal = 10.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.height(44.dp)
+                    ) {
+                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = "运行历史")
+                    }
+
+                    DropdownMenu(
+                        expanded = showRunHistoryMenu,
+                        onDismissRequest = { showRunHistoryMenu = false }
+                    ) {
+                        if (workflowRuns.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("暂无运行记录") },
+                                onClick = { showRunHistoryMenu = false }
+                            )
+                        } else {
+                            workflowRuns.forEach { run ->
+                                val stateLabel = when {
+                                    run.status != "completed" -> run.status
+                                    run.conclusion == "success" -> "成功"
+                                    run.conclusion.isNotBlank() -> run.conclusion
+                                    else -> run.status
+                                }
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "#${run.runNumber} · ${run.name} ($stateLabel)",
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    onClick = { showRunHistoryMenu = false }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            latestRun?.let { run ->
+                val (badgeColor, statusText) = when {
+                    run.status == "queued" || run.status == "waiting" -> Color(0xFFD97706) to "排队中"
+                    run.status == "in_progress" -> Color(0xFF2563EB) to "构建中"
+                    run.conclusion == "success" -> Color(0xFF1B8E3E) to "构建成功"
+                    run.conclusion == "failure" -> Color(0xFFDC2626) to "构建失败"
+                    else -> Color.Gray to (run.conclusion.ifBlank { run.status })
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(badgeColor.copy(alpha = 0.12f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "#${run.runNumber} · ${run.name} · $statusText",
+                        color = badgeColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = {
+                            scope.launch {
+                                engine.listWorkflowRuns(pat, targetRepo).onSuccess { workflowRuns = it }
+                            }
+                        },
+                        modifier = Modifier.size(22.dp)
+                    ) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新状态", tint = badgeColor, modifier = Modifier.size(15.dp))
+                    }
+                }
+            }
         }
     }
 
@@ -764,6 +950,82 @@ fun PushGitScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showTokenManagerDialog = false }) { Text("关闭") }
+            }
+        )
+    }
+    if (showRunWorkflowDialog) {
+        val wf = selectedWorkflow
+        AlertDialog(
+            onDismissRequest = { showRunWorkflowDialog = false },
+            title = {
+                Text(
+                    text = wf?.name ?: "Run Workflow",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "分支: $branch",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (workflowInputs.isEmpty()) {
+                        Text("该工作流无需额外参数，可直接运行。", fontSize = 13.sp)
+                    } else {
+                        workflowInputs.forEach { field ->
+                            OutlinedTextField(
+                                value = workflowInputValues[field.key] ?: "",
+                                onValueChange = { workflowInputValues[field.key] = it },
+                                label = {
+                                    Text(
+                                        text = if (field.required) "${field.key} *" else field.key,
+                                        fontSize = 12.sp
+                                    )
+                                },
+                                supportingText = if (field.description.isNotBlank()) {
+                                    { Text(field.description, fontSize = 11.sp) }
+                                } else null,
+                                singleLine = field.key != "changelog",
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !isDispatchingWorkflow && wf != null,
+                    onClick = {
+                        val targetWf = wf ?: return@Button
+                        scope.launch {
+                            isDispatchingWorkflow = true
+                            val inputsMap = workflowInputValues.toMap()
+                            engine.dispatchWorkflow(pat, targetRepo, targetWf.id, branch, inputsMap)
+                                .onSuccess {
+                                    showRunWorkflowDialog = false
+                                    Toast.makeText(context, "已触发 Run workflow", Toast.LENGTH_SHORT).show()
+                                    delay(1500)
+                                    engine.listWorkflowRuns(pat, targetRepo).onSuccess { workflowRuns = it }
+                                }
+                                .onFailure { err ->
+                                    Toast.makeText(context, "触发失败: ${err.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            isDispatchingWorkflow = false
+                        }
+                    }
+                ) {
+                    Text(if (isDispatchingWorkflow) "触发中..." else "Run workflow")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRunWorkflowDialog = false }) { Text("取消") }
             }
         )
     }
