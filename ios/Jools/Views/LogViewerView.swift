@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct LogViewerView: View {
     @EnvironmentObject private var logger: AppLogManager

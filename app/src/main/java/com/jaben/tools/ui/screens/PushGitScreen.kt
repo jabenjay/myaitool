@@ -264,8 +264,9 @@ fun PushGitScreen(
             }
         }
     }
-    LaunchedEffect(activeRuns.size, activeRuns.firstOrNull()?.id, pat, targetRepo) {
-        if (pat.isNotBlank() && activeRuns.isNotEmpty()) {
+    val hasActiveRuns = activeRuns.isNotEmpty()
+    LaunchedEffect(hasActiveRuns, pat, targetRepo) {
+        while (hasActiveRuns && pat.isNotBlank()) {
             delay(5000)
             engine.listWorkflowRuns(pat, targetRepo).onSuccess { runs ->
                 workflowRuns = runs
@@ -1332,7 +1333,8 @@ fun PushGitScreen(
                         ) {
                             items(historyRuns, key = { it.id }) { run ->
                                 val (stateLabel, stateColor) = when {
-                                    run.status != "completed" -> "运行中" to Color(0xFF2563EB)
+                                    run.status == "queued" || run.status == "waiting" -> "排队中" to Color(0xFFD97706)
+                                    run.status != "completed" -> "构建中" to Color(0xFF2563EB)
                                     run.conclusion == "success" -> "成功" to Color(0xFF1B8E3E)
                                     run.conclusion == "failure" -> "失败" to Color(0xFFDC2626)
                                     run.conclusion.isNotBlank() -> run.conclusion to Color.Gray

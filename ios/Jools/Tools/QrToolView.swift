@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct QrToolView: View {
     @ObservedObject var prefs: AppPreferences

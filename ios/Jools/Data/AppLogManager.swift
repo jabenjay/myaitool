@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 @MainActor
 final class AppLogManager: ObservableObject {
@@ -27,13 +28,13 @@ final class AppLogManager: ObservableObject {
     private func loadFromDisk() {
         guard let data = try? Data(contentsOf: logFileURL),
               let text = String(data: data, encoding: .utf8) else { return }
-        logs = text.components(separatedBy: .newlines).filter { !$0.isEmpty }.suffix(maxLines)
+        logs = Array(text.components(separatedBy: .newlines).filter { !$0.isEmpty }.suffix(maxLines))
     }
 
     func log(_ tag: String, _ message: String) {
         let ts = formatter.string(from: Date())
         let entry = "[\(ts)][\(tag)] \(message)"
-        logs = (logs + [entry]).suffix(maxLines)
+        logs = Array((logs + [entry]).suffix(maxLines))
         persist()
     }
 

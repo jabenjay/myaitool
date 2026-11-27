@@ -296,6 +296,15 @@ struct PushGitView: View {
                 Button { Task { await refreshMeta(token: pat) } } label: { Image(systemName: "arrow.clockwise") }
             }
         }
+        .task(id: workflowRuns.contains(where: { $0.status != "completed" })) {
+            while workflowRuns.contains(where: { $0.status != "completed" }) && !pat.isEmpty {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                if let runs = try? await engine.listWorkflowRuns(pat, repo: targetRepo) {
+                    workflowRuns = runs
+                    runs.filter { $0.status != "completed" }.forEach { observedActiveRunIds.insert($0.id) }
+                }
+            }
+        }
         .onAppear {
             pat = engine.loadSavedToken()
             targetRepo = engine.loadSavedRepo()
