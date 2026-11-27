@@ -555,8 +555,17 @@ fun BrowserScreen(
             AndroidView(
                 factory = { ctx ->
                     WebView(ctx).apply {
+                        layoutParams = android.view.ViewGroup.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                        )
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
+                        settings.databaseEnabled = true
+                        settings.allowFileAccess = true
+                        settings.allowContentAccess = true
+                        settings.loadsImagesAutomatically = true
+                        settings.textZoom = 100
                         settings.useWideViewPort = true
                         settings.loadWithOverviewMode = true
                         settings.builtInZoomControls = true
@@ -565,7 +574,15 @@ fun BrowserScreen(
                         settings.mediaPlaybackRequiresUserGesture = false
                         settings.javaScriptCanOpenWindowsAutomatically = false
                         settings.setSupportMultipleWindows(false)
-                        webViewUserAgent = settings.userAgentString ?: "Mozilla/5.0"
+                        val cleanUa = (settings.userAgentString ?: "Mozilla/5.0")
+                            .replace("; wv)", ")")
+                            .replace("Version/4.0 ", "")
+                        settings.userAgentString = cleanUa
+                        webViewUserAgent = cleanUa
+                        android.webkit.CookieManager.getInstance().apply {
+                            setAcceptCookie(true)
+                            setAcceptThirdPartyCookies(this@apply, true)
+                        }
                         addJavascriptInterface(object {
                             @JavascriptInterface
                             fun onVideoFound(src: String?, posSec: Double) {
