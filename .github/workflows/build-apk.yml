@@ -174,7 +174,7 @@ jobs:
 
   build_ios:
     name: Build iOS IPA
-    runs-on: macos-15
+    runs-on: macos-latest
 
     steps:
       - name: Checkout repository
@@ -231,7 +231,7 @@ jobs:
   publish_release:
     name: Publish GitHub Release
     needs: [build, build_ios]
-    if: github.event.inputs.build_type != 'debug'
+    if: always() && needs.build.result == 'success' && github.event.inputs.build_type != 'debug'
     runs-on: ubuntu-latest
 
     steps:
@@ -245,6 +245,7 @@ jobs:
           path: release_assets
 
       - name: Download iOS IPA
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: Jools-iOS-IPA
