@@ -10,8 +10,8 @@ import android.webkit.CookieManager
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -63,6 +63,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +72,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -95,6 +97,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -111,6 +114,7 @@ fun BuiltInVideoPlayerOverlay(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
     val activity = remember(context) { context.findHostActivity() }
 
     var isFullscreen by remember { mutableStateOf(false) }
@@ -252,54 +256,31 @@ fun BuiltInVideoPlayerOverlay(
         val maxRestingScale = (screenWidthPx / baseWidthPx).coerceAtLeast(1f)
         val minScale = 0.25f
 
-        var targetScale by remember { mutableFloatStateOf(1f) }
-        var isGestureActive by remember { mutableStateOf(false) }
+        val scaleAnim = remember { Animatable(0.88f) }
+        val offsetXAnim = remember { Animatable((screenWidthPx - baseWidthPx) / 2f) }
+        val offsetYAnim = remember { Animatable(with(density) { 80.dp.toPx() }) }
 
-        val animatedScale by animateFloatAsState(
-            targetValue = targetScale,
-            animationSpec = if (isGestureActive) {
-                spring(stiffness = Spring.StiffnessHigh)
-            } else {
-                spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
-            },
-            label = "floatScale"
-        )
+        // Entrance animation when floating player opens
+        LaunchedEffect(Unit) {
+            scaleAnim.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
+            )
+        }
 
-        var targetOffsetX by remember { mutableFloatStateOf((screenWidthPx - baseWidthPx) / 2f) }
-        var targetOffsetY by remember { mutableFloatStateOf(with(density) { 80.dp.toPx() }) }
-
-        val animatedOffsetX by animateFloatAsState(
-            targetValue = targetOffsetX,
-            animationSpec = if (isGestureActive) {
-                spring(stiffness = Spring.StiffnessHigh)
-            } else {
-                spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)
-            },
-            label = "floatOffsetX"
-        )
-        val animatedOffsetY by animateFloatAsState(
-            targetValue = targetOffsetY,
-            animationSpec = if (isGestureActive) {
-                spring(stiffness = Spring.StiffnessHigh)
-            } else {
-                spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)
-            },
-            label = "floatOffsetY"
-        )
-
-        val currentWidthPx = baseWidthPx * animatedScale
-        val currentHeightPx = currentWidthPx * (9f / 16f)
+        val currentWidthPx = baseWidthPx * scaleAnim.value
         val safeTopPx = with(density) { 28.dp.toPx() }
         val safeBottomPx = with(density) { 56.dp.toPx() }
 
-        val minimizedWidthDp = 42.dp
-        val minimizedHeightDp = 48.dp
+        // Narrow & tall iPhone-style edge handle
+        val minimizedWidthDp = 22.dp
+        val minimizedHeightDp = 68.dp
         val minimizedWidthPx = with(density) { minimizedWidthDp.toPx() }
         val minimizedHeightPx = with(density) { minimizedHeightDp.toPx() }
-        var minimizedY by remember { mutableFloatStateOf(screenHeightPx * 0.45f) }
+        var minimizedY by remember { mutableFloatStateOf(screenHeightPx * 0.42f) }
 
         if (isMinimized && !isFullscreen) {
-            // Keep ExoPlayer alive in background at 1dp invisible size so audio keeps playing
+            // Keep ExoPlayer alive in background at 1px invisible size so audio keeps playing
             AndroidView(
                 factory = { ctx ->
                     PlayerView(ctx).apply {
@@ -313,16 +294,16 @@ fun BuiltInVideoPlayerOverlay(
                     .alpha(0f)
             )
 
-            // Small gray edge-snapped tab with play icon
+            // Narrow, tall pill tab snapped to left or right edge with an iPhone-style vertical bar
             val snapX = if (minimizedOnLeft) 0 else (screenWidthPx - minimizedWidthPx).roundToInt()
             val tabShape = if (minimizedOnLeft) {
-                RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp)
+                RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp)
             } else {
-                RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp)
+                RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
             }
             Surface(
                 shape = tabShape,
-                color = Color(0xFF4A4A4E).copy(alpha = 0.92f),
+                color = Color(0xFF3A3A3E).copy(alpha = 0.88f),
                 shadowElevation = 8.dp,
                 modifier = Modifier
                     .offset { IntOffset(snapX, minimizedY.roundToInt()) }
@@ -331,28 +312,52 @@ fun BuiltInVideoPlayerOverlay(
                     .pointerInput(Unit) {
                         detectDragGestures { change, dragAmount ->
                             change.consume()
-                            minimizedY = (minimizedY + dragAmount.y)
-                                .coerceIn(safeTopPx, (screenHeightPx - minimizedHeightPx - safeBottomPx).coerceAtLeast(safeTopPx))
+                            minimizedY = (minimizedY + dragAmount.y).coerceIn(
+                                safeTopPx,
+                                (screenHeightPx - minimizedHeightPx - safeBottomPx).coerceAtLeast(safeTopPx)
+                            )
                         }
                     }
                     .clickable {
                         isMinimized = false
-                        // Restore inside screen bounds
-                        val maxRestW = baseWidthPx * targetScale.coerceIn(minScale, maxRestingScale)
-                        val maxRestH = maxRestW * (9f / 16f)
-                        targetOffsetX = ((screenWidthPx - maxRestW) / 2f).coerceAtLeast(0f)
-                        targetOffsetY = minimizedY.coerceIn(
+                        val restScale = scaleAnim.value.coerceIn(minScale, maxRestingScale)
+                        val restW = baseWidthPx * restScale
+                        val restH = restW * (9f / 16f)
+                        val targetX = ((screenWidthPx - restW) / 2f).coerceAtLeast(0f)
+                        val targetY = minimizedY.coerceIn(
                             safeTopPx,
-                            (screenHeightPx - maxRestH - safeBottomPx).coerceAtLeast(safeTopPx)
+                            (screenHeightPx - restH - safeBottomPx).coerceAtLeast(safeTopPx)
                         )
+                        scope.launch {
+                            launch {
+                                scaleAnim.animateTo(
+                                    restScale,
+                                    spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
+                                )
+                            }
+                            launch {
+                                offsetXAnim.animateTo(
+                                    targetX,
+                                    spring(dampingRatio = 0.76f, stiffness = Spring.StiffnessMediumLow)
+                                )
+                            }
+                            launch {
+                                offsetYAnim.animateTo(
+                                    targetY,
+                                    spring(dampingRatio = 0.76f, stiffness = Spring.StiffnessMediumLow)
+                                )
+                            }
+                        }
                     }
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Icon(
-                        imageVector = Icons.Rounded.PlayArrow,
-                        contentDescription = "恢复浮窗播放",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
+                    // iPhone-style slim vertical indicator bar
+                    Box(
+                        modifier = Modifier
+                            .width(3.5.dp)
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Color.White.copy(alpha = 0.90f))
                     )
                 }
             }
@@ -366,18 +371,22 @@ fun BuiltInVideoPlayerOverlay(
                         indication = null
                     ) { controlsVisible = !controlsVisible }
             } else {
-                val widthDp = with(density) { currentWidthPx.toDp() }
+                val baseWidthDp = with(density) { baseWidthPx.toDp() }
                 Modifier
-                    .offset { IntOffset(animatedOffsetX.roundToInt(), animatedOffsetY.roundToInt()) }
-                    .width(widthDp)
+                    .offset { IntOffset(offsetXAnim.value.roundToInt(), offsetYAnim.value.roundToInt()) }
+                    .width(baseWidthDp)
                     .aspectRatio(16f / 9f)
+                    .graphicsLayer {
+                        scaleX = scaleAnim.value
+                        scaleY = scaleAnim.value
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                    }
                     .shadow(12.dp, RoundedCornerShape(14.dp))
                     .clip(RoundedCornerShape(14.dp))
                     .background(Color.Black)
                     .pointerInput(screenWidthPx, screenHeightPx) {
                         awaitEachGesture {
                             awaitFirstDown(requireUnconsumed = false)
-                            isGestureActive = true
                             var moved = false
                             var wasMultiTouch = false
                             var totalPanDist = 0f
@@ -393,63 +402,77 @@ fun BuiltInVideoPlayerOverlay(
                                     if (totalPanDist > 10f || zoomChange != 1f) {
                                         moved = true
                                     }
-                                    if (zoomChange != 1f) {
-                                        // Allow rubber-band overshoot beyond screen width up to 1.18x maxRestingScale
-                                        val nextScale = (targetScale * zoomChange)
-                                            .coerceIn(minScale, maxRestingScale * 1.18f)
-                                        val oldW = baseWidthPx * targetScale
-                                        val newW = baseWidthPx * nextScale
-                                        val oldH = oldW * (9f / 16f)
-                                        val newH = newW * (9f / 16f)
-                                        targetOffsetX -= (newW - oldW) / 2f
-                                        targetOffsetY -= (newH - oldH) / 2f
-                                        targetScale = nextScale
+                                    scope.launch {
+                                        if (zoomChange != 1f) {
+                                            // Allow pinching well beyond screen width (up to 2.2x maxRestingScale)
+                                            val nextScale = (scaleAnim.value * zoomChange)
+                                                .coerceIn(minScale, maxRestingScale * 2.2f)
+                                            val oldW = baseWidthPx * scaleAnim.value
+                                            val newW = baseWidthPx * nextScale
+                                            val oldH = oldW * (9f / 16f)
+                                            val newH = newW * (9f / 16f)
+                                            scaleAnim.snapTo(nextScale)
+                                            offsetXAnim.snapTo(offsetXAnim.value - (newW - oldW) / 2f)
+                                            offsetYAnim.snapTo(offsetYAnim.value - (newH - oldH) / 2f)
+                                        }
+                                        if (moved) {
+                                            offsetXAnim.snapTo(offsetXAnim.value + panChange.x)
+                                            offsetYAnim.snapTo(offsetYAnim.value + panChange.y)
+                                        }
                                     }
                                     if (moved) {
-                                        targetOffsetX += panChange.x
-                                        targetOffsetY += panChange.y
                                         event.changes.forEach { it.consume() }
                                     }
                                 }
                             } while (event.changes.any { it.pressed })
 
-                            isGestureActive = false
-
-                            // Tap (no drag/zoom) -> toggle controls visibility
+                            // Tap -> toggle controls visibility
                             if (!moved && !wasMultiTouch && (System.currentTimeMillis() - downTime) < 350L) {
                                 controlsVisible = !controlsVisible
                                 return@awaitEachGesture
                             }
 
-                            // 1. Snap scale back within [minScale, maxRestingScale] smoothly
-                            val clampedScale = targetScale.coerceIn(minScale, maxRestingScale)
-                            if (clampedScale != targetScale) {
-                                val oldW = baseWidthPx * targetScale
-                                val newW = baseWidthPx * clampedScale
-                                val oldH = oldW * (9f / 16f)
-                                val newH = newW * (9f / 16f)
-                                targetOffsetX -= (newW - oldW) / 2f
-                                targetOffsetY -= (newH - oldH) / 2f
-                                targetScale = clampedScale
-                            }
-
+                            val curScale = scaleAnim.value
+                            val clampedScale = curScale.coerceIn(minScale, maxRestingScale)
                             val finalW = baseWidthPx * clampedScale
                             val finalH = finalW * (9f / 16f)
 
-                            // 2. Check if dragged past left or right screen edge -> auto minimize & snap to edge
-                            if (moved && (targetOffsetX < -finalW * 0.20f || targetOffsetX + finalW > screenWidthPx + finalW * 0.20f)) {
-                                minimizedOnLeft = targetOffsetX + finalW / 2f < screenWidthPx / 2f
-                                minimizedY = targetOffsetY.coerceIn(
+                            var targetX = offsetXAnim.value
+                            var targetY = offsetYAnim.value
+                            if (clampedScale != curScale) {
+                                val oldW = baseWidthPx * curScale
+                                val oldH = oldW * (9f / 16f)
+                                targetX -= (finalW - oldW) / 2f
+                                targetY -= (finalH - oldH) / 2f
+                            }
+
+                            // Minimize ONLY when > 2/3 of the floating window is obscured beyond left/right edge
+                            val hiddenLeft = -targetX
+                            val hiddenRight = (targetX + finalW) - screenWidthPx
+                            val twoThirdsW = finalW * (2f / 3f)
+
+                            if (moved && (hiddenLeft > twoThirdsW || hiddenRight > twoThirdsW)) {
+                                minimizedOnLeft = hiddenLeft > twoThirdsW
+                                minimizedY = targetY.coerceIn(
                                     safeTopPx,
                                     (screenHeightPx - minimizedHeightPx - safeBottomPx).coerceAtLeast(safeTopPx)
                                 )
                                 isMinimized = true
                             } else {
-                                // 3. Clamp strictly inside screen bounds
                                 val maxX = (screenWidthPx - finalW).coerceAtLeast(0f)
                                 val maxY = (screenHeightPx - finalH - safeBottomPx).coerceAtLeast(safeTopPx)
-                                targetOffsetX = targetOffsetX.coerceIn(0f, maxX)
-                                targetOffsetY = targetOffsetY.coerceIn(safeTopPx, maxY)
+                                val clampedX = targetX.coerceIn(0f, maxX)
+                                val clampedY = targetY.coerceIn(safeTopPx, maxY)
+
+                                val bounceSpec = spring<Float>(
+                                    dampingRatio = 0.68f,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                                scope.launch {
+                                    launch { scaleAnim.animateTo(clampedScale, bounceSpec) }
+                                    launch { offsetXAnim.animateTo(clampedX, bounceSpec) }
+                                    launch { offsetYAnim.animateTo(clampedY, bounceSpec) }
+                                }
                             }
                         }
                     }
@@ -711,7 +734,6 @@ private fun ExpressiveSlimSeekBar(
             },
         contentAlignment = Alignment.CenterStart
     ) {
-        // Slim background track (2.5dp)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -719,7 +741,6 @@ private fun ExpressiveSlimSeekBar(
                 .clip(RoundedCornerShape(2.dp))
                 .background(Color.White.copy(alpha = 0.30f))
         )
-        // Slim active progress line
         Box(
             modifier = Modifier
                 .fillMaxWidth(value.coerceIn(0f, 1f))
@@ -727,7 +748,6 @@ private fun ExpressiveSlimSeekBar(
                 .clip(RoundedCornerShape(2.dp))
                 .background(Color.White)
         )
-        // Expressive dot thumb
         val thumbSize = if (isDragging) 11.dp else 8.dp
         val density = LocalDensity.current
         val thumbOffsetPx = ((barWidthPx - with(density) { thumbSize.toPx() }) * value.coerceIn(0f, 1f))

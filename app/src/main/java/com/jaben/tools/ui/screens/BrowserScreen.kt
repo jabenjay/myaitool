@@ -599,18 +599,23 @@ fun BrowserScreen(
 
                             @JavascriptInterface
                             fun onVideoPlayRequested(src: String?, posSec: Double) {
-                                val clean = src?.trim().orEmpty()
-                                if (clean.startsWith("http://") || clean.startsWith("https://")) {
-                                    post {
-                                        detectedVideoUrl = clean
+                                val raw = src?.trim().orEmpty()
+                                post {
+                                    val resolved = when {
+                                        raw.startsWith("http://") || raw.startsWith("https://") -> raw
+                                        raw.startsWith("blob:") -> detectedVideoUrl.orEmpty()
+                                        else -> ""
+                                    }
+                                    if (resolved.startsWith("http://") || resolved.startsWith("https://")) {
+                                        detectedVideoUrl = resolved
                                         val posMs = (posSec * 1000.0).toLong().coerceAtLeast(0L)
                                         detectedVideoPosMs = posMs
                                         if (!userDismissedFloatingForPage && activeBuiltInVideoUrl == null) {
                                             evaluateJavascript(
-                                                "document.querySelectorAll('video').forEach(function(v){v.pause();});",
+                                                "window.__joolsLockPause=true;document.querySelectorAll('video').forEach(function(v){try{v.pause();}catch(e){}});",
                                                 null
                                             )
-                                            activeBuiltInVideoUrl = clean
+                                            activeBuiltInVideoUrl = resolved
                                         }
                                     }
                                 }
@@ -698,6 +703,7 @@ fun BrowserScreen(
 
                             override fun onPageCommitVisible(view: WebView?, url: String?) {
                                 showLoadingOverlay = false
+                                view?.evaluateJavascript(VIDEO_DETECTOR_JS, null)
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
@@ -858,7 +864,7 @@ fun BrowserScreen(
                             val vUrl = detectedVideoUrl ?: return@clickable
                             runCatching {
                                 webViewRef?.evaluateJavascript(
-                                    "document.querySelectorAll('video').forEach(function(v){v.pause();});",
+                                    "window.__joolsLockPause=true;document.querySelectorAll('video').forEach(function(v){try{v.pause();}catch(e){}});",
                                     null
                                 )
                             }
@@ -1784,7 +1790,7 @@ fun BrowserScreen(
                 activeBuiltInVideoUrl = null
                 userDismissedFloatingForPage = true
                 runCatching {
-                    webViewRef?.evaluateJavascript("window.__joolsAutoHijack = false;", null)
+                    webViewRef?.evaluateJavascript("window.__joolsLockPause = false; window.__joolsAutoHijack = false;", null)
                 }
             }
         )
@@ -2155,6 +2161,11 @@ private const val VIDEO_DETECTOR_JS = """
     }
     return src;
   }
+  function pauseAllVideos() {
+    try {
+      document.querySelectorAll('video').forEach(function(v) { try { v.pause(); } catch(e) {} });
+    } catch(e) {}
+  }
   function scanVideos() {
     try {
       var vids = document.querySelectorAll('video');
@@ -2184,25 +2195,57 @@ private const val VIDEO_DETECTOR_JS = """
   }
   function handlePlayEvent(e) {
     var v = e.target;
-    if (v && v.tagName === 'VIDEO') {
-      var src = getVideoSrc(v);
-      if (src && (src.indexOf('http://') === 0 || src.indexOf('https://') === 0)) {
-        if (window.__joolsAutoHijack !== false && window.JoolsVideoBridge) {
-          v.pause();
-          window.JoolsVideoBridge.onVideoPlayRequested(src, v.currentTime || 0);
-        } else if (window.JoolsVideoBridge) {
-          window.JoolsVideoBridge.onVideoFound(src, v.currentTime || 0);
-        }
+    if (!v || v.tagName !== 'VIDEO') return;
+    if (window.__joolsLockPause) {
+      try { v.pause(); } catch(err) {}
+      return;
+    }
+    var src = getVideoSrc(v);
+    if (src && (src.indexOf('http://') === 0 || src.indexOf('https://') === 0 || src.indexOf('blob:') === 0)) {
+      if (window.__joolsAutoHijack !== false && window.JoolsVideoBridge) {
+        try { v.pause(); } catch(err) {}
+        window.JoolsVideoBridge.onVideoPlayRequested(src, v.currentTime || 0);
+      } else if (window.JoolsVideoBridge && src.indexOf('http') === 0) {
+        window.JoolsVideoBridge.onVideoFound(src, v.currentTime || 0);
       }
     }
   }
   if (!window.__joolsVideoHooked) {
     window.__joolsVideoHooked = true;
     window.__joolsAutoHijack = true;
+    window.__joolsLockPause = false;
+    var origPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function() {
+      try {
+        if (this.tagName === 'VIDEO') {
+          if (window.__joolsLockPause) {
+            try { this.pause(); } catch(e) {}
+            return Promise.resolve();
+          }
+          var src = getVideoSrc(this);
+          if (src && (src.indexOf('http://') === 0 || src.indexOf('https://') === 0 || src.indexOf('blob:') === 0)) {
+            if (window.__joolsAutoHijack !== false && window.JoolsVideoBridge) {
+              try { this.pause(); } catch(e) {}
+              window.JoolsVideoBridge.onVideoPlayRequested(src, this.currentTime || 0);
+              return Promise.resolve();
+            }
+          }
+        }
+      } catch(e) {}
+      return origPlay.apply(this, arguments);
+    };
     document.addEventListener('play', handlePlayEvent, true);
     document.addEventListener('playing', handlePlayEvent, true);
+    document.addEventListener('timeupdate', function(e) {
+      if (window.__joolsLockPause && e.target && e.target.tagName === 'VIDEO') {
+        try { e.target.pause(); } catch(err) {}
+      }
+    }, true);
     try {
-      var obs = new MutationObserver(function() { scanVideos(); });
+      var obs = new MutationObserver(function() {
+        if (window.__joolsLockPause) pauseAllVideos();
+        scanVideos();
+      });
       if (document.body) obs.observe(document.body, { childList: true, subtree: true });
     } catch (e) {}
   }
