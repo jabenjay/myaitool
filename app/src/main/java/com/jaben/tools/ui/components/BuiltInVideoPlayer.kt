@@ -1,6 +1,7 @@
 package com.jaben.tools.ui.components
 
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
@@ -22,8 +23,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -72,6 +71,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -84,18 +84,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.jaben.tools.service.VideoPlaybackService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -130,29 +132,10 @@ fun BuiltInVideoPlayerOverlay(
     var playbackSpeed by remember { mutableFloatStateOf(1f) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    var mediaController by remember { mutableStateOf<MediaController?>(null) }
+    var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
+
     val speeds = remember { listOf(0.5f, 0.75f, 1.0f, 1.28f, 1.5f, 2.0f) }
-
-    val exoPlayer = remember(videoUrl, pageUrl) {
-        val cookie = runCatching { CookieManager.getInstance().getCookie(pageUrl) }.getOrNull().orEmpty()
-        val headers = buildMap {
-            if (pageUrl.isNotBlank()) put("Referer", pageUrl)
-            if (cookie.isNotBlank()) put("Cookie", cookie)
-        }
-        val httpFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent(userAgent.ifBlank { "Mozilla/5.0" })
-            .setAllowCrossProtocolRedirects(true)
-            .setDefaultRequestProperties(headers)
-
-        ExoPlayer.Builder(context)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(httpFactory))
-            .build()
-            .apply {
-                setMediaItem(MediaItem.fromUri(Uri.parse(videoUrl)))
-                if (initialPositionMs > 0L) seekTo(initialPositionMs)
-                playWhenReady = true
-                prepare()
-            }
-    }
 
     fun applyFullscreenSystemUi(fullscreen: Boolean) {
         activity?.let { act ->
@@ -177,6 +160,10 @@ fun BuiltInVideoPlayerOverlay(
 
     fun closePlayer() {
         applyFullscreenSystemUi(false)
+        runCatching {
+            mediaController?.stop()
+            mediaController?.clearMediaItems()
+        }
         onClose()
     }
 
@@ -197,38 +184,69 @@ fun BuiltInVideoPlayerOverlay(
         applyFullscreenSystemUi(isFullscreen)
     }
 
-    DisposableEffect(exoPlayer) {
-        val listener = object : Player.Listener {
-            override fun onPlaybackStateChanged(state: Int) {
-                isBuffering = state == Player.STATE_BUFFERING
-                if (state == Player.STATE_READY) {
-                    durationMs = exoPlayer.duration.coerceAtLeast(0L)
+    DisposableEffect(videoUrl, pageUrl) {
+        val cookie = runCatching { CookieManager.getInstance().getCookie(pageUrl) }.getOrNull().orEmpty()
+        VideoPlaybackService.updateHttpHeaders(userAgent = userAgent, referer = pageUrl, cookie = cookie)
+
+        val sessionToken = SessionToken(context, ComponentName(context, VideoPlaybackService::class.java))
+        val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+        var attachedListener: Player.Listener? = null
+
+        controllerFuture.addListener({
+            val controller = runCatching { controllerFuture.get() }.getOrNull() ?: return@addListener
+            mediaController = controller
+            playerViewRef?.player = controller
+
+            val listener = object : Player.Listener {
+                override fun onPlaybackStateChanged(state: Int) {
+                    isBuffering = state == Player.STATE_BUFFERING
+                    if (state == Player.STATE_READY) {
+                        durationMs = controller.duration.coerceAtLeast(0L)
+                    }
+                }
+
+                override fun onIsPlayingChanged(playing: Boolean) {
+                    isPlaying = playing
+                }
+
+                override fun onPlayerError(error: PlaybackException) {
+                    isBuffering = false
+                    errorMessage = "无法播放该视频（${error.errorCodeName}）"
                 }
             }
+            attachedListener = listener
+            controller.addListener(listener)
 
-            override fun onIsPlayingChanged(playing: Boolean) {
-                isPlaying = playing
-            }
-
-            override fun onPlayerError(error: PlaybackException) {
-                isBuffering = false
-                errorMessage = "无法播放该视频（${error.errorCodeName}）"
-            }
-        }
-        exoPlayer.addListener(listener)
+            val item = MediaItem.Builder()
+                .setUri(Uri.parse(videoUrl))
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(pageTitle.ifBlank { "网页视频" })
+                        .setArtist("Jools 浏览器")
+                        .build()
+                )
+                .build()
+            controller.setMediaItem(item)
+            if (initialPositionMs > 0L) controller.seekTo(initialPositionMs)
+            controller.playWhenReady = true
+            controller.prepare()
+        }, ContextCompat.getMainExecutor(context))
 
         onDispose {
-            exoPlayer.removeListener(listener)
-            exoPlayer.release()
+            attachedListener?.let { l -> mediaController?.removeListener(l) }
+            playerViewRef?.player = null
+            MediaController.releaseFuture(controllerFuture)
+            mediaController = null
             applyFullscreenSystemUi(false)
         }
     }
 
-    LaunchedEffect(exoPlayer, isSeeking) {
+    LaunchedEffect(mediaController, isSeeking) {
+        val controller = mediaController ?: return@LaunchedEffect
         while (true) {
             if (!isSeeking) {
-                val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
-                val dur = exoPlayer.duration.coerceAtLeast(0L)
+                val pos = controller.currentPosition.coerceAtLeast(0L)
+                val dur = controller.duration.coerceAtLeast(0L)
                 currentPositionMs = pos
                 durationMs = dur
                 sliderPosition = if (dur > 0L) (pos.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f
@@ -260,7 +278,6 @@ fun BuiltInVideoPlayerOverlay(
         val offsetXAnim = remember { Animatable((screenWidthPx - baseWidthPx) / 2f) }
         val offsetYAnim = remember { Animatable(with(density) { 80.dp.toPx() }) }
 
-        // Entrance animation when floating player opens
         LaunchedEffect(Unit) {
             scaleAnim.animateTo(
                 targetValue = 1f,
@@ -268,11 +285,9 @@ fun BuiltInVideoPlayerOverlay(
             )
         }
 
-        val currentWidthPx = baseWidthPx * scaleAnim.value
         val safeTopPx = with(density) { 28.dp.toPx() }
         val safeBottomPx = with(density) { 56.dp.toPx() }
 
-        // Narrow & tall iPhone-style edge handle
         val minimizedWidthDp = 22.dp
         val minimizedHeightDp = 68.dp
         val minimizedWidthPx = with(density) { minimizedWidthDp.toPx() }
@@ -280,21 +295,6 @@ fun BuiltInVideoPlayerOverlay(
         var minimizedY by remember { mutableFloatStateOf(screenHeightPx * 0.42f) }
 
         if (isMinimized && !isFullscreen) {
-            // Keep ExoPlayer alive in background at 1px invisible size so audio keeps playing
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        player = exoPlayer
-                        useController = false
-                        layoutParams = ViewGroup.LayoutParams(1, 1)
-                    }
-                },
-                modifier = Modifier
-                    .size(1.dp)
-                    .alpha(0f)
-            )
-
-            // Narrow, tall pill tab snapped to left or right edge with an iPhone-style vertical bar
             val snapX = if (minimizedOnLeft) 0 else (screenWidthPx - minimizedWidthPx).roundToInt()
             val tabShape = if (minimizedOnLeft) {
                 RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp)
@@ -351,7 +351,6 @@ fun BuiltInVideoPlayerOverlay(
                     }
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    // iPhone-style slim vertical indicator bar
                     Box(
                         modifier = Modifier
                             .width(3.5.dp)
@@ -379,7 +378,7 @@ fun BuiltInVideoPlayerOverlay(
                     .graphicsLayer {
                         scaleX = scaleAnim.value
                         scaleY = scaleAnim.value
-                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                        transformOrigin = TransformOrigin(0f, 0f)
                     }
                     .shadow(12.dp, RoundedCornerShape(14.dp))
                     .clip(RoundedCornerShape(14.dp))
@@ -393,6 +392,10 @@ fun BuiltInVideoPlayerOverlay(
                             val downTime = System.currentTimeMillis()
                             do {
                                 val event = awaitPointerEvent()
+                                // If child (e.g. ExpressiveSlimSeekBar) already consumed the gesture, do not drag window!
+                                if (event.changes.any { it.isConsumed }) {
+                                    break
+                                }
                                 if (event.changes.size > 1) wasMultiTouch = true
                                 val zoomChange = event.calculateZoom()
                                 val panChange = event.calculatePan()
@@ -404,7 +407,6 @@ fun BuiltInVideoPlayerOverlay(
                                     }
                                     scope.launch {
                                         if (zoomChange != 1f) {
-                                            // Allow pinching well beyond screen width (up to 2.2x maxRestingScale)
                                             val nextScale = (scaleAnim.value * zoomChange)
                                                 .coerceIn(minScale, maxRestingScale * 2.2f)
                                             val oldW = baseWidthPx * scaleAnim.value
@@ -426,7 +428,6 @@ fun BuiltInVideoPlayerOverlay(
                                 }
                             } while (event.changes.any { it.pressed })
 
-                            // Tap -> toggle controls visibility
                             if (!moved && !wasMultiTouch && (System.currentTimeMillis() - downTime) < 350L) {
                                 controlsVisible = !controlsVisible
                                 return@awaitEachGesture
@@ -446,7 +447,6 @@ fun BuiltInVideoPlayerOverlay(
                                 targetY -= (finalH - oldH) / 2f
                             }
 
-                            // Minimize ONLY when > 2/3 of the floating window is obscured beyond left/right edge
                             val hiddenLeft = -targetX
                             val hiddenRight = (targetX + finalW) - screenWidthPx
                             val twoThirdsW = finalW * (2f / 3f)
@@ -482,13 +482,19 @@ fun BuiltInVideoPlayerOverlay(
                 AndroidView(
                     factory = { ctx ->
                         PlayerView(ctx).apply {
-                            player = exoPlayer
+                            player = mediaController
                             useController = false
                             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                             layoutParams = ViewGroup.LayoutParams(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT
                             )
+                            playerViewRef = this
+                        }
+                    },
+                    update = { view ->
+                        if (view.player !== mediaController) {
+                            view.player = mediaController
                         }
                     },
                     modifier = Modifier.fillMaxSize()
@@ -579,7 +585,7 @@ fun BuiltInVideoPlayerOverlay(
                                         val nextIdx = (speeds.indexOf(playbackSpeed) + 1) % speeds.size
                                         val nextSpeed = speeds[nextIdx]
                                         playbackSpeed = nextSpeed
-                                        exoPlayer.setPlaybackSpeed(nextSpeed)
+                                        mediaController?.setPlaybackSpeed(nextSpeed)
                                     }
                             ) {
                                 val speedLabel = if (playbackSpeed == 1.0f) "1x" else "${playbackSpeed}x"
@@ -597,7 +603,8 @@ fun BuiltInVideoPlayerOverlay(
                         if (errorMessage == null) {
                             IconButton(
                                 onClick = {
-                                    if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                    val c = mediaController ?: return@IconButton
+                                    if (c.isPlaying) c.pause() else c.play()
                                 },
                                 modifier = Modifier
                                     .align(Alignment.Center)
@@ -664,7 +671,7 @@ fun BuiltInVideoPlayerOverlay(
                                 },
                                 onValueChangeFinished = {
                                     if (durationMs > 0L) {
-                                        exoPlayer.seekTo((sliderPosition * durationMs).toLong())
+                                        mediaController?.seekTo((sliderPosition * durationMs).toLong())
                                     }
                                     isSeeking = false
                                 },
@@ -703,34 +710,25 @@ private fun ExpressiveSlimSeekBar(
 
     Box(
         modifier = modifier
-            .height(22.dp)
+            .height(28.dp)
             .onSizeChanged { barWidthPx = it.width.toFloat().coerceAtLeast(1f) }
             .pointerInput(Unit) {
-                detectTapGestures { offset ->
-                    val ratio = (offset.x / barWidthPx).coerceIn(0f, 1f)
-                    onValueChange(ratio)
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    isDragging = true
+                    onValueChange((down.position.x / barWidthPx).coerceIn(0f, 1f))
+                    do {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull() ?: break
+                        if (change.pressed) {
+                            change.consume()
+                            onValueChange((change.position.x / barWidthPx).coerceIn(0f, 1f))
+                        }
+                    } while (event.changes.any { it.pressed })
+                    isDragging = false
                     onValueChangeFinished()
                 }
-            }
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragStart = { offset ->
-                        isDragging = true
-                        onValueChange((offset.x / barWidthPx).coerceIn(0f, 1f))
-                    },
-                    onHorizontalDrag = { change, _ ->
-                        change.consume()
-                        onValueChange((change.position.x / barWidthPx).coerceIn(0f, 1f))
-                    },
-                    onDragEnd = {
-                        isDragging = false
-                        onValueChangeFinished()
-                    },
-                    onDragCancel = {
-                        isDragging = false
-                        onValueChangeFinished()
-                    }
-                )
             },
         contentAlignment = Alignment.CenterStart
     ) {
@@ -748,7 +746,7 @@ private fun ExpressiveSlimSeekBar(
                 .clip(RoundedCornerShape(2.dp))
                 .background(Color.White)
         )
-        val thumbSize = if (isDragging) 11.dp else 8.dp
+        val thumbSize = if (isDragging) 12.dp else 8.dp
         val density = LocalDensity.current
         val thumbOffsetPx = ((barWidthPx - with(density) { thumbSize.toPx() }) * value.coerceIn(0f, 1f))
             .coerceAtLeast(0f)
