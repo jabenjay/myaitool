@@ -12,13 +12,33 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
+import java.util.UUID
 import java.util.zip.ZipInputStream
+
+data class SavedGitToken(
+    val id: String,
+    val username: String,
+    val token: String
+)
 
 data class PushFileEntry(
     val relativePath: String,
     val bytes: ByteArray
 ) {
     val sizeBytes: Long get() = bytes.size.toLong()
+}
+
+data class GitDiffSummary(
+    val headSha: String,
+    val baseTreeSha: String,
+    val addedFiles: List<PushFileEntry>,
+    val modifiedFiles: List<PushFileEntry>,
+    val deletedPaths: List<String>,
+    val unchangedCount: Int
+) {
+    val uploadFiles: List<PushFileEntry> get() = addedFiles + modifiedFiles
+    val hasChanges: Boolean get() = addedFiles.isNotEmpty() || modifiedFiles.isNotEmpty() || deletedPaths.isNotEmpty()
 }
 
 data class PushGitResult(
@@ -44,6 +64,63 @@ class PushGitEngine(private val context: Context) {
             .apply()
     }
 
+    fun getSavedTokens(): List<SavedGitToken> {
+        val raw = prefs.getString(KEY_SAVED_TOKENS, null) ?: return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val token = obj.optString("token").trim()
+                    if (token.isNotEmpty()) {
+                        add(
+                            SavedGitToken(
+                                id = obj.optString("id").ifBlank { UUID.randomUUID().toString() },
+                                username = obj.optString("username").ifBlank { "GitHub User" },
+                                token = token
+                            )
+                        )
+                    }
+                }
+            }
+        }.getOrElse { emptyList() }
+    }
+
+    fun saveTokenEntry(username: String, token: String): List<SavedGitToken> {
+        val cleanToken = token.trim()
+        if (cleanToken.isEmpty()) return getSavedTokens()
+        val existing = getSavedTokens().filterNot { it.token == cleanToken }
+        val updated = listOf(
+            SavedGitToken(
+                id = UUID.randomUUID().toString(),
+                username = username.trim().ifBlank { "GitHub User" },
+                token = cleanToken
+            )
+        ) + existing
+        persistTokens(updated)
+        return updated
+    }
+
+    fun deleteTokenEntry(id: String): List<SavedGitToken> {
+        val updated = getSavedTokens().filterNot { it.id == id }
+        persistTokens(updated)
+        return updated
+    }
+
+    private fun persistTokens(list: List<SavedGitToken>) {
+        val arr = JSONArray()
+        list.forEach { item ->
+            arr.put(
+                JSONObject().apply {
+                    put("id", item.id)
+                    put("username", item.username)
+                    put("token", item.token)
+                }
+            )
+        }
+        prefs.edit().putString(KEY_SAVED_TOKENS, arr.toString()).apply()
+    }
+
     fun parseOwnerRepo(input: String): String {
         val clean = input.trim()
             .removePrefix("https://github.com/")
@@ -65,7 +142,12 @@ class PushGitEngine(private val context: Context) {
 
     suspend fun listRepos(pat: String): Result<List<String>> = withContext(Dispatchers.IO) {
         runCatching {
-            val resp = apiRequest("GET", "https://api.github.com/user/repos?per_page=100&sort=updated", pat, null)
+            val resp = apiRequest(
+                "GET",
+                "https://api.github.com/user/repos?affiliation=owner,collaborator,organization_member&per_page=100&sort=updated",
+                pat,
+                null
+            )
             val arr = JSONArray(resp)
             buildList {
                 for (i in 0 until arr.length()) {
@@ -168,34 +250,88 @@ class PushGitEngine(private val context: Context) {
         return DocumentFile.fromSingleUri(context, uri)?.name ?: uri.lastPathSegment
     }
 
-    suspend fun pushFiles(
+    suspend fun inspectChanges(
+        pat: String,
+        ownerRepoInput: String,
+        branchInput: String,
+        localFiles: List<PushFileEntry>
+    ): Result<GitDiffSummary> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = parseOwnerRepo(ownerRepoInput)
+            val branch = branchInput.trim().ifBlank { "main" }
+            require(repo.contains("/")) { "仓库格式应为 owner/repo" }
+            require(pat.isNotBlank()) { "请填写 GitHub Token" }
+            require(localFiles.isNotEmpty()) { "请先选择要上传的文件" }
+
+            val refResp = apiRequest("GET", "https://api.github.com/repos/$repo/git/ref/heads/$branch", pat, null)
+            val headSha = JSONObject(refResp).getJSONObject("object").getString("sha")
+
+            val commitResp = apiRequest("GET", "https://api.github.com/repos/$repo/git/commits/$headSha", pat, null)
+            val baseTreeSha = JSONObject(commitResp).getJSONObject("tree").getString("sha")
+
+            val treeResp = apiRequest("GET", "https://api.github.com/repos/$repo/git/trees/$baseTreeSha?recursive=1", pat, null)
+            val treeArr = JSONObject(treeResp).optJSONArray("tree") ?: JSONArray()
+            val remoteBlobs = HashMap<String, String>(treeArr.length())
+            for (i in 0 until treeArr.length()) {
+                val item = treeArr.optJSONObject(i) ?: continue
+                if (item.optString("type") == "blob") {
+                    remoteBlobs[item.optString("path")] = item.optString("sha")
+                }
+            }
+
+            val added = ArrayList<PushFileEntry>()
+            val modified = ArrayList<PushFileEntry>()
+            var unchanged = 0
+            val localPaths = HashSet<String>(localFiles.size)
+
+            for (file in localFiles) {
+                localPaths.add(file.relativePath)
+                val remoteSha = remoteBlobs[file.relativePath]
+                if (remoteSha == null) {
+                    added.add(file)
+                } else {
+                    val localSha = computeGitBlobSha1(file.bytes)
+                    if (localSha != remoteSha) {
+                        modified.add(file)
+                    } else {
+                        unchanged++
+                    }
+                }
+            }
+
+            val deleted = remoteBlobs.keys.filter { it !in localPaths }.sorted()
+            GitDiffSummary(
+                headSha = headSha,
+                baseTreeSha = baseTreeSha,
+                addedFiles = added,
+                modifiedFiles = modified,
+                deletedPaths = deleted,
+                unchangedCount = unchanged
+            )
+        }
+    }
+
+    suspend fun pushDiff(
         pat: String,
         ownerRepoInput: String,
         branchInput: String,
         commitMessageInput: String,
-        files: List<PushFileEntry>,
+        diff: GitDiffSummary,
+        syncDeletions: Boolean,
         onProgress: (done: Int, total: Int, currentPath: String) -> Unit
     ): Result<PushGitResult> = withContext(Dispatchers.IO) {
         runCatching {
             val repo = parseOwnerRepo(ownerRepoInput)
             val branch = branchInput.trim().ifBlank { "main" }
             val message = commitMessageInput.trim().ifBlank { "Sync project files via PushGit" }
-            require(repo.contains("/")) { "仓库格式应为 owner/repo" }
-            require(pat.isNotBlank()) { "请填写 GitHub Token" }
-            require(files.isNotEmpty()) { "请先选择要上传的文件" }
+            val filesToUpload = diff.uploadFiles
+            require(filesToUpload.isNotEmpty() || (syncDeletions && diff.deletedPaths.isNotEmpty())) {
+                "没有需要推送的变动文件"
+            }
 
-            // 1. Get branch HEAD commit SHA
-            val refResp = apiRequest("GET", "https://api.github.com/repos/$repo/git/ref/heads/$branch", pat, null)
-            val headSha = JSONObject(refResp).getJSONObject("object").getString("sha")
-
-            // 2. Get base tree SHA
-            val commitResp = apiRequest("GET", "https://api.github.com/repos/$repo/git/commits/$headSha", pat, null)
-            val baseTreeSha = JSONObject(commitResp).getJSONObject("tree").getString("sha")
-
-            // 3. Create blobs for all files
             val treeArray = JSONArray()
-            val total = files.size
-            files.forEachIndexed { idx, file ->
+            val total = filesToUpload.size
+            filesToUpload.forEachIndexed { idx, file ->
                 onProgress(idx, total, file.relativePath)
                 val b64 = Base64.encodeToString(file.bytes, Base64.NO_WRAP)
                 val blobBody = JSONObject().apply {
@@ -214,26 +350,37 @@ class PushGitEngine(private val context: Context) {
                     }
                 )
             }
+
+            if (syncDeletions) {
+                diff.deletedPaths.forEach { delPath ->
+                    treeArray.put(
+                        JSONObject().apply {
+                            put("path", delPath)
+                            put("mode", "100644")
+                            put("type", "blob")
+                            put("sha", JSONObject.NULL)
+                        }
+                    )
+                }
+            }
+
             onProgress(total, total, "正在提交...")
 
-            // 4. Create new tree
             val treeBody = JSONObject().apply {
-                put("base_tree", baseTreeSha)
+                put("base_tree", diff.baseTreeSha)
                 put("tree", treeArray)
             }.toString()
             val newTreeResp = apiRequest("POST", "https://api.github.com/repos/$repo/git/trees", pat, treeBody)
             val newTreeSha = JSONObject(newTreeResp).getString("sha")
 
-            // 5. Create new commit
             val commitBody = JSONObject().apply {
                 put("message", message)
                 put("tree", newTreeSha)
-                put("parents", JSONArray().put(headSha))
+                put("parents", JSONArray().put(diff.headSha))
             }.toString()
             val newCommitResp = apiRequest("POST", "https://api.github.com/repos/$repo/git/commits", pat, commitBody)
             val newCommitSha = JSONObject(newCommitResp).getString("sha")
 
-            // 6. Update branch ref
             val patchBody = JSONObject().apply {
                 put("sha", newCommitSha)
                 put("force", false)
@@ -242,10 +389,18 @@ class PushGitEngine(private val context: Context) {
 
             PushGitResult(
                 commitSha = newCommitSha,
-                fileCount = files.size,
+                fileCount = filesToUpload.size + if (syncDeletions) diff.deletedPaths.size else 0,
                 commitUrl = "https://github.com/$repo/commit/$newCommitSha"
             )
         }
+    }
+
+    private fun computeGitBlobSha1(bytes: ByteArray): String {
+        val header = "blob ${bytes.size}\u0000".toByteArray(Charsets.UTF_8)
+        val md = MessageDigest.getInstance("SHA-1")
+        md.update(header)
+        md.update(bytes)
+        return md.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun apiRequest(method: String, urlStr: String, pat: String, jsonBody: String?): String {
@@ -287,5 +442,6 @@ class PushGitEngine(private val context: Context) {
         private const val KEY_REPO = "repo"
         private const val KEY_BRANCH = "branch"
         private const val KEY_MSG = "commit_msg"
+        private const val KEY_SAVED_TOKENS = "saved_tokens"
     }
 }

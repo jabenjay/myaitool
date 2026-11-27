@@ -4,6 +4,7 @@ import PhotosUI
 import CoreImage.CIFilterBuiltins
 import UniformTypeIdentifiers
 import Compression
+import CryptoKit
 
 // MARK: - 1. Base64 Tool
 struct Base64ToolView: View {
@@ -412,15 +413,35 @@ struct FileCompressorView: View {
 
 // MARK: - 6. PushGit Tool
 struct PushGitView: View {
+    struct SavedToken: Identifiable, Codable, Equatable {
+        let id: String
+        let username: String
+        let token: String
+    }
+
     struct PushFile: Identifiable {
         let id = UUID()
         let path: String
         let data: Data
     }
 
+    struct DiffResult {
+        let headSha: String
+        let baseTreeSha: String
+        let added: [PushFile]
+        let modified: [PushFile]
+        let deleted: [String]
+        let unchangedCount: Int
+        var uploadFiles: [PushFile] { added + modified }
+    }
+
     @State private var pat: String = UserDefaults.standard.string(forKey: "jools_pushgit_pat") ?? ""
     @State private var showPat: Bool = false
     @State private var connectedUser: String?
+    @State private var savedTokens: [SavedToken] = []
+    @State private var showTokenManager: Bool = false
+    @State private var newTokenInput: String = ""
+
     @State private var repoText: String = UserDefaults.standard.string(forKey: "jools_pushgit_repo") ?? "jabenjay/myaitool"
     @State private var branch: String = UserDefaults.standard.string(forKey: "jools_pushgit_branch") ?? "main"
     @State private var commitMessage: String = UserDefaults.standard.string(forKey: "jools_pushgit_msg") ?? "Sync project files via PushGit"
@@ -429,19 +450,37 @@ struct PushGitView: View {
     @State private var branches: [String] = ["main"]
 
     @State private var selectedFiles: [PushFile] = []
+    @State private var diffResult: DiffResult?
+    @State private var syncDeletions: Bool = false
     @State private var showZipImporter = false
     @State private var showFolderImporter = false
     @State private var showFilesImporter = false
 
+    @State private var isInspecting = false
     @State private var isPushing = false
     @State private var statusText = ""
 
     var body: some View {
         Form {
-            Section("目标仓库与认证") {
+            Section("已保存账号与目标仓库") {
+                if !savedTokens.isEmpty {
+                    Picker("切换账号", selection: $pat) {
+                        ForEach(savedTokens) { item in
+                            Text("@\(item.username)").tag(item.token)
+                        }
+                    }
+                    .onChange(of: pat) { _ in
+                        diffResult = nil
+                        Task { await fetchMeta() }
+                    }
+                }
                 if !repos.isEmpty {
-                    Picker("选择仓库", selection: $repoText) {
+                    Picker("目标仓库", selection: $repoText) {
                         ForEach(repos, id: \.self) { Text($0).tag($0) }
+                    }
+                    .onChange(of: repoText) { _ in
+                        diffResult = nil
+                        Task { await fetchBranchesOnly() }
                     }
                 }
                 TextField("owner/repo（如 jabenjay/myaitool）", text: $repoText)
@@ -464,7 +503,7 @@ struct PushGitView: View {
                         .font(.system(size: 13))
                         .foregroundColor(.green)
                 }
-                Button("验证 Token 并拉取仓库") {
+                Button("刷新仓库与分支") {
                     Task { await fetchMeta() }
                 }
                 .disabled(pat.isEmpty)
@@ -478,7 +517,7 @@ struct PushGitView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack {
                             ForEach(branches, id: \.self) { b in
-                                Button(b) { branch = b }
+                                Button(b) { branch = b; diffResult = nil }
                                     .buttonStyle(.bordered)
                                     .tint(branch == b ? .accentColor : .secondary)
                             }
@@ -503,8 +542,19 @@ struct PushGitView: View {
                         .buttonStyle(.bordered)
                         .frame(maxWidth: .infinity)
                 }
-                if !selectedFiles.isEmpty {
-                    Text("已就绪 \(selectedFiles.count) 个文件")
+                if let diff = diffResult {
+                    Text("比对结果：新增 \(diff.added.count) · 修改 \(diff.modified.count) · 远程独有 \(diff.deleted.count) · 未变 \(diff.unchangedCount)")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.accentColor)
+                    if !diff.deleted.isEmpty {
+                        Toggle("同步删除远程独有文件 (\(diff.deleted.count))", isOn: $syncDeletions)
+                            .font(.system(size: 12))
+                    }
+                    ForEach(diff.added) { f in Text("[新增] \(f.path)").font(.system(size: 12)).foregroundColor(.green) }
+                    ForEach(diff.modified) { f in Text("[修改] \(f.path)").font(.system(size: 12)).foregroundColor(.orange) }
+                    ForEach(diff.deleted, id: \.self) { p in Text("[删除] \(p)").font(.system(size: 12)).foregroundColor(.red) }
+                } else if !selectedFiles.isEmpty {
+                    Text("已就绪 \(selectedFiles.count) 个文件，请先比对差异")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.accentColor)
                     ForEach(selectedFiles) { f in
@@ -517,17 +567,31 @@ struct PushGitView: View {
             }
 
             Section {
+                let pushCount = (diffResult?.uploadFiles.count ?? 0) + (syncDeletions ? (diffResult?.deleted.count ?? 0) : 0)
                 Button {
-                    Task { await pushAll() }
+                    Task {
+                        if diffResult == nil {
+                            await inspectDiff()
+                        } else {
+                            await pushDiffChanges()
+                        }
+                    }
                 } label: {
                     HStack {
                         Spacer()
-                        Text(isPushing ? "正在推送..." : "Push 到 GitHub")
-                            .fontWeight(.semibold)
+                        if isInspecting {
+                            Text("正在比对...").fontWeight(.semibold)
+                        } else if isPushing {
+                            Text("正在推送...").fontWeight(.semibold)
+                        } else if diffResult == nil {
+                            Text("比对仓库差异").fontWeight(.semibold)
+                        } else {
+                            Text("Push 变动文件 (\(pushCount))").fontWeight(.semibold)
+                        }
                         Spacer()
                     }
                 }
-                .disabled(isPushing || pat.isEmpty || selectedFiles.isEmpty)
+                .disabled(isInspecting || isPushing || pat.isEmpty || selectedFiles.isEmpty || (diffResult != nil && pushCount == 0))
 
                 if !statusText.isEmpty {
                     Text(statusText)
@@ -537,23 +601,109 @@ struct PushGitView: View {
             }
         }
         .navigationTitle("PushGit")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { showTokenManager = true } label: {
+                    Image(systemName: "key")
+                }
+            }
+        }
+        .sheet(isPresented: $showTokenManager) {
+            NavigationStack {
+                List {
+                    Section("添加新 Token") {
+                        HStack {
+                            TextField("输入 ghp_... Token", text: $newTokenInput)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            Button("保存") {
+                                Task { await saveNewToken() }
+                            }
+                            .disabled(newTokenInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                    }
+                    Section("已保存账号") {
+                        ForEach(savedTokens) { item in
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text("@\(item.username)").fontWeight(.semibold)
+                                    Text("\(item.token.prefix(10))...").font(.system(size: 11)).foregroundColor(.secondary)
+                                }
+                                Spacer()
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                pat = item.token
+                                connectedUser = item.username
+                                showTokenManager = false
+                                Task { await fetchMeta() }
+                            }
+                        }
+                        .onDelete { idxs in
+                            savedTokens.remove(atOffsets: idxs)
+                            persistTokens()
+                        }
+                    }
+                }
+                .navigationTitle("管理 Token")
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("关闭") { showTokenManager = false }
+                    }
+                }
+            }
+        }
         .task {
+            loadSavedTokens()
             if !pat.isEmpty { await fetchMeta() }
         }
         .fileImporter(isPresented: $showZipImporter, allowedContentTypes: [.zip], allowsMultipleSelection: false) { res in
             if case .success(let urls) = res, let u = urls.first {
+                diffResult = nil
                 loadZip(u)
             }
         }
         .fileImporter(isPresented: $showFolderImporter, allowedContentTypes: [.folder], allowsMultipleSelection: false) { res in
             if case .success(let urls) = res, let u = urls.first {
+                diffResult = nil
                 loadFolder(u)
             }
         }
         .fileImporter(isPresented: $showFilesImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { res in
             if case .success(let urls) = res {
+                diffResult = nil
                 loadFiles(urls)
             }
+        }
+    }
+
+    private func loadSavedTokens() {
+        if let d = UserDefaults.standard.data(forKey: "jools_pushgit_tokens"),
+           let arr = try? JSONDecoder().decode([SavedToken].self, from: d) {
+            savedTokens = arr
+        }
+    }
+
+    private func persistTokens() {
+        if let d = try? JSONEncoder().encode(savedTokens) {
+            UserDefaults.standard.set(d, forKey: "jools_pushgit_tokens")
+        }
+    }
+
+    private func saveNewToken() async {
+        let t = newTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        if let uJson = try? await ghRequestWithToken(method: "GET", urlStr: "https://api.github.com/user", token: t, body: nil) as? [String: Any],
+           let login = uJson["login"] as? String {
+            savedTokens.removeAll { $0.token == t }
+            savedTokens.insert(SavedToken(id: UUID().uuidString, username: login, token: t), at: 0)
+            persistTokens()
+            pat = t
+            connectedUser = login
+            newTokenInput = ""
+            await fetchMeta()
+        } else {
+            statusText = "Token 无效"
         }
     }
 
@@ -570,9 +720,17 @@ struct PushGitView: View {
            let login = uJson["login"] as? String {
             connectedUser = login
         }
-        if let arr = try? await ghRequest(method: "GET", urlStr: "https://api.github.com/user/repos?per_page=100&sort=updated", body: nil) as? [[String: Any]] {
-            repos = arr.compactMap { $0["full_name"] as? String }
+        if let arr = try? await ghRequest(method: "GET", urlStr: "https://api.github.com/user/repos?affiliation=owner,collaborator,organization_member&per_page=100&sort=updated", body: nil) as? [[String: Any]] {
+            let list = arr.compactMap { $0["full_name"] as? String }
+            repos = list
+            if !list.isEmpty && !list.contains(repoText) {
+                repoText = list[0]
+            }
         }
+        await fetchBranchesOnly()
+    }
+
+    private func fetchBranchesOnly() async {
         let repo = cleanRepoName(repoText)
         if let bArr = try? await ghRequest(method: "GET", urlStr: "https://api.github.com/repos/\(repo)/branches?per_page=100", body: nil) as? [[String: Any]] {
             let names = bArr.compactMap { $0["name"] as? String }
@@ -626,7 +784,59 @@ struct PushGitView: View {
         statusText = "已选择 \(out.count) 个文件"
     }
 
-    private func pushAll() async {
+    private func gitBlobSha1(_ data: Data) -> String {
+        var headerData = Data("blob \(data.count)\0".utf8)
+        headerData.append(data)
+        let digest = Insecure.SHA1.hash(data: headerData)
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func inspectDiff() async {
+        isInspecting = true
+        defer { isInspecting = false }
+        let repo = cleanRepoName(repoText)
+        let br = branch.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            guard let refObj = try await ghRequest(method: "GET", urlStr: "https://api.github.com/repos/\(repo)/git/ref/heads/\(br)", body: nil) as? [String: Any],
+                  let obj = refObj["object"] as? [String: Any],
+                  let headSha = obj["sha"] as? String,
+                  let commitObj = try await ghRequest(method: "GET", urlStr: "https://api.github.com/repos/\(repo)/git/commits/\(headSha)", body: nil) as? [String: Any],
+                  let treeObj = commitObj["tree"] as? [String: Any],
+                  let baseTreeSha = treeObj["sha"] as? String,
+                  let treeResp = try await ghRequest(method: "GET", urlStr: "https://api.github.com/repos/\(repo)/git/trees/\(baseTreeSha)?recursive=1", body: nil) as? [String: Any],
+                  let treeArr = treeResp["tree"] as? [[String: Any]] else {
+                statusText = "比对失败"
+                return
+            }
+            var remoteBlobs: [String: String] = [:]
+            for item in treeArr where (item["type"] as? String) == "blob" {
+                if let p = item["path"] as? String, let s = item["sha"] as? String {
+                    remoteBlobs[p] = s
+                }
+            }
+            var added: [PushFile] = []
+            var modified: [PushFile] = []
+            var unchanged = 0
+            var localPaths = Set<String>()
+            for file in selectedFiles {
+                localPaths.insert(file.path)
+                if let rSha = remoteBlobs[file.path] {
+                    if gitBlobSha1(file.data) != rSha { modified.append(file) }
+                    else { unchanged += 1 }
+                } else {
+                    added.append(file)
+                }
+            }
+            let deleted = remoteBlobs.keys.filter { !localPaths.contains($0) }.sorted()
+            diffResult = DiffResult(headSha: headSha, baseTreeSha: baseTreeSha, added: added, modified: modified, deleted: deleted, unchangedCount: unchanged)
+            statusText = "比对完成：\(added.count) 新增，\(modified.count) 修改"
+        } catch {
+            statusText = "比对失败: \(error.localizedDescription)"
+        }
+    }
+
+    private func pushDiffChanges() async {
+        guard let diff = diffResult else { return }
         UserDefaults.standard.set(pat, forKey: "jools_pushgit_pat")
         UserDefaults.standard.set(repoText, forKey: "jools_pushgit_repo")
         UserDefaults.standard.set(branch, forKey: "jools_pushgit_branch")
@@ -637,56 +847,49 @@ struct PushGitView: View {
         let repo = cleanRepoName(repoText)
         let br = branch.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            guard let refObj = try await ghRequest(method: "GET", urlStr: "https://api.github.com/repos/\(repo)/git/ref/heads/\(br)", body: nil) as? [String: Any],
-                  let obj = refObj["object"] as? [String: Any],
-                  let headSha = obj["sha"] as? String else {
-                statusText = "无法读取分支信息"
-                return
-            }
-            guard let commitObj = try await ghRequest(method: "GET", urlStr: "https://api.github.com/repos/\(repo)/git/commits/\(headSha)", body: nil) as? [String: Any],
-                  let treeObj = commitObj["tree"] as? [String: Any],
-                  let baseTreeSha = treeObj["sha"] as? String else {
-                statusText = "无法读取基线树"
-                return
-            }
-
             var treeEntries: [[String: Any]] = []
-            for (idx, file) in selectedFiles.enumerated() {
-                statusText = "推送中 (\(idx + 1)/\(selectedFiles.count)): \(file.path)"
+            let filesToUpload = diff.uploadFiles
+            for (idx, file) in filesToUpload.enumerated() {
+                statusText = "推送中 (\(idx + 1)/\(filesToUpload.count)): \(file.path)"
                 let blobBody: [String: Any] = ["content": file.data.base64EncodedString(), "encoding": "base64"]
                 if let bResp = try await ghRequest(method: "POST", urlStr: "https://api.github.com/repos/\(repo)/git/blobs", body: blobBody) as? [String: Any],
                    let bSha = bResp["sha"] as? String {
                     treeEntries.append(["path": file.path, "mode": "100644", "type": "blob", "sha": bSha])
                 }
             }
-
-            let treeBody: [String: Any] = ["base_tree": baseTreeSha, "tree": treeEntries]
-            guard let newTree = try await ghRequest(method: "POST", urlStr: "https://api.github.com/repos/\(repo)/git/trees", body: treeBody) as? [String: Any],
-                  let newTreeSha = newTree["sha"] as? String else {
-                statusText = "创建 Tree 失败"
-                return
+            if syncDeletions {
+                for delPath in diff.deleted {
+                    treeEntries.append(["path": delPath, "mode": "100644", "type": "blob", "sha": NSNull()])
+                }
             }
 
-            let commitBody: [String: Any] = ["message": commitMessage, "tree": newTreeSha, "parents": [headSha]]
-            guard let newCommit = try await ghRequest(method: "POST", urlStr: "https://api.github.com/repos/\(repo)/git/commits", body: commitBody) as? [String: Any],
+            let treeBody: [String: Any] = ["base_tree": diff.baseTreeSha, "tree": treeEntries]
+            guard let newTree = try await ghRequest(method: "POST", urlStr: "https://api.github.com/repos/\(repo)/git/trees", body: treeBody) as? [String: Any],
+                  let newTreeSha = newTree["sha"] as? String,
+                  let newCommit = try await ghRequest(method: "POST", urlStr: "https://api.github.com/repos/\(repo)/git/commits", body: ["message": commitMessage, "tree": newTreeSha, "parents": [diff.headSha]]) as? [String: Any],
                   let newCommitSha = newCommit["sha"] as? String else {
-                statusText = "创建 Commit 失败"
+                statusText = "提交失败"
                 return
             }
 
             _ = try await ghRequest(method: "PATCH", urlStr: "https://api.github.com/repos/\(repo)/git/refs/heads/\(br)", body: ["sha": newCommitSha, "force": false])
-            statusText = "推送成功: \(selectedFiles.count) 个文件 (\(newCommitSha.prefix(7)))"
+            diffResult = nil
+            statusText = "推送成功: \(filesToUpload.count) 个文件 (\(newCommitSha.prefix(7)))"
         } catch {
             statusText = "推送失败: \(error.localizedDescription)"
         }
     }
 
     private func ghRequest(method: String, urlStr: String, body: [String: Any]?) async throws -> Any {
+        return try await ghRequestWithToken(method: method, urlStr: urlStr, token: pat, body: body)
+    }
+
+    private func ghRequestWithToken(method: String, urlStr: String, token: String, body: [String: Any]?) async throws -> Any {
         guard let url = URL(string: urlStr) else { throw URLError(.badURL) }
         var req = URLRequest(url: url, timeoutInterval: 25)
         req.httpMethod = method
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        req.setValue("Bearer \(pat.trimmingCharacters(in: .whitespacesAndNewlines))", forHTTPHeaderField: "Authorization")
+        req.setValue("Bearer \(token.trimmingCharacters(in: .whitespacesAndNewlines))", forHTTPHeaderField: "Authorization")
         if let body {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: body)

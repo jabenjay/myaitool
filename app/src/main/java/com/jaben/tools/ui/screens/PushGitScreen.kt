@@ -31,15 +31,21 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudUpload
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderZip
 import androidx.compose.material.icons.rounded.InsertDriveFile
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,6 +55,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -68,9 +75,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.jaben.tools.tools.git.GitDiffSummary
 import com.jaben.tools.tools.git.PushFileEntry
 import com.jaben.tools.tools.git.PushGitEngine
-import com.jaben.tools.ui.theme.LocalAppThemeVisuals
 import com.jaben.tools.ui.theme.liquidGlassSurface
 import kotlinx.coroutines.launch
 
@@ -80,13 +87,17 @@ fun PushGitScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val visuals = LocalAppThemeVisuals.current
     val scope = rememberCoroutineScope()
     val engine = remember(context) { PushGitEngine(context) }
 
     var pat by remember { mutableStateOf(engine.loadSavedToken()) }
     var showToken by remember { mutableStateOf(false) }
     var connectedUser by remember { mutableStateOf<String?>(null) }
+
+    var savedTokens by remember { mutableStateOf(engine.getSavedTokens()) }
+    var accountMenuExpanded by remember { mutableStateOf(false) }
+    var showTokenManagerDialog by remember { mutableStateOf(false) }
+    var newTokenInput by remember { mutableStateOf("") }
 
     var targetRepo by remember { mutableStateOf(engine.loadSavedRepo()) }
     var repoUrl by remember { mutableStateOf("https://github.com/${engine.loadSavedRepo()}") }
@@ -99,25 +110,35 @@ fun PushGitScreen(
     var targetSubpath by remember { mutableStateOf("") }
 
     var selectedFiles by remember { mutableStateOf<List<PushFileEntry>>(emptyList()) }
+    var diffSummary by remember { mutableStateOf<GitDiffSummary?>(null) }
+    var syncDeletions by remember { mutableStateOf(false) }
+
     var isFetchingMeta by remember { mutableStateOf(false) }
+    var isInspecting by remember { mutableStateOf(false) }
     var isPushing by remember { mutableStateOf(false) }
     var pushDone by remember { mutableIntStateOf(0) }
     var pushTotal by remember { mutableIntStateOf(0) }
     var pushStatus by remember { mutableStateOf("") }
 
-    fun refreshGitHubMeta() {
-        if (pat.isBlank()) return
+    fun refreshGitHubMeta(tokenToUse: String = pat) {
+        if (tokenToUse.isBlank()) return
         scope.launch {
             isFetchingMeta = true
-            engine.verifyToken(pat).onSuccess { user ->
+            engine.verifyToken(tokenToUse).onSuccess { user ->
                 connectedUser = user
             }.onFailure {
                 connectedUser = null
             }
-            engine.listRepos(pat).onSuccess { list ->
-                if (list.isNotEmpty()) repos = list
+            engine.listRepos(tokenToUse).onSuccess { list ->
+                if (list.isNotEmpty()) {
+                    repos = list
+                    if (targetRepo.isBlank() || targetRepo !in list) {
+                        targetRepo = list.first()
+                        repoUrl = "https://github.com/${list.first()}"
+                    }
+                }
             }
-            engine.listBranches(pat, targetRepo).onSuccess { bList ->
+            engine.listBranches(tokenToUse, targetRepo).onSuccess { bList ->
                 if (bList.isNotEmpty()) branches = bList
             }
             isFetchingMeta = false
@@ -125,7 +146,7 @@ fun PushGitScreen(
     }
 
     LaunchedEffect(Unit) {
-        if (pat.isNotBlank()) refreshGitHubMeta()
+        if (pat.isNotBlank()) refreshGitHubMeta(pat)
     }
 
     val zipPicker = rememberLauncherForActivityResult(
@@ -135,6 +156,8 @@ fun PushGitScreen(
             scope.launch {
                 engine.readZipUri(uri).onSuccess { list ->
                     selectedFiles = list
+                    diffSummary = null
+                    pushStatus = ""
                     Toast.makeText(context, "已解析 ${list.size} 个文件", Toast.LENGTH_SHORT).show()
                 }.onFailure {
                     Toast.makeText(context, "读取压缩包失败", Toast.LENGTH_SHORT).show()
@@ -150,6 +173,8 @@ fun PushGitScreen(
             scope.launch {
                 engine.readFolderUri(uri).onSuccess { list ->
                     selectedFiles = list
+                    diffSummary = null
+                    pushStatus = ""
                     Toast.makeText(context, "已读取 ${list.size} 个文件", Toast.LENGTH_SHORT).show()
                 }.onFailure {
                     Toast.makeText(context, "读取文件夹失败", Toast.LENGTH_SHORT).show()
@@ -165,6 +190,8 @@ fun PushGitScreen(
             scope.launch {
                 engine.readFileUris(uris, targetSubpath).onSuccess { list ->
                     selectedFiles = list
+                    diffSummary = null
+                    pushStatus = ""
                     Toast.makeText(context, "已选择 ${list.size} 个文件", Toast.LENGTH_SHORT).show()
                 }.onFailure {
                     Toast.makeText(context, "读取文件失败", Toast.LENGTH_SHORT).show()
@@ -210,8 +237,11 @@ fun PushGitScreen(
                 }
             }
             Spacer(modifier = Modifier.weight(1f))
+            IconButton(onClick = { showTokenManagerDialog = true }) {
+                Icon(Icons.Rounded.Key, contentDescription = "管理 Token")
+            }
             IconButton(
-                onClick = { refreshGitHubMeta() },
+                onClick = { refreshGitHubMeta(pat) },
                 enabled = !isFetchingMeta
             ) {
                 Icon(Icons.Rounded.Refresh, contentDescription = "刷新仓库")
@@ -225,7 +255,7 @@ fun PushGitScreen(
                 .padding(horizontal = 16.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Card 1: Target Repository & PAT
+            // Card 1: Saved Account Selector + Target Repository + PAT
             Surface(
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier
@@ -236,8 +266,58 @@ fun PushGitScreen(
                     modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("目标仓库与认证", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("用户与目标仓库", fontSize = 14.sp, fontWeight = FontWeight.Bold)
 
+                    // Saved Account / Token Dropdown
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    if (savedTokens.isNotEmpty()) accountMenuExpanded = true
+                                    else showTokenManagerDialog = true
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (savedTokens.isEmpty()) {
+                                        "点击右上角钥匙图标保存 Token"
+                                    } else {
+                                        "已存账号: ${connectedUser?.let { "@$it" } ?: "选择用户"} (${savedTokens.size})"
+                                    },
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text("▾", fontSize = 12.sp)
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = accountMenuExpanded,
+                            onDismissRequest = { accountMenuExpanded = false }
+                        ) {
+                            savedTokens.forEach { acc ->
+                                DropdownMenuItem(
+                                    text = { Text("@${acc.username} (${acc.token.take(8)}...)") },
+                                    onClick = {
+                                        accountMenuExpanded = false
+                                        pat = acc.token
+                                        connectedUser = acc.username
+                                        diffSummary = null
+                                        refreshGitHubMeta(acc.token)
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Target Repository Dropdown
                     Box(modifier = Modifier.fillMaxWidth()) {
                         Surface(
                             shape = RoundedCornerShape(12.dp),
@@ -252,12 +332,12 @@ fun PushGitScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = targetRepo.ifBlank { "选择或输入仓库" },
+                                    text = targetRepo.ifBlank { "选择目标仓库" },
                                     fontSize = 14.sp,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.weight(1f)
                                 )
-                                Text(if (repos.isEmpty()) "手动输入" else "▾", fontSize = 12.sp)
+                                Text(if (repos.isEmpty()) "待拉取" else "▾ (${repos.size})", fontSize = 12.sp)
                             }
                         }
                         DropdownMenu(
@@ -271,6 +351,7 @@ fun PushGitScreen(
                                         repoMenuExpanded = false
                                         targetRepo = r
                                         repoUrl = "https://github.com/$r"
+                                        diffSummary = null
                                         scope.launch {
                                             engine.listBranches(pat, r).onSuccess {
                                                 if (it.isNotEmpty()) branches = it
@@ -287,6 +368,7 @@ fun PushGitScreen(
                         onValueChange = {
                             repoUrl = it
                             targetRepo = engine.parseOwnerRepo(it)
+                            diffSummary = null
                         },
                         label = { Text("GitHub Repository URL") },
                         singleLine = true,
@@ -295,7 +377,10 @@ fun PushGitScreen(
 
                     OutlinedTextField(
                         value = pat,
-                        onValueChange = { pat = it },
+                        onValueChange = {
+                            pat = it
+                            diffSummary = null
+                        },
                         label = { Text("Personal Access Token (ghp_...)") },
                         singleLine = true,
                         visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
@@ -347,7 +432,10 @@ fun PushGitScreen(
 
                     OutlinedTextField(
                         value = branch,
-                        onValueChange = { branch = it },
+                        onValueChange = {
+                            branch = it
+                            diffSummary = null
+                        },
                         label = { Text("Branch") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
@@ -357,7 +445,10 @@ fun PushGitScreen(
                         items(branches) { b ->
                             FilterChip(
                                 selected = branch == b,
-                                onClick = { branch = b },
+                                onClick = {
+                                    branch = b
+                                    diffSummary = null
+                                },
                                 label = { Text(b, fontSize = 12.sp) }
                             )
                         }
@@ -373,7 +464,7 @@ fun PushGitScreen(
                 }
             }
 
-            // Card 3: Native Android File Picker (ZIP / Folder / Files)
+            // Card 3: Native Android File Picker & Diff Preview
             Surface(
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier
@@ -389,7 +480,7 @@ fun PushGitScreen(
                     OutlinedTextField(
                         value = targetSubpath,
                         onValueChange = { targetSubpath = it },
-                        label = { Text("单文件目标路径前缀（可选，如 app/src/...）") },
+                        label = { Text("单文件目标路径前缀（可选）") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -427,10 +518,45 @@ fun PushGitScreen(
                         }
                     }
 
-                    if (selectedFiles.isNotEmpty()) {
+                    val diff = diffSummary
+                    if (diff != null) {
+                        Text(
+                            text = "比对结果：新增 ${diff.addedFiles.size} · 修改 ${diff.modifiedFiles.size} · 远程独有 ${diff.deletedPaths.size} · 未变 ${diff.unchangedCount}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        if (diff.deletedPaths.isNotEmpty()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { syncDeletions = !syncDeletions }
+                            ) {
+                                Checkbox(checked = syncDeletions, onCheckedChange = { syncDeletions = it })
+                                Text("同步删除远程独有文件 (${diff.deletedPaths.size})", fontSize = 12.sp)
+                            }
+                        }
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 200.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(diff.addedFiles, key = { "add_${it.relativePath}" }) { f ->
+                                DiffRowItem("新增", Color(0xFF1B8E3E), f.relativePath)
+                            }
+                            items(diff.modifiedFiles, key = { "mod_${it.relativePath}" }) { f ->
+                                DiffRowItem("修改", Color(0xFFD97706), f.relativePath)
+                            }
+                            items(diff.deletedPaths, key = { "del_$it" }) { p ->
+                                DiffRowItem("删除", Color(0xFFDC2626), p)
+                            }
+                        }
+                    } else if (selectedFiles.isNotEmpty()) {
                         val totalKb = selectedFiles.sumOf { it.sizeBytes } / 1024.0
                         Text(
-                            text = "已就绪 ${selectedFiles.size} 个文件 (${String.format("%.1f KB", totalKb)})",
+                            text = "已就绪 ${selectedFiles.size} 个文件 (${String.format("%.1f KB", totalKb)})，请先比对差异",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Medium
@@ -438,7 +564,7 @@ fun PushGitScreen(
                         LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(max = 180.dp),
+                                .heightIn(max = 160.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             items(selectedFiles, key = { it.relativePath }) { entry ->
@@ -487,48 +613,197 @@ fun PushGitScreen(
             }
         }
 
-        // Bottom Push Button
+        // Bottom Action Button: First Inspect Diff, then Push Changes
+        val currentDiff = diffSummary
+        val readyToPushCount = if (currentDiff != null) {
+            currentDiff.uploadFiles.size + if (syncDeletions) currentDiff.deletedPaths.size else 0
+        } else 0
+
         Button(
             onClick = {
                 engine.saveConfig(pat, targetRepo, branch, commitMessage)
-                scope.launch {
-                    isPushing = true
-                    pushDone = 0
-                    pushTotal = selectedFiles.size
-                    engine.pushFiles(
-                        pat = pat,
-                        ownerRepoInput = targetRepo,
-                        branchInput = branch,
-                        commitMessageInput = commitMessage,
-                        files = selectedFiles
-                    ) { done, total, cur ->
-                        pushDone = done
-                        pushTotal = total
-                        pushStatus = "推送中 ($done/$total): $cur"
-                    }.onSuccess { res ->
-                        pushStatus = "推送成功: ${res.fileCount} 个文件 (${res.commitSha.take(7)})"
-                        Toast.makeText(context, "推送成功", Toast.LENGTH_SHORT).show()
-                    }.onFailure { err ->
-                        pushStatus = "推送失败: ${err.message}"
-                        Toast.makeText(context, "推送失败", Toast.LENGTH_SHORT).show()
+                if (currentDiff == null) {
+                    scope.launch {
+                        isInspecting = true
+                        pushStatus = "正在比对仓库文件..."
+                        engine.inspectChanges(pat, targetRepo, branch, selectedFiles)
+                            .onSuccess { diff ->
+                                diffSummary = diff
+                                pushStatus = if (diff.uploadFiles.isEmpty() && diff.deletedPaths.isEmpty()) {
+                                    "与仓库完全一致，无需推送"
+                                } else {
+                                    "比对完成：${diff.addedFiles.size} 新增，${diff.modifiedFiles.size} 修改"
+                                }
+                            }
+                            .onFailure { err ->
+                                pushStatus = "比对失败: ${err.message}"
+                                Toast.makeText(context, "比对失败", Toast.LENGTH_SHORT).show()
+                            }
+                        isInspecting = false
                     }
-                    isPushing = false
+                } else {
+                    scope.launch {
+                        isPushing = true
+                        pushDone = 0
+                        pushTotal = currentDiff.uploadFiles.size
+                        engine.pushDiff(
+                            pat = pat,
+                            ownerRepoInput = targetRepo,
+                            branchInput = branch,
+                            commitMessageInput = commitMessage,
+                            diff = currentDiff,
+                            syncDeletions = syncDeletions
+                        ) { done, total, cur ->
+                            pushDone = done
+                            pushTotal = total
+                            pushStatus = "推送中 ($done/$total): $cur"
+                        }.onSuccess { res ->
+                            pushStatus = "推送成功: ${res.fileCount} 个文件 (${res.commitSha.take(7)})"
+                            diffSummary = null
+                            Toast.makeText(context, "推送成功", Toast.LENGTH_SHORT).show()
+                        }.onFailure { err ->
+                            pushStatus = "推送失败: ${err.message}"
+                            Toast.makeText(context, "推送失败", Toast.LENGTH_SHORT).show()
+                        }
+                        isPushing = false
+                    }
                 }
             },
-            enabled = !isPushing && pat.isNotBlank() && selectedFiles.isNotEmpty(),
+            enabled = !isInspecting && !isPushing && pat.isNotBlank() && selectedFiles.isNotEmpty() &&
+                (currentDiff == null || readyToPushCount > 0),
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
                 .height(50.dp)
         ) {
-            Icon(Icons.Rounded.CloudUpload, contentDescription = null)
+            Icon(
+                imageVector = if (currentDiff == null) Icons.Rounded.ManageSearch else Icons.Rounded.CloudUpload,
+                contentDescription = null
+            )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = if (isPushing) "正在推送..." else "Push 到 GitHub",
+                text = when {
+                    isInspecting -> "正在比对..."
+                    isPushing -> "正在推送..."
+                    currentDiff == null -> "比对仓库差异"
+                    else -> "Push 变动文件 ($readyToPushCount)"
+                },
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold
             )
         }
+    }
+
+    if (showTokenManagerDialog) {
+        AlertDialog(
+            onDismissRequest = { showTokenManagerDialog = false },
+            title = { Text("管理已保存 Token", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = newTokenInput,
+                            onValueChange = { newTokenInput = it },
+                            placeholder = { Text("输入 ghp_... Token", fontSize = 12.sp) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilledTonalButton(
+                            onClick = {
+                                val t = newTokenInput.trim()
+                                if (t.isNotEmpty()) {
+                                    scope.launch {
+                                        engine.verifyToken(t).onSuccess { uname ->
+                                            savedTokens = engine.saveTokenEntry(uname, t)
+                                            pat = t
+                                            connectedUser = uname
+                                            newTokenInput = ""
+                                            refreshGitHubMeta(t)
+                                            Toast.makeText(context, "已保存 @$uname", Toast.LENGTH_SHORT).show()
+                                        }.onFailure {
+                                            Toast.makeText(context, "Token 无效", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            }
+                        ) {
+                            Text("保存")
+                        }
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(savedTokens, key = { it.id }) { item ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                    .clickable {
+                                        pat = item.token
+                                        connectedUser = item.username
+                                        showTokenManagerDialog = false
+                                        refreshGitHubMeta(item.token)
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("@${item.username}", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("${item.token.take(10)}...", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                IconButton(
+                                    onClick = { savedTokens = engine.deleteTokenEntry(item.id) },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(Icons.Rounded.DeleteOutline, contentDescription = "删除", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTokenManagerDialog = false }) { Text("关闭") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun DiffRowItem(label: String, badgeColor: Color, path: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Surface(shape = RoundedCornerShape(6.dp), color = badgeColor.copy(alpha = 0.16f)) {
+            Text(
+                text = label,
+                color = badgeColor,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+        }
+        Text(
+            text = path,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
     }
 }

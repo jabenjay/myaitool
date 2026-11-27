@@ -270,6 +270,7 @@ fun BrowserScreen(
     var detectedVideoTitle by remember { mutableStateOf("") }
     var detectedVideoPosterUrl by remember { mutableStateOf("") }
     var activeBuiltInVideoUrl by remember { mutableStateOf<String?>(null) }
+    var activeBuiltInVideoPageUrl by remember { mutableStateOf("") }
     var userDismissedFloatingForPage by remember { mutableStateOf(false) }
     var lastVideoPageUrl by remember { mutableStateOf("") }
     var webViewUserAgent by remember { mutableStateOf("Mozilla/5.0") }
@@ -639,6 +640,7 @@ fun BrowserScreen(
                                                 "window.__joolsLockPause=true;document.querySelectorAll('video').forEach(function(v){try{v.pause();}catch(e){}});",
                                                 null
                                             )
+                                            activeBuiltInVideoPageUrl = urlInput
                                             activeBuiltInVideoUrl = resolved
                                         }
                                     }
@@ -897,6 +899,7 @@ fun BrowserScreen(
                                     null
                                 )
                             }
+                            activeBuiltInVideoPageUrl = urlInput
                             activeBuiltInVideoUrl = vUrl
                         }
                 ) {
@@ -2077,7 +2080,7 @@ fun BrowserScreen(
     activeBuiltInVideoUrl?.let { vUrl ->
         BuiltInVideoPlayerOverlay(
             videoUrl = vUrl,
-            pageUrl = urlInput,
+            pageUrl = activeBuiltInVideoPageUrl.ifBlank { urlInput },
             pageTitle = detectedVideoTitle.ifBlank { pageTitle },
             posterUrl = detectedVideoPosterUrl,
             userAgent = webViewUserAgent,

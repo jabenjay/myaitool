@@ -38,6 +38,7 @@ struct BrowserView: View {
     @State private var detectedVideoTitle: String = ""
     @State private var detectedVideoPoster: String = ""
     @State private var activeFloatingVideoUrl: String?
+    @State private var activeFloatingVideoPageUrl: String = ""
     @State private var userDismissedFloating: Bool = false
 
     @State private var webViewRef: WKWebView?
@@ -164,6 +165,7 @@ struct BrowserView: View {
                             if !poster.isEmpty { self.detectedVideoPoster = poster }
                             if !self.userDismissedFloating && self.activeFloatingVideoUrl == nil {
                                 self.lockWebPagePause(true)
+                                self.activeFloatingVideoPageUrl = self.urlInput
                                 self.activeFloatingVideoUrl = src
                             }
                         }
@@ -173,6 +175,7 @@ struct BrowserView: View {
                         Button {
                             if let vUrl = detectedVideoUrl {
                                 lockWebPagePause(true)
+                                activeFloatingVideoPageUrl = urlInput
                                 activeFloatingVideoUrl = vUrl
                             }
                         } label: {
@@ -274,7 +277,7 @@ struct BrowserView: View {
             if let videoUrl = activeFloatingVideoUrl {
                 FloatingVideoPlayerOverlay(
                     videoUrl: videoUrl,
-                    pageUrl: urlInput,
+                    pageUrl: activeFloatingVideoPageUrl.isEmpty ? urlInput : activeFloatingVideoPageUrl,
                     pageTitle: detectedVideoTitle.isEmpty ? pageTitle : detectedVideoTitle,
                     posterUrl: detectedVideoPoster,
                     initialPositionSec: detectedVideoPos,
@@ -729,6 +732,8 @@ struct BrowserView: View {
         let target = normalizeUrl(raw)
         urlInput = target
         showBookmarks = false
+        activeFloatingVideoUrl = nil
+        lockWebPagePause(false)
         if let url = URL(string: target) {
             webViewRef?.load(URLRequest(url: url))
         }

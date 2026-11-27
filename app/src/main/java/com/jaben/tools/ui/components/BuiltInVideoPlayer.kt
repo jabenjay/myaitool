@@ -194,7 +194,7 @@ fun BuiltInVideoPlayerOverlay(
         applyFullscreenSystemUi(isFullscreen)
     }
 
-    DisposableEffect(videoUrl, pageUrl) {
+    DisposableEffect(videoUrl) {
         val cookie = runCatching { CookieManager.getInstance().getCookie(pageUrl) }.getOrNull().orEmpty()
         VideoPlaybackService.updateHttpHeaders(userAgent = userAgent, referer = pageUrl, cookie = cookie)
 
