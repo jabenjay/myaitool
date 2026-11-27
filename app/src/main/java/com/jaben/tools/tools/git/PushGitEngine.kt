@@ -641,10 +641,15 @@ class PushGitEngine(private val context: Context) {
         }
     }
 
-    suspend fun listWorkflowRuns(pat: String, ownerRepoInput: String): Result<List<WorkflowRunInfo>> = withContext(Dispatchers.IO) {
+    suspend fun listWorkflowRuns(
+        pat: String,
+        ownerRepoInput: String,
+        page: Int = 1,
+        perPage: Int = 15
+    ): Result<List<WorkflowRunInfo>> = withContext(Dispatchers.IO) {
         runCatching {
             val repo = parseOwnerRepo(ownerRepoInput)
-            val resp = apiRequest("GET", "https://api.github.com/repos/$repo/actions/runs?per_page=15", pat, null)
+            val resp = apiRequest("GET", "https://api.github.com/repos/$repo/actions/runs?per_page=$perPage&page=$page", pat, null)
             val arr = JSONObject(resp).optJSONArray("workflow_runs") ?: JSONArray()
             buildList {
                 for (i in 0 until arr.length()) {

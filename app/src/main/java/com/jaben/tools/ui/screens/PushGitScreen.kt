@@ -170,11 +170,14 @@ fun PushGitScreen(
     var isDispatchingWorkflow by remember { mutableStateOf(false) }
     var hasPendingBuildAfterPush by remember { mutableStateOf(false) }
     var workflowRuns by remember { mutableStateOf<List<WorkflowRunInfo>>(emptyList()) }
-    var showRunHistoryMenu by remember { mutableStateOf(false) }
+    var showRunHistoryDialog by remember { mutableStateOf(false) }
+    var historyRuns by remember { mutableStateOf<List<WorkflowRunInfo>>(emptyList()) }
+    var historyPage by remember { mutableIntStateOf(1) }
+    var hasMoreHistory by remember { mutableStateOf(true) }
+    var isLoadingMoreHistory by remember { mutableStateOf(false) }
     var isFetchingRuns by remember { mutableStateOf(false) }
-    var failedRunLog by remember { mutableStateOf("") }
-    var fetchedLogRunId by remember { mutableStateOf<Long?>(null) }
-    var expandedFailedLogRunId by remember { mutableStateOf<Long?>(null) }
+    val observedActiveRunIds = remember { mutableStateMapOf<Long, Boolean>() }
+    val dismissedCompletedRunIds = remember { mutableStateMapOf<Long, Boolean>() }
     var isFetchingFailedLog by remember { mutableStateOf(false) }
     var pendingCancelRun by remember { mutableStateOf<WorkflowRunInfo?>(null) }
 
@@ -250,27 +253,19 @@ fun PushGitScreen(
     }
 
     val activeRuns = workflowRuns.filter { it.status != "completed" }
-    val latestRun = workflowRuns.firstOrNull()
-    LaunchedEffect(activeRuns.size, latestRun?.id, latestRun?.status, latestRun?.conclusion, pat, targetRepo) {
+    LaunchedEffect(workflowRuns) {
+        workflowRuns.forEach { run ->
+            if (run.status != "completed") {
+                observedActiveRunIds[run.id] = true
+            }
+        }
+    }
+    LaunchedEffect(activeRuns.size, activeRuns.firstOrNull()?.id, pat, targetRepo) {
         if (pat.isNotBlank() && activeRuns.isNotEmpty()) {
             delay(5000)
             engine.listWorkflowRuns(pat, targetRepo).onSuccess { runs ->
                 workflowRuns = runs
             }
-        } else if (latestRun != null && latestRun.conclusion == "failure" && fetchedLogRunId != latestRun.id && pat.isNotBlank()) {
-            isFetchingFailedLog = true
-            engine.fetchFailedRunLog(pat, targetRepo, latestRun.id)
-                .onSuccess { logText ->
-                    failedRunLog = logText
-                    fetchedLogRunId = latestRun.id
-                }
-                .onFailure { err ->
-                    failedRunLog = "获取日志失败: ${err.message}"
-                }
-            isFetchingFailedLog = false
-        } else if (latestRun?.conclusion == "success") {
-            failedRunLog = ""
-            fetchedLogRunId = null
         }
     }
 
@@ -912,62 +907,38 @@ fun PushGitScreen(
                     )
                 }
 
-                Box {
-                    OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                isFetchingRuns = true
-                                engine.listWorkflowRuns(pat, targetRepo).onSuccess { runs ->
-                                    workflowRuns = runs
-                                }
-                                isFetchingRuns = false
-                                showRunHistoryMenu = true
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            isFetchingRuns = true
+                            engine.listWorkflowRuns(pat, targetRepo, page = 1, perPage = 15).onSuccess { runs ->
+                                workflowRuns = runs
+                                historyRuns = runs
+                                historyPage = 1
+                                hasMoreHistory = runs.size >= 15
                             }
-                        },
-                        enabled = pat.isNotBlank() && targetRepo.isNotBlank() && !isFetchingRuns,
-                        contentPadding = PaddingValues(horizontal = 10.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.height(44.dp)
-                    ) {
-                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = "运行历史")
-                    }
-
-                    DropdownMenu(
-                        expanded = showRunHistoryMenu,
-                        onDismissRequest = { showRunHistoryMenu = false }
-                    ) {
-                        if (workflowRuns.isEmpty()) {
-                            DropdownMenuItem(
-                                text = { Text("暂无运行记录") },
-                                onClick = { showRunHistoryMenu = false }
-                            )
-                        } else {
-                            workflowRuns.forEach { run ->
-                                val stateLabel = when {
-                                    run.status != "completed" -> run.status
-                                    run.conclusion == "success" -> "成功"
-                                    run.conclusion.isNotBlank() -> run.conclusion
-                                    else -> run.status
-                                }
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = "#${run.runNumber} · ${run.name} ($stateLabel)",
-                                            fontSize = 12.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    },
-                                    onClick = { showRunHistoryMenu = false }
-                                )
-                            }
+                            isFetchingRuns = false
+                            showRunHistoryDialog = true
                         }
-                    }
+                    },
+                    enabled = pat.isNotBlank() && targetRepo.isNotBlank() && !isFetchingRuns,
+                    contentPadding = PaddingValues(horizontal = 12.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    Text(
+                        text = if (isFetchingRuns) "加载中..." else "构建历史",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1
+                    )
                 }
             }
 
-            val latestFailedRun = workflowRuns.firstOrNull { it.status == "completed" }?.takeIf { it.conclusion == "failure" }
-            val displayRuns = (activeRuns + listOfNotNull(latestFailedRun)).distinctBy { it.id }
+            val displayRuns = workflowRuns.filter { run ->
+                run.status != "completed" ||
+                    (observedActiveRunIds[run.id] == true && dismissedCompletedRunIds[run.id] != true)
+            }
             if (displayRuns.isNotEmpty()) {
                 Column(
                     modifier = Modifier
@@ -1050,36 +1021,15 @@ fun PushGitScreen(
                                         Text("取消", color = Color(0xFFDC2626), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                     }
                                     Spacer(modifier = Modifier.width(4.dp))
-                                } else if (run.conclusion == "failure") {
-                                    val isExpanded = expandedFailedLogRunId == run.id
+                                } else {
                                     TextButton(
                                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                                        onClick = {
-                                            if (isExpanded) {
-                                                expandedFailedLogRunId = null
-                                            } else {
-                                                expandedFailedLogRunId = run.id
-                                                if (fetchedLogRunId != run.id && pat.isNotBlank()) {
-                                                    scope.launch {
-                                                        isFetchingFailedLog = true
-                                                        engine.fetchFailedRunLog(pat, targetRepo, run.id)
-                                                            .onSuccess { logText ->
-                                                                failedRunLog = logText
-                                                                fetchedLogRunId = run.id
-                                                            }
-                                                            .onFailure { err ->
-                                                                failedRunLog = "获取日志失败: ${err.message}"
-                                                            }
-                                                        isFetchingFailedLog = false
-                                                    }
-                                                }
-                                            }
-                                        },
+                                        onClick = { dismissedCompletedRunIds[run.id] = true },
                                         modifier = Modifier.height(24.dp)
                                     ) {
                                         Text(
-                                            text = if (isExpanded) "收起" else "日志",
-                                            color = Color(0xFFDC2626),
+                                            text = "完成",
+                                            color = badgeColor,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )
@@ -1105,103 +1055,6 @@ fun PushGitScreen(
                                 }
                             }
 
-                            if (run.conclusion == "failure" && expandedFailedLogRunId == run.id) {
-                                val previewLines = remember(failedRunLog) { failedRunLog.lines().takeLast(120) }
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = Color(0xFF1E1E1E),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(10.dp),
-                                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = if (isFetchingFailedLog) "正在拉取失败日志..."
-                                                else "失败日志 (${previewLines.size} 行)",
-                                                color = Color(0xFFF87171),
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            if (failedRunLog.isNotBlank()) {
-                                                TextButton(
-                                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                                    onClick = {
-                                                        clipboardManager.setText(AnnotatedString(failedRunLog))
-                                                        Toast.makeText(context, "已复制日志", Toast.LENGTH_SHORT).show()
-                                                    },
-                                                    modifier = Modifier.height(26.dp)
-                                                ) {
-                                                    Text("复制", color = Color(0xFFA7F3D0), fontSize = 11.sp)
-                                                }
-                                                TextButton(
-                                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                                    onClick = {
-                                                        val fileName = "workflow_run_${run.runNumber}_error.txt"
-                                                        val uri = OutputStorageHelper.saveStream(
-                                                            context = context,
-                                                            subFolder = OutputStorageHelper.SUB_FILES,
-                                                            fileName = fileName,
-                                                            mimeType = "text/plain",
-                                                            inputStream = ByteArrayInputStream(failedRunLog.toByteArray(Charsets.UTF_8))
-                                                        )
-                                                        Toast.makeText(
-                                                            context,
-                                                            if (uri != null) "已保存 $fileName" else "保存失败",
-                                                            Toast.LENGTH_SHORT
-                                                        ).show()
-                                                    },
-                                                    modifier = Modifier.height(26.dp)
-                                                ) {
-                                                    Text("保存 .txt", color = Color(0xFF93C5FD), fontSize = 11.sp)
-                                                }
-                                            }
-                                        }
-                                        if (failedRunLog.isNotBlank()) {
-                                            SelectionContainer {
-                                                Column(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .heightIn(max = 180.dp)
-                                                        .verticalScroll(rememberScrollState()),
-                                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                                ) {
-                                                    val numWidth = (previewLines.size.toString().length.coerceAtLeast(2) * 7 + 4).dp
-                                                    previewLines.forEachIndexed { idx, lineText ->
-                                                        Row(modifier = Modifier.fillMaxWidth()) {
-                                                            DisableSelection {
-                                                                Text(
-                                                                    text = "${idx + 1}",
-                                                                    fontFamily = FontFamily.Monospace,
-                                                                    fontSize = 9.5.sp,
-                                                                    lineHeight = 14.sp,
-                                                                    textAlign = TextAlign.End,
-                                                                    color = Color(0xFF6B7280),
-                                                                    modifier = Modifier.width(numWidth)
-                                                                )
-                                                            }
-                                                            Spacer(modifier = Modifier.width(6.dp))
-                                                            Text(
-                                                                text = lineText,
-                                                                fontFamily = FontFamily.Monospace,
-                                                                color = Color(0xFFE5E7EB),
-                                                                fontSize = 10.sp,
-                                                                lineHeight = 14.sp,
-                                                                modifier = Modifier.weight(1f)
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -1372,6 +1225,296 @@ fun PushGitScreen(
                 TextButton(onClick = { pendingCancelRun = null }) { Text("暂不取消") }
             }
         )
+    }
+
+    if (showRunHistoryDialog) {
+        var expandedHistoryRunId by remember { mutableStateOf<Long?>(null) }
+        val historyLogsCache = remember { mutableStateMapOf<Long, String>() }
+        var loadingLogRunId by remember { mutableStateOf<Long?>(null) }
+
+        Dialog(
+            onDismissRequest = { showRunHistoryDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                modifier = Modifier
+                    .fillMaxWidth(0.94f)
+                    .fillMaxHeight(0.84f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "构建历史 (${historyRuns.size})",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "点击任意记录可展开查看与复制日志",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextButton(onClick = { showRunHistoryDialog = false }) {
+                            Text("关闭", fontSize = 13.sp)
+                        }
+                    }
+
+                    if (historyRuns.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("暂无构建记录", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(historyRuns, key = { it.id }) { run ->
+                                val (stateLabel, stateColor) = when {
+                                    run.status != "completed" -> "运行中" to Color(0xFF2563EB)
+                                    run.conclusion == "success" -> "成功" to Color(0xFF1B8E3E)
+                                    run.conclusion == "failure" -> "失败" to Color(0xFFDC2626)
+                                    run.conclusion.isNotBlank() -> run.conclusion to Color.Gray
+                                    else -> run.status to Color.Gray
+                                }
+                                val isExpanded = expandedHistoryRunId == run.id
+                                val cachedLog = historyLogsCache[run.id] ?: ""
+                                val isFetchingThisLog = loadingLogRunId == run.id
+
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(stateColor.copy(alpha = 0.08f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                if (isExpanded) {
+                                                    expandedHistoryRunId = null
+                                                } else {
+                                                    expandedHistoryRunId = run.id
+                                                    if (!historyLogsCache.containsKey(run.id) && pat.isNotBlank()) {
+                                                        loadingLogRunId = run.id
+                                                        scope.launch {
+                                                            engine.fetchFailedRunLog(pat, targetRepo, run.id)
+                                                                .onSuccess { logText ->
+                                                                    historyLogsCache[run.id] = logText
+                                                                }
+                                                                .onFailure { err ->
+                                                                    historyLogsCache[run.id] = "获取日志失败: ${err.message}"
+                                                                }
+                                                            if (loadingLogRunId == run.id) loadingLogRunId = null
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "#${run.runNumber} · ${run.name}",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "${run.branch} · ${run.createdAt.replace("T", " ").removeSuffix("Z")}",
+                                                fontSize = 10.5.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = stateColor.copy(alpha = 0.16f)
+                                        ) {
+                                            Text(
+                                                text = stateLabel,
+                                                color = stateColor,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    }
+
+                                    if (isExpanded) {
+                                        val previewLines = remember(cachedLog) {
+                                            if (cachedLog.isBlank()) emptyList() else cachedLog.lines().takeLast(200)
+                                        }
+                                        Surface(
+                                            shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
+                                            color = Color(0xFF1E1E1E),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.padding(10.dp),
+                                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = if (isFetchingThisLog) "正在拉取日志..."
+                                                        else "日志 (${cachedLog.lines().size} 行)",
+                                                        color = Color(0xFF93C5FD),
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    if (cachedLog.isNotBlank()) {
+                                                        TextButton(
+                                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                                            onClick = {
+                                                                clipboardManager.setText(AnnotatedString(cachedLog))
+                                                                Toast.makeText(context, "已复制日志", Toast.LENGTH_SHORT).show()
+                                                            },
+                                                            modifier = Modifier.height(26.dp)
+                                                        ) {
+                                                            Text("复制", color = Color(0xFFA7F3D0), fontSize = 11.sp)
+                                                        }
+                                                        TextButton(
+                                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                                            onClick = {
+                                                                val fileName = "workflow_run_${run.runNumber}_log.txt"
+                                                                val uri = OutputStorageHelper.saveStream(
+                                                                    context = context,
+                                                                    subFolder = OutputStorageHelper.SUB_FILES,
+                                                                    fileName = fileName,
+                                                                    mimeType = "text/plain",
+                                                                    inputStream = ByteArrayInputStream(cachedLog.toByteArray(Charsets.UTF_8))
+                                                                )
+                                                                Toast.makeText(
+                                                                    context,
+                                                                    if (uri != null) "已保存 $fileName" else "保存失败",
+                                                                    Toast.LENGTH_SHORT
+                                                                ).show()
+                                                            },
+                                                            modifier = Modifier.height(26.dp)
+                                                        ) {
+                                                            Text("保存 .txt", color = Color(0xFF93C5FD), fontSize = 11.sp)
+                                                        }
+                                                    }
+                                                }
+                                                if (isFetchingThisLog) {
+                                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                                } else if (previewLines.isNotEmpty()) {
+                                                    SelectionContainer {
+                                                        Column(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .heightIn(max = 220.dp)
+                                                                .verticalScroll(rememberScrollState()),
+                                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                                        ) {
+                                                            val numWidth = (previewLines.size.toString().length.coerceAtLeast(2) * 7 + 4).dp
+                                                            previewLines.forEachIndexed { idx, lineText ->
+                                                                Row(modifier = Modifier.fillMaxWidth()) {
+                                                                    DisableSelection {
+                                                                        Text(
+                                                                            text = "${idx + 1}",
+                                                                            fontFamily = FontFamily.Monospace,
+                                                                            fontSize = 9.5.sp,
+                                                                            lineHeight = 14.sp,
+                                                                            textAlign = TextAlign.End,
+                                                                            color = Color(0xFF6B7280),
+                                                                            modifier = Modifier.width(numWidth)
+                                                                        )
+                                                                    }
+                                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                                    Text(
+                                                                        text = lineText,
+                                                                        fontFamily = FontFamily.Monospace,
+                                                                        color = Color(0xFFE5E7EB),
+                                                                        fontSize = 10.sp,
+                                                                        lineHeight = 14.sp,
+                                                                        modifier = Modifier.weight(1f)
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            item(key = "load_more_history") {
+                                if (hasMoreHistory) {
+                                    FilledTonalButton(
+                                        onClick = {
+                                            if (!isLoadingMoreHistory) {
+                                                isLoadingMoreHistory = true
+                                                val nextPage = historyPage + 1
+                                                scope.launch {
+                                                    engine.listWorkflowRuns(pat, targetRepo, page = nextPage, perPage = 15)
+                                                        .onSuccess { more ->
+                                                            if (more.isEmpty()) {
+                                                                hasMoreHistory = false
+                                                            } else {
+                                                                historyRuns = (historyRuns + more).distinctBy { it.id }
+                                                                historyPage = nextPage
+                                                                hasMoreHistory = more.size >= 15
+                                                            }
+                                                        }
+                                                        .onFailure {
+                                                            Toast.makeText(context, "加载失败", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    isLoadingMoreHistory = false
+                                                }
+                                            }
+                                        },
+                                        enabled = !isLoadingMoreHistory,
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = if (isLoadingMoreHistory) "加载中..." else "点击加载更多 (+15条)",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = "已加载全部记录",
+                                        fontSize = 11.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 8.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     if (showRunWorkflowDialog) {
