@@ -764,7 +764,7 @@ fun BrowserScreen(
             }
 
             // Floating built-in video player trigger when a playable video is detected on page
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = detectedVideoUrl != null && !showBookmarks,
                 enter = fadeIn(tween(180)),
                 exit = fadeOut(tween(150)),
@@ -2042,3 +2042,36 @@ private fun formatDlBytes(bytes: Long): String {
         else -> String.format("%.2f MB", bytes / (1024.0 * 1024.0))
     }
 }
+
+
+private const val VIDEO_DETECTOR_JS = """
+(function() {
+  if (window.__joolsVideoHooked) {
+    scanVideos();
+    return;
+  }
+  window.__joolsVideoHooked = true;
+  function scanVideos() {
+    try {
+      var vids = document.querySelectorAll('video');
+      for (var i = 0; i < vids.length; i++) {
+        var v = vids[i];
+        var src = v.currentSrc || v.src || '';
+        if (!src) {
+          var s = v.querySelector('source');
+          if (s) src = s.src || '';
+        }
+        if (src && (src.indexOf('http://') === 0 || src.indexOf('https://') === 0)) {
+          window.JoolsVideoBridge && window.JoolsVideoBridge.onVideoFound(src, v.currentTime || 0);
+          break;
+        }
+      }
+    } catch (e) {}
+  }
+  document.addEventListener('play', function(e) {
+    if (e.target && e.target.tagName === 'VIDEO') scanVideos();
+  }, true);
+  setTimeout(scanVideos, 800);
+  setTimeout(scanVideos, 2500);
+})();
+"""
