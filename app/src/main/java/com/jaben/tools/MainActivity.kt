@@ -417,7 +417,6 @@ fun PocketToolboxApp(
                                 onOpenLayoutSettings = { navController.navigate("settings/layout") },
                                 onOpenProxySettings = { navController.navigate("settings/proxy") },
                                 onOpenStorageSettings = { navController.navigate("settings/storage") },
-                                onOpenLogs = { navController.navigate("settings/logs") },
                                 onOpenAbout = { navController.navigate("settings/about") },
                                 onOpenUpdateUrl = { url -> navController.navigate("tool/browser?url=${Uri.encode(url)}") },
                                 activeJavaProxy = { proxyManager.activeJavaProxy() }

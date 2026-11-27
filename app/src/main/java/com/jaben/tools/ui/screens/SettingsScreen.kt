@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Palette
@@ -74,7 +73,6 @@ fun SettingsScreen(
     onOpenLayoutSettings: () -> Unit,
     onOpenProxySettings: () -> Unit,
     onOpenStorageSettings: () -> Unit,
-    onOpenLogs: () -> Unit,
     onOpenAbout: () -> Unit,
     onOpenUpdateUrl: (String) -> Unit,
     activeJavaProxy: () -> Proxy? = { null },
@@ -149,110 +147,72 @@ fun SettingsScreen(
 
             item {
                 SettingsEntryCard(
-                    icon = Icons.Rounded.BugReport,
-                    title = "运行日志",
-                    subtitle = "查看运行状态与崩溃记录",
-                    onClick = onOpenLogs
-                )
-            }
-
-            item {
-                val visuals = LocalAppThemeVisuals.current
-                Surface(
-                    shape = MaterialTheme.shapes.large,
-                    color = visuals.cardContainerColor,
-                    contentColor = visuals.cardContentColor,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .liquidPress(pressedScale = 0.98f)
-                        .clip(MaterialTheme.shapes.large)
-                        .liquidGlassSurface(26.dp)
-                        .clickable {
-                            if (!isCheckingUpdate) {
-                                isCheckingUpdate = true
-                                scope.launch {
-                                    updateResult = AppUpdateChecker.checkLatestRelease(
-                                        context = context,
-                                        proxy = activeJavaProxy(),
-                                        channel = selectedChannel
-                                    )
-                                    isCheckingUpdate = false
-                                }
-                            }
-                        }
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(visuals.cardContentColor.copy(alpha = 0.08f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.SystemUpdate,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(14.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "检查更新",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = visuals.cardContentColor
-                            )
-                            Text(
-                                text = if (isCheckingUpdate) "正在检查更新..." else "当前版本 v$currentVersion",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = visuals.cardContentColor.copy(alpha = 0.65f)
-                            )
-                        }
-                        Box {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { channelMenuExpanded = true }
-                            ) {
-                                Text(
-                                    text = "${selectedChannel.label} ▾",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    icon = Icons.Rounded.SystemUpdate,
+                    title = "检查更新",
+                    subtitle = if (isCheckingUpdate) "正在检查更新..." else "当前版本 v$currentVersion",
+                    onClick = {
+                        if (!isCheckingUpdate) {
+                            isCheckingUpdate = true
+                            scope.launch {
+                                updateResult = AppUpdateChecker.checkLatestRelease(
+                                    context = context,
+                                    proxy = activeJavaProxy(),
+                                    channel = selectedChannel
                                 )
+                                isCheckingUpdate = false
                             }
-                            DropdownMenu(
-                                expanded = channelMenuExpanded,
-                                onDismissRequest = { channelMenuExpanded = false }
-                            ) {
-                                UpdateChannel.entries.forEach { ch ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                text = ch.label,
-                                                fontWeight = if (ch == selectedChannel) FontWeight.Bold else FontWeight.Normal
-                                            )
-                                        },
-                                        onClick = {
-                                            selectedChannel = ch
-                                            AppUpdateChecker.setSelectedChannel(context, ch)
-                                            channelMenuExpanded = false
-                                        }
+                        }
+                    },
+                    trailingContent = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { channelMenuExpanded = true }
+                                ) {
+                                    Text(
+                                        text = "${selectedChannel.label} ▾",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
                                     )
                                 }
+                                DropdownMenu(
+                                    expanded = channelMenuExpanded,
+                                    onDismissRequest = { channelMenuExpanded = false }
+                                ) {
+                                    UpdateChannel.entries.forEach { ch ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = ch.label,
+                                                    fontWeight = if (ch == selectedChannel) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            },
+                                            onClick = {
+                                                selectedChannel = ch
+                                                AppUpdateChecker.setSelectedChannel(context, ch)
+                                                channelMenuExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
                             }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
-                }
+                )
             }
 
             item {
@@ -326,7 +286,8 @@ private fun SettingsEntryCard(
     icon: ImageVector,
     title: String,
     subtitle: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    trailingContent: (@Composable () -> Unit)? = null
 ) {
     val visuals = LocalAppThemeVisuals.current
     Surface(
@@ -369,11 +330,15 @@ private fun SettingsEntryCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Icon(
-                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            if (trailingContent != null) {
+                trailingContent()
+            } else {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

@@ -29,6 +29,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -77,6 +79,7 @@ private const val WECHAT_DONATE_URL = "https://payapp.wechatpay.cn/sjt/qr/AQGxLT
 fun AboutScreen(
     onBack: () -> Unit,
     onOpenRepoInBrowser: (String) -> Unit,
+    onOpenLogs: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val visuals = LocalAppThemeVisuals.current
@@ -228,6 +231,50 @@ fun AboutScreen(
                             }
                         }
                     }
+                }
+            }
+
+            // Runtime Logs Card
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = visuals.cardContainerColor,
+                contentColor = visuals.cardContentColor,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .liquidPress(pressedScale = 0.98f)
+                    .clip(RoundedCornerShape(22.dp))
+                    .then(if (visuals.isLiquidGlass) Modifier.liquidGlassSurface(22.dp) else Modifier)
+                    .clickable(onClick = onOpenLogs)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.BugReport,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "运行日志",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "查看运行状态与崩溃记录",
+                            fontSize = 12.sp,
+                            color = visuals.cardContentColor.copy(alpha = 0.65f)
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = visuals.cardContentColor.copy(alpha = 0.55f)
+                    )
                 }
             }
 

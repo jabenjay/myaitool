@@ -6,6 +6,11 @@ import android.provider.OpenableColumns
 import android.util.Base64
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -14,6 +19,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
 import java.util.zip.ZipInputStream
 
@@ -752,6 +760,51 @@ class PushGitEngine(private val context: Context) {
                     )
                 }
             }.sortedWith(compareBy<RepoContentItem> { it.type != "dir" }.thenBy { it.name.lowercase() })
+        }
+    }
+
+
+    suspend fun fetchDirectoryLastModifiedMap(
+        pat: String,
+        ownerRepoInput: String,
+        branch: String,
+        paths: List<String>
+    ): Map<String, String> = withContext(Dispatchers.IO) {
+        if (paths.isEmpty()) return@withContext emptyMap()
+        val repo = parseOwnerRepo(ownerRepoInput)
+        val ref = URLEncoder.encode(branch.trim().ifBlank { "main" }, "UTF-8")
+        val sem = Semaphore(6)
+        val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val formatter = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+        coroutineScope {
+            paths.map { itemPath ->
+                async {
+                    sem.withPermit {
+                        val dateStr = runCatching {
+                            val encoded = URLEncoder.encode(itemPath, "UTF-8")
+                            val resp = apiRequest(
+                                "GET",
+                                "https://api.github.com/repos/$repo/commits?sha=$ref&path=$encoded&per_page=1",
+                                pat,
+                                null
+                            )
+                            val arr = JSONArray(resp)
+                            val iso = arr.optJSONObject(0)
+                                ?.optJSONObject("commit")
+                                ?.optJSONObject("committer")
+                                ?.optString("date")
+                                .orEmpty()
+                            if (iso.isNotBlank()) {
+                                val parsed = synchronized(parser) { parser.parse(iso) }
+                                if (parsed != null) synchronized(formatter) { formatter.format(parsed) } else ""
+                            } else ""
+                        }.getOrDefault("")
+                        itemPath to dateStr
+                    }
+                }
+            }.awaitAll().filter { it.second.isNotBlank() }.toMap()
         }
     }
 

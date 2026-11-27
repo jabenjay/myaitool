@@ -110,6 +110,15 @@ fun PushGitScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val mainScrollState = rememberScrollState()
+    var shouldStickBottom by remember { mutableStateOf(false) }
+    LaunchedEffect(mainScrollState.maxValue, isInspecting, isPushing, pushDone, diffSummary, pushStatus) {
+        if ((shouldStickBottom || isInspecting || isPushing) && mainScrollState.value < mainScrollState.maxValue) {
+            mainScrollState.animateScrollTo(mainScrollState.maxValue)
+            if (!isInspecting && !isPushing) {
+                shouldStickBottom = false
+            }
+        }
+    }
     val engine = remember(context) { PushGitEngine(context) }
 
     var pat by remember { mutableStateOf(engine.loadSavedToken()) }
@@ -758,6 +767,7 @@ fun PushGitScreen(
                 if (currentDiff == null) {
                     scope.launch {
                         isInspecting = true
+                        shouldStickBottom = true
                         pushStatus = "正在比对仓库文件..."
                         delay(60)
                         mainScrollState.animateScrollTo(mainScrollState.maxValue)
@@ -782,6 +792,7 @@ fun PushGitScreen(
                     scope.launch {
                         isPushing = true
                         pushDone = 0
+                        shouldStickBottom = true
                         pushTotal = if (forceFullPush) selectedFiles.size else currentDiff.uploadFiles.size
                         delay(60)
                         mainScrollState.animateScrollTo(mainScrollState.maxValue)
@@ -1488,6 +1499,7 @@ private fun RepoBrowserEditorDialog(
 
     var currentPath by remember { mutableStateOf("") }
     var items by remember { mutableStateOf<List<RepoContentItem>>(emptyList()) }
+    var itemDates by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
@@ -1509,6 +1521,10 @@ private fun RepoBrowserEditorDialog(
                 .onSuccess {
                     currentPath = path
                     items = it
+                    itemDates = emptyMap()
+                    scope.launch {
+                        itemDates = engine.fetchDirectoryLastModifiedMap(pat, repo, branch, it.map { entry -> entry.path })
+                    }
                 }
                 .onFailure { err ->
                     errorMsg = err.message ?: "拉取目录失败"
@@ -1685,6 +1701,14 @@ private fun RepoBrowserEditorDialog(
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
                                 )
+                                val updatedLabel = itemDates[item.path]
+                                if (!updatedLabel.isNullOrBlank()) {
+                                    Text(
+                                        text = updatedLabel,
+                                        fontSize = 10.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
+                                    )
+                                }
                                 if (!isDir) {
                                     val sizeLabel = if (item.size < 1024) "${item.size} B"
                                     else String.format("%.1f KB", item.size / 1024.0)

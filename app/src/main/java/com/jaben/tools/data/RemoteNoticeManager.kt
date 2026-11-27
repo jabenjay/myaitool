@@ -1,6 +1,8 @@
 package com.jaben.tools.data
 
 import android.content.Context
+import android.util.Base64
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
@@ -24,6 +26,8 @@ object RemoteNoticeManager {
     private const val KEY_NOTICE_HASH = "ack_usage_notice_hash"
     private const val KEY_ANNOUNCEMENT_HASH = "ack_announcement_hash"
 
+    private const val API_NOTICE_URL = "https://api.github.com/repos/jabenjay/myaitool/contents/NOTICE.md?ref=main"
+    private const val API_ANNOUNCEMENT_URL = "https://api.github.com/repos/jabenjay/myaitool/contents/ANNOUNCEMENT.md?ref=main"
     private const val RAW_NOTICE_URL = "https://raw.githubusercontent.com/jabenjay/myaitool/main/NOTICE.md"
     private const val RAW_ANNOUNCEMENT_URL = "https://raw.githubusercontent.com/jabenjay/myaitool/main/ANNOUNCEMENT.md"
 
@@ -53,7 +57,7 @@ object RemoteNoticeManager {
         val result = ArrayList<PendingNoticeItem>(2)
 
         // 1. Check NOTICE.md (always show on first launch even if offline via bundled fallback)
-        val remoteNotice = fetchTextWithMirror(context, RAW_NOTICE_URL)
+        val remoteNotice = fetchLatestGitHubFile(context, API_NOTICE_URL, RAW_NOTICE_URL)
         val noticeText = remoteNotice ?: if (savedNoticeHash.isEmpty()) BUNDLED_DEFAULT_NOTICE else null
         if (!noticeText.isNullOrBlank()) {
             val hash = sha256(noticeText)
@@ -70,7 +74,7 @@ object RemoteNoticeManager {
         }
 
         // 2. Check ANNOUNCEMENT.md
-        val remoteAnn = fetchTextWithMirror(context, RAW_ANNOUNCEMENT_URL)
+        val remoteAnn = fetchLatestGitHubFile(context, API_ANNOUNCEMENT_URL, RAW_ANNOUNCEMENT_URL)
         if (!remoteAnn.isNullOrBlank()) {
             val hash = sha256(remoteAnn)
             if (hash != savedAnnHash) {
@@ -97,6 +101,36 @@ object RemoteNoticeManager {
             .edit()
             .putString(key, item.contentHash)
             .apply()
+    }
+
+    private fun fetchLatestGitHubFile(context: Context, apiUrl: String, rawUrl: String): String? {
+        // 1. Try GitHub Contents API first so commits reflect immediately without 5-min raw CDN cache
+        val apiText = runCatching {
+            val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 5000
+                readTimeout = 7000
+                useCaches = false
+                setRequestProperty("Accept", "application/vnd.github+json")
+                setRequestProperty("Cache-Control", "no-cache")
+                useCaches = false
+                    setRequestProperty("Cache-Control", "no-cache")
+                    setRequestProperty("User-Agent", "Jools-Notice/1.0")
+            }
+            try {
+                if (conn.responseCode in 200..299) {
+                    val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    val b64 = JSONObject(body).optString("content").replace("\n", "")
+                    if (b64.isNotBlank()) String(Base64.decode(b64, Base64.DEFAULT), Charsets.UTF_8).trim() else null
+                } else null
+            } finally {
+                conn.disconnect()
+            }
+        }.getOrNull()
+        if (!apiText.isNullOrBlank()) return apiText
+
+        // 2. Fallback to cache-busted raw URL & mirrors
+        val sep = if ('?' in rawUrl) '&' else '?'
+        return fetchTextWithMirror(context, "$rawUrl${sep}t=${System.currentTimeMillis()}")
     }
 
     private fun fetchTextWithMirror(context: Context, rawUrl: String): String? {

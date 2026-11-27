@@ -63,6 +63,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -174,6 +175,12 @@ import com.jaben.tools.data.ProxyState
 import com.jaben.tools.ui.theme.LocalAppThemeVisuals
 import com.jaben.tools.ui.theme.liquidPress
 
+private data class BrowserTabState(
+    val id: String,
+    val title: String = "新标签页",
+    val url: String
+)
+
 private const val DEFAULT_HOME_URL = "https://cn.pornhub.com/"
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
@@ -214,7 +221,9 @@ fun BrowserScreen(
     val browserStatePrefs = remember(context) {
         context.getSharedPreferences("jools_browser_state", android.content.Context.MODE_PRIVATE)
     }
+    val tabWebViews = remember { mutableMapOf<String, WebView>() }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var showTabsSheet by remember { mutableStateOf(false) }
     val startUrl = remember(initialUrl) {
         val t = initialUrl.trim()
         val lastSaved = browserStatePrefs.getString("last_visited_url", "").orEmpty().trim()
@@ -228,6 +237,19 @@ fun BrowserScreen(
             else -> homeUrl
         }
     }
+    var tabs by remember {
+        mutableStateOf(
+            listOf(
+                BrowserTabState(
+                    id = java.util.UUID.randomUUID().toString(),
+                    title = "新标签页",
+                    url = startUrl
+                )
+            )
+        )
+    }
+    var activeTabId by remember { mutableStateOf(tabs.first().id) }
+    val currentActiveTabId by rememberUpdatedState(activeTabId)
     var urlInput by remember { mutableStateOf(startUrl) }
     var showBookmarks by remember { mutableStateOf(false) }
     var progress by remember { mutableIntStateOf(0) }
@@ -341,9 +363,69 @@ fun BrowserScreen(
         runCatching { focusManager.clearFocus() }
     }
 
+    fun updateTabMeta(tabId: String, newTitle: String? = null, newUrl: String? = null) {
+        tabs = tabs.map { t ->
+            if (t.id == tabId) {
+                t.copy(
+                    title = newTitle?.takeIf { it.isNotBlank() } ?: t.title,
+                    url = newUrl?.takeIf { it.isNotBlank() } ?: t.url
+                )
+            } else t
+        }
+    }
+
+    fun switchToTab(tabId: String) {
+        activeTabId = tabId
+        val wv = tabWebViews[tabId]
+        webViewRef = wv
+        val tabMeta = tabs.firstOrNull { it.id == tabId }
+        val targetUrl = wv?.url?.takeIf { it.isNotBlank() } ?: tabMeta?.url.orEmpty()
+        if (targetUrl.isNotBlank()) urlInput = targetUrl
+        pageTitle = wv?.title?.takeIf { it.isNotBlank() } ?: tabMeta?.title.orEmpty()
+        canGoBack = wv?.canGoBack() == true
+        canGoForward = wv?.canGoForward() == true
+        isLoading = false
+        showTabsSheet = false
+    }
+
+    fun openNewTab(targetUrl: String = homeUrl) {
+        val newId = java.util.UUID.randomUUID().toString()
+        val newTab = BrowserTabState(id = newId, title = "新标签页", url = targetUrl)
+        tabs = tabs + newTab
+        activeTabId = newId
+        urlInput = targetUrl
+        pageTitle = ""
+        canGoBack = false
+        canGoForward = false
+        isLoading = true
+        showTabsSheet = false
+    }
+
+    fun closeTab(tabId: String) {
+        val removedWv = tabWebViews.remove(tabId)
+        runCatching {
+            (removedWv?.parent as? android.view.ViewGroup)?.removeView(removedWv)
+            removedWv?.stopLoading()
+            removedWv?.destroy()
+        }
+        if (tabs.size <= 1) {
+            val freshId = java.util.UUID.randomUUID().toString()
+            tabs = listOf(BrowserTabState(id = freshId, title = "新标签页", url = homeUrl))
+            switchToTab(freshId)
+        } else {
+            val idx = tabs.indexOfFirst { it.id == tabId }
+            val remaining = tabs.filterNot { it.id == tabId }
+            tabs = remaining
+            if (activeTabId == tabId) {
+                val nextIdx = idx.coerceAtMost(remaining.lastIndex).coerceAtLeast(0)
+                switchToTab(remaining[nextIdx].id)
+            }
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
-            val lastUrl = webViewRef?.url?.trim().orEmpty()
+            val lastUrl = (tabWebViews[activeTabId]?.url ?: webViewRef?.url)?.trim().orEmpty()
             if (lastUrl.startsWith("http://") || lastUrl.startsWith("https://")) {
                 browserStatePrefs.edit().putString("last_visited_url", lastUrl).apply()
             }
@@ -351,8 +433,11 @@ fun BrowserScreen(
                 exitVideoFullscreen()
             }
             runCatching {
-                webViewRef?.stopLoading()
-                webViewRef?.destroy()
+                tabWebViews.values.forEach { wv ->
+                    wv.stopLoading()
+                    wv.destroy()
+                }
+                tabWebViews.clear()
                 webViewRef = null
             }
         }
@@ -586,9 +671,8 @@ fun BrowserScreen(
                 .zIndex(0f)
                 .clipToBounds()
         ) {
-            AndroidView(
-                factory = { ctx ->
-                    WebView(ctx).apply {
+            fun createTabWebView(ctx: android.content.Context, tabId: String, initialTabUrl: String): WebView {
+                return WebView(ctx).apply {
                         layoutParams = android.view.ViewGroup.LayoutParams(
                             android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                             android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -753,8 +837,11 @@ fun BrowserScreen(
                                 isLoading = false
                                 showLoadingOverlay = false
                                 if (!url.isNullOrEmpty() && (url.startsWith("http://") || url.startsWith("https://"))) {
-                                    urlInput = url
-                                    browserStatePrefs.edit().putString("last_visited_url", url).apply()
+                                    updateTabMeta(tabId, newTitle = view?.title, newUrl = url)
+                                    if (currentActiveTabId == tabId) {
+                                        urlInput = url
+                                        browserStatePrefs.edit().putString("last_visited_url", url).apply()
+                                    }
                                 }
                                 canGoBack = view?.canGoBack() == true
                                 canGoForward = view?.canGoForward() == true
@@ -804,10 +891,38 @@ fun BrowserScreen(
                             }
                         }
 
-                        AppLogManager.log("BROWSER", "初始化WebView并加载主页")
-                    loadUrl(startUrl)
-                        webViewRef = this
+                        AppLogManager.log("BROWSER", "初始化WebView并加载页面: $initialTabUrl")
+                        loadUrl(initialTabUrl)
                     }
+            }
+
+            AndroidView(
+                factory = { ctx ->
+                    android.widget.FrameLayout(ctx).apply {
+                        layoutParams = android.view.ViewGroup.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                    }
+                },
+                update = { container ->
+                    val currentTab = tabs.firstOrNull { it.id == activeTabId } ?: return@AndroidView
+                    val targetWv = tabWebViews.getOrPut(currentTab.id) {
+                        createTabWebView(container.context, currentTab.id, currentTab.url).also { wv ->
+                            container.addView(
+                                wv,
+                                android.widget.FrameLayout.LayoutParams(
+                                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                                )
+                            )
+                        }
+                    }
+                    for (i in 0 until container.childCount) {
+                        val child = container.getChildAt(i)
+                        child.visibility = if (child === targetWv) android.view.View.VISIBLE else android.view.View.GONE
+                    }
+                    webViewRef = targetWv
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -1079,6 +1194,24 @@ fun BrowserScreen(
                         tint = barFg,
                         modifier = Modifier.size(21.dp)
                     )
+                }
+                IconButton(
+                    onClick = { showTabsSheet = true },
+                    modifier = Modifier.liquidPress()
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .border(1.7.dp, barFg, RoundedCornerShape(5.dp))
+                    ) {
+                        Text(
+                            text = tabs.size.toString(),
+                            color = barFg,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
                 val activeDownloadCount = downloadItems.count { it.status == DownloadStatus.DOWNLOADING }
                 Box(contentAlignment = Alignment.Center) {
@@ -1474,6 +1607,93 @@ fun BrowserScreen(
                 editingBookmark = null
             }
         )
+    }
+
+    if (showTabsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showTabsSheet = false },
+            containerColor = menuBg,
+            contentColor = barFg
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .navigationBarsPadding(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "标签页 (${tabs.size})",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { openNewTab(homeUrl) }) {
+                        Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("新建标签页", fontSize = 13.sp)
+                    }
+                }
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(tabs, key = { _, t -> t.id }) { _, tab ->
+                        val isActive = tab.id == activeTabId
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                            else barFg.copy(alpha = 0.06f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { switchToTab(tab.id) }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = tab.title.ifBlank { "新标签页" },
+                                        fontSize = 13.5.sp,
+                                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isActive) MaterialTheme.colorScheme.primary else barFg,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = tab.url,
+                                        fontSize = 11.sp,
+                                        color = barFg.copy(alpha = 0.6f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { closeTab(tab.id) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "关闭标签页",
+                                        tint = barFg.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+        }
     }
 
     if (showMenuSheet) {
