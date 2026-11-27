@@ -38,8 +38,6 @@ import androidx.compose.material.icons.rounded.InsertDriveFile
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Visibility
-import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -81,8 +79,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -111,7 +107,6 @@ fun PushGitScreen(
     val engine = remember(context) { PushGitEngine(context) }
 
     var pat by remember { mutableStateOf(engine.loadSavedToken()) }
-    var showToken by remember { mutableStateOf(false) }
     var connectedUser by remember { mutableStateOf<String?>(null) }
 
     var savedTokens by remember { mutableStateOf(engine.getSavedTokens()) }
@@ -120,7 +115,6 @@ fun PushGitScreen(
     var newTokenInput by remember { mutableStateOf("") }
 
     var targetRepo by remember { mutableStateOf(engine.loadSavedRepo()) }
-    var repoUrl by remember { mutableStateOf("https://github.com/${engine.loadSavedRepo()}") }
     var repos by remember { mutableStateOf<List<String>>(emptyList()) }
     var repoMenuExpanded by remember { mutableStateOf(false) }
 
@@ -170,7 +164,6 @@ fun PushGitScreen(
                     repos = list
                     if (targetRepo.isBlank() || targetRepo !in list) {
                         targetRepo = list.first()
-                        repoUrl = "https://github.com/${list.first()}"
                     }
                 }
             }
@@ -455,7 +448,6 @@ fun PushGitScreen(
                                     onClick = {
                                         repoMenuExpanded = false
                                         targetRepo = r
-                                        repoUrl = "https://github.com/$r"
                                         diffSummary = null
                                         scope.launch {
                                             engine.listBranches(pat, r).onSuccess {
@@ -467,38 +459,6 @@ fun PushGitScreen(
                             }
                         }
                     }
-
-                    OutlinedTextField(
-                        value = repoUrl,
-                        onValueChange = {
-                            repoUrl = it
-                            targetRepo = engine.parseOwnerRepo(it)
-                            diffSummary = null
-                        },
-                        label = { Text("GitHub Repository URL") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = pat,
-                        onValueChange = {
-                            pat = it
-                            diffSummary = null
-                        },
-                        label = { Text("Personal Access Token (ghp_...)") },
-                        singleLine = true,
-                        visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
-                        trailingIcon = {
-                            IconButton(onClick = { showToken = !showToken }) {
-                                Icon(
-                                    imageVector = if (showToken) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                    contentDescription = "显示令牌"
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    )
 
                     if (!connectedUser.isNullOrBlank()) {
                         Row(
