@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.jaben.tools.data.NoticeType
+import com.jaben.tools.data.NoticeDonationConfig
 import com.jaben.tools.data.PendingNoticeItem
 import com.jaben.tools.tools.qr.QrCodeHelper
 import com.jaben.tools.tools.qr.QrDotStyle
@@ -58,10 +59,14 @@ fun NoticeConfirmDialog(
     val scrollState = rememberScrollState()
     var hasReachedBottom by remember(item.contentHash) { mutableStateOf(false) }
 
-    val alipayQr = remember(item.type) {
-        if (item.type == NoticeType.USAGE_NOTICE) {
+    val donationCfg = remember(item) {
+        if (item.type == NoticeType.USAGE_NOTICE) (item.donationConfig ?: NoticeDonationConfig()) else null
+    }
+    val alipayQr = remember(donationCfg?.alipayUrl) {
+        val url = donationCfg?.alipayUrl?.trim().orEmpty()
+        if (donationCfg?.enabled == true && url.isNotEmpty()) {
             QrCodeHelper.generateStyledQrBitmap(
-                content = NOTICE_ALIPAY_URL,
+                content = url,
                 sizePx = 420,
                 fgColor = android.graphics.Color.BLACK,
                 bgColor = android.graphics.Color.WHITE,
@@ -70,10 +75,11 @@ fun NoticeConfirmDialog(
             )
         } else null
     }
-    val wechatQr = remember(item.type) {
-        if (item.type == NoticeType.USAGE_NOTICE) {
+    val wechatQr = remember(donationCfg?.wechatUrl) {
+        val url = donationCfg?.wechatUrl?.trim().orEmpty()
+        if (donationCfg?.enabled == true && url.isNotEmpty()) {
             QrCodeHelper.generateStyledQrBitmap(
-                content = NOTICE_WECHAT_URL,
+                content = url,
                 sizePx = 420,
                 fgColor = android.graphics.Color.BLACK,
                 bgColor = android.graphics.Color.WHITE,
@@ -152,21 +158,23 @@ fun NoticeConfirmDialog(
                     }
                 }
 
-                if (item.type == NoticeType.USAGE_NOTICE) {
+                if (donationCfg != null && donationCfg.enabled) {
                     Spacer(modifier = Modifier.height(4.dp))
                     HorizontalDivider()
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "捐赠支持",
+                        text = donationCfg.title,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Text(
-                        text = "如果 Jools 对你有帮助，欢迎自愿打赏支持后续维护：",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (donationCfg.description.isNotBlank()) {
+                        Text(
+                            text = donationCfg.description,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -222,27 +230,29 @@ fun NoticeConfirmDialog(
                             }
                         }
                     }
-                    Text(
-                        text = "点击跳转支付宝捐赠（$NOTICE_ALIPAY_URL）",
-                        fontSize = 12.sp,
-                        color = Color(0xFF1677FF),
-                        textDecoration = TextDecoration.Underline,
-                        modifier = Modifier
-                            .clickable {
-                                val launched = runCatching {
-                                    val intent = Intent(
-                                        Intent.ACTION_VIEW,
-                                        Uri.parse("alipays://platformapi/startapp?saId=10000007&qrcode=${Uri.encode(NOTICE_ALIPAY_URL)}")
-                                    ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                    if (donationCfg.alipayUrl.isNotBlank()) {
+                        Text(
+                            text = donationCfg.alipayLinkText,
+                            fontSize = 12.sp,
+                            color = Color(0xFF1677FF),
+                            textDecoration = TextDecoration.Underline,
+                            modifier = Modifier
+                                .clickable {
+                                    val launched = runCatching {
+                                        val intent = Intent(
+                                            Intent.ACTION_VIEW,
+                                            Uri.parse("alipays://platformapi/startapp?saId=10000007&qrcode=${Uri.encode(donationCfg.alipayUrl)}")
+                                        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                                     context.startActivity(intent)
                                     true
                                 }.getOrDefault(false)
-                                if (!launched) {
-                                    Toast.makeText(context, "未安装支付宝", Toast.LENGTH_SHORT).show()
+                                    if (!launched) {
+                                        Toast.makeText(context, "未安装支付宝", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
-                            }
-                            .padding(vertical = 4.dp)
-                    )
+                                .padding(vertical = 4.dp)
+                        )
+                    }
                 }
             }
         },

@@ -14,11 +14,21 @@ enum class NoticeType {
     ANNOUNCEMENT
 }
 
+data class NoticeDonationConfig(
+    val enabled: Boolean = true,
+    val title: String = "捐赠支持",
+    val description: String = "如果 Jools 对你有帮助，欢迎自愿打赏支持后续维护：",
+    val alipayUrl: String = "https://qr.alipay.com/fkx19214trgp2tndpljhv7f",
+    val alipayLinkText: String = "点击跳转支付宝捐赠",
+    val wechatUrl: String = "https://payapp.wechatpay.cn/sjt/qr/AQGxLTUPxACTHPvYfBhlq6Nh"
+)
+
 data class PendingNoticeItem(
     val type: NoticeType,
     val title: String,
     val content: String,
-    val contentHash: String
+    val contentHash: String,
+    val donationConfig: NoticeDonationConfig? = null
 )
 
 object RemoteNoticeManager {
@@ -30,6 +40,8 @@ object RemoteNoticeManager {
     private const val API_ANNOUNCEMENT_URL = "https://api.github.com/repos/jabenjay/myaitool/contents/notices/announcement/ANNOUNCEMENT.md?ref=main"
     private const val RAW_NOTICE_URL = "https://raw.githubusercontent.com/jabenjay/myaitool/main/notices/usage_notice/NOTICE.md"
     private const val RAW_ANNOUNCEMENT_URL = "https://raw.githubusercontent.com/jabenjay/myaitool/main/notices/announcement/ANNOUNCEMENT.md"
+    private const val API_DONATION_URL = "https://api.github.com/repos/jabenjay/myaitool/contents/notices/usage_notice/DONATION.json?ref=main"
+    private const val RAW_DONATION_URL = "https://raw.githubusercontent.com/jabenjay/myaitool/main/notices/usage_notice/DONATION.json"
 
     private const val BUNDLED_DEFAULT_NOTICE = """# Jools 使用须知
 
@@ -56,18 +68,22 @@ object RemoteNoticeManager {
 
         val result = ArrayList<PendingNoticeItem>(2)
 
-        // 1. Check NOTICE.md (always show on first launch even if offline via bundled fallback)
+        // 1. Check NOTICE.md + DONATION.json (always show on first launch even if offline via bundled fallback)
         val remoteNotice = fetchLatestGitHubFile(context, API_NOTICE_URL, RAW_NOTICE_URL)
+        val remoteDonationRaw = fetchLatestGitHubFile(context, API_DONATION_URL, RAW_DONATION_URL)
+        val donationConfig = parseDonationConfig(remoteDonationRaw)
         val noticeText = remoteNotice ?: if (savedNoticeHash.isEmpty()) BUNDLED_DEFAULT_NOTICE else null
         if (!noticeText.isNullOrBlank()) {
-            val hash = sha256(noticeText)
+            val combinedForHash = if (!remoteDonationRaw.isNullOrBlank()) "$noticeText\n---\n$remoteDonationRaw" else noticeText
+            val hash = sha256(combinedForHash)
             if (hash != savedNoticeHash) {
                 result.add(
                     PendingNoticeItem(
                         type = NoticeType.USAGE_NOTICE,
                         title = "使用须知",
                         content = noticeText,
-                        contentHash = hash
+                        contentHash = hash,
+                        donationConfig = donationConfig
                     )
                 )
             }
@@ -154,6 +170,22 @@ object RemoteNoticeManager {
             if (!res.isNullOrBlank()) return res
         }
         return null
+    }
+
+
+    private fun parseDonationConfig(rawJson: String?): NoticeDonationConfig {
+        if (rawJson.isNullOrBlank()) return NoticeDonationConfig()
+        return runCatching {
+            val obj = JSONObject(rawJson)
+            NoticeDonationConfig(
+                enabled = obj.optBoolean("enabled", true),
+                title = obj.optString("title", "捐赠支持").ifBlank { "捐赠支持" },
+                description = obj.optString("description", "如果 Jools 对你有帮助，欢迎自愿打赏支持后续维护："),
+                alipayUrl = obj.optString("alipay_url", "https://qr.alipay.com/fkx19214trgp2tndpljhv7f"),
+                alipayLinkText = obj.optString("alipay_link_text", "点击跳转支付宝捐赠").ifBlank { "点击跳转支付宝捐赠" },
+                wechatUrl = obj.optString("wechat_url", "https://payapp.wechatpay.cn/sjt/qr/AQGxLTUPxACTHPvYfBhlq6Nh")
+            )
+        }.getOrDefault(NoticeDonationConfig())
     }
 
     private fun sha256(text: String): String {
