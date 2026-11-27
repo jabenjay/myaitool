@@ -712,14 +712,15 @@ fun BuiltInVideoPlayerOverlay(
 
                         // Middle-Right: Download current video (Icon only)
                         if (errorMessage == null) {
-                            IconButton(
-                                onClick = { onDownloadVideo(videoUrl) },
+                            Box(
+                                contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .align(Alignment.CenterEnd)
                                     .padding(end = if (isFullscreen) 28.dp else 6.dp)
                                     .size(if (isFullscreen) 40.dp else 24.dp)
                                     .clip(CircleShape)
                                     .background(Color.Black.copy(alpha = 0.45f))
+                                    .clickable { onDownloadVideo(videoUrl) }
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.Download,
