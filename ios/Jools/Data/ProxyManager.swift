@@ -73,16 +73,24 @@ final class ProxyManager: ObservableObject {
     func testNode(_ node: ProxyNodeItem) {
         Task {
             let start = Date()
-            var config = URLSessionConfiguration.ephemeral
+            let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = 6
-            config.connectionProxyDictionary = [
-                kCFNetworkProxiesHTTPEnable as String: node.protocolType == .http ? 1 : 0,
-                kCFNetworkProxiesHTTPProxy as String: node.host,
-                kCFNetworkProxiesHTTPPort as String: node.port,
-                kCFNetworkProxiesHTTPSEnable as String: node.protocolType == .http ? 1 : 0,
-                kCFNetworkProxiesHTTPSProxy as String: node.host,
-                kCFNetworkProxiesHTTPSPort as String: node.port
-            ]
+            if node.protocolType == .http {
+                config.connectionProxyDictionary = [
+                    kCFNetworkProxiesHTTPEnable as String: 1,
+                    kCFNetworkProxiesHTTPProxy as String: node.host,
+                    kCFNetworkProxiesHTTPPort as String: node.port,
+                    "HTTPSEnable": 1,
+                    "HTTPSProxy": node.host,
+                    "HTTPSPort": node.port
+                ]
+            } else {
+                config.connectionProxyDictionary = [
+                    "SOCKSEnable": 1,
+                    "SOCKSProxy": node.host,
+                    "SOCKSPort": node.port
+                ]
+            }
             let session = URLSession(configuration: config)
             if let u = URL(string: "https://www.google.com/generate_204"),
                let (_, resp) = try? await session.data(from: u),

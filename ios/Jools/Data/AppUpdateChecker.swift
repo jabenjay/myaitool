@@ -51,7 +51,8 @@ final class AppUpdateChecker {
         UserDefaults.standard.set(channel.rawValue, forKey: channelKey)
     }
 
-    static func checkLatestRelease(channel: UpdateChannel = getSelectedChannel()) async -> UpdateCheckResult {
+    static func checkLatestRelease(channel: UpdateChannel? = nil) async -> UpdateCheckResult {
+        let resolvedChannel = channel ?? getSelectedChannel()
         let current = currentVersionName
         guard let url = URL(string: releasesAPI) else { return .error(message: "无效的检查地址") }
         var req = URLRequest(url: url, timeoutInterval: 12)
@@ -69,7 +70,7 @@ final class AppUpdateChecker {
             guard let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
                 return .upToDate(current: current)
             }
-            guard let matched = arr.first(where: { matchesChannel($0, channel: channel) }) else {
+            guard let matched = arr.first(where: { matchesChannel($0, channel: resolvedChannel) }) else {
                 return .upToDate(current: current)
             }
             let tag = (matched["tag_name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
