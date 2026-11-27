@@ -38,7 +38,8 @@ struct MainTabView: View {
                     SettingsView(
                         prefs: prefs,
                         onOpenProxy: { path.append(.proxy) },
-                        onOpenAbout: { path.append(.about) }
+                        onOpenAbout: { path.append(.about) },
+                        onOpenBrowser: { url in path.append(.browserWithUrl(url)) }
                     )
                     .tabItem {
                         Label("设置", systemImage: "gearshape.fill")
@@ -98,7 +99,7 @@ struct MainTabView: View {
         }
         .sheet(item: $startupUpdate) { upd in
             if case let .updateAvailable(cur, lat, name, notes, dl) = upd {
-                UpdateSheet(current: cur, latest: lat, name: name, notes: notes, downloadUrl: dl)
+                UpdateSheet(current: cur, latest: lat, name: name, notes: notes, downloadUrl: dl, onOpenInBrowser: { url in path.append(.browserWithUrl(url)) })
             }
         }
     }

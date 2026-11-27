@@ -89,6 +89,7 @@ import com.jaben.tools.data.AppShortcutHelper
 import com.jaben.tools.data.AppUpdateChecker
 import com.jaben.tools.data.PendingNoticeItem
 import com.jaben.tools.data.RemoteNoticeManager
+import com.jaben.tools.data.RootHelper
 import com.jaben.tools.ui.components.NoticeConfirmDialog
 import com.jaben.tools.data.UpdateCheckResult
 import com.jaben.tools.ui.components.UpdateBottomSheet
@@ -136,6 +137,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        RootHelper.cleanupPendingApkIfNeeded(applicationContext)
 
         val themePreferences = ThemePreferences(applicationContext)
         val gfwRuleManager = GfwRuleManager(applicationContext)

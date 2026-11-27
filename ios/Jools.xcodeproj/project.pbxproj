@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		BA8D610C02344638BE96EC7C /* BrowserDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A7EEE57C065484BA412309C /* Data/BrowserDownloadManager.swift */; };
 		D18C0371FBCE4E9FADCA1EF0 /* IpaManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96FDDE4127EC47CDAD0C3BD7 /* Tools/IpaManagerView.swift */; };
 		D2DC04A25BF949BBB00956AD /* IpaManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30303F1F523740BFA94E2D21 /* Data/IpaManager.swift */; };
 		5BDA3C96835B430FA748B72D /* BookmarkManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0428A502B9A4EC8A9FDC9C4 /* Data/BookmarkManager.swift */; };
@@ -39,6 +40,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		6A7EEE57C065484BA412309C /* Data/BrowserDownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "BrowserDownloadManager.swift"; path = "Data/BrowserDownloadManager.swift"; sourceTree = "<group>"; };
 		96FDDE4127EC47CDAD0C3BD7 /* Tools/IpaManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "IpaManagerView.swift"; path = "Tools/IpaManagerView.swift"; sourceTree = "<group>"; };
 		30303F1F523740BFA94E2D21 /* Data/IpaManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "IpaManager.swift"; path = "Data/IpaManager.swift"; sourceTree = "<group>"; };
 		D0428A502B9A4EC8A9FDC9C4 /* Data/BookmarkManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BookmarkManager.swift; path = Data/BookmarkManager.swift; sourceTree = "<group>"; };
@@ -100,6 +102,7 @@
 				0CC0A24906418BD0E1B86BE1,
 				7B407B9D827B5F0D6EF3F32F,
 				D0428A502B9A4EC8A9FDC9C4,
+				6A7EEE57C065484BA412309C,
 				96FDDE4127EC47CDAD0C3BD7,
 				30303F1F523740BFA94E2D21,
 				2D2E9DD9AA1228232EBB5494,
@@ -210,6 +213,7 @@
 				9AA95989B6CE3513BF64B4F0 /* AppPreferences.swift in Sources */,
 				B24653E7F0BF78024AC7142F /* AppUpdateChecker.swift in Sources */,
 				5BDA3C96835B430FA748B72D /* BookmarkManager.swift in Sources */,
+				BA8D610C02344638BE96EC7C /* BrowserDownloadManager.swift in Sources */,
 				D18C0371FBCE4E9FADCA1EF0 /* IpaManagerView.swift in Sources */,
 				D2DC04A25BF949BBB00956AD /* IpaManager.swift in Sources */,
 				C7107DFAF3715C9C525EE475 /* GitHubMirrorHelper.swift in Sources */,

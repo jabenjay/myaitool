@@ -22,18 +22,21 @@ final class BrowserWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate,
     let onStateChange: (String, String?, String?, Bool, Bool, Bool) -> Void
     let onProgressChange: (String, Double) -> Void
     let onVideoDetected: (String, String) -> Void
+    let onDownloadRequested: (String, String?, String) -> Void
     var progressObservation: NSKeyValueObservation?
 
     init(
         tabId: String,
         onStateChange: @escaping (String, String?, String?, Bool, Bool, Bool) -> Void,
         onProgressChange: @escaping (String, Double) -> Void,
-        onVideoDetected: @escaping (String, String) -> Void
+        onVideoDetected: @escaping (String, String) -> Void,
+        onDownloadRequested: @escaping (String, String?, String) -> Void
     ) {
         self.tabId = tabId
         self.onStateChange = onStateChange
         self.onProgressChange = onProgressChange
         self.onVideoDetected = onVideoDetected
+        self.onDownloadRequested = onDownloadRequested
     }
 
     deinit {
@@ -65,6 +68,48 @@ final class BrowserWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate,
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         onStateChange(tabId, webView.url?.absoluteString, webView.title, false, webView.canGoBack, webView.canGoForward)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        if let url = navigationAction.request.url {
+            let ext = url.pathExtension.lowercased()
+            let downloadExts = Set(["ipa", "zip", "rar", "7z", "p12", "mobileprovision", "apk", "dmg", "mp4", "m4a", "mp3", "pdf"])
+            if downloadExts.contains(ext) && navigationAction.navigationType == .linkActivated {
+                DispatchQueue.main.async {
+                    self.onDownloadRequested(url.absoluteString, url.lastPathComponent, "")
+                }
+                decisionHandler(.cancel)
+                return
+            }
+        }
+        decisionHandler(.allow)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        let resp = navigationResponse.response
+        let mime = resp.mimeType ?? ""
+        let disp = (resp as? HTTPURLResponse)?.allHeaderFields["Content-Disposition"] as? String ?? ""
+        let isAttachment = disp.lowercased().contains("attachment")
+        let ext = resp.url?.pathExtension.lowercased() ?? ""
+        if !navigationResponse.canShowMIMEType || isAttachment || ext == "ipa" {
+            if let urlStr = resp.url?.absoluteString {
+                let suggested = resp.suggestedFilename
+                DispatchQueue.main.async {
+                    self.onDownloadRequested(urlStr, suggested, mime)
+                }
+            }
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
     }
 
     func webView(
@@ -122,6 +167,7 @@ struct BrowserView: View {
     @ObservedObject var prefs: AppPreferences
     @ObservedObject private var bookmarkManager = BookmarkManager.shared
     @ObservedObject private var proxyManager = ProxyManager.shared
+    @ObservedObject private var downloadManager = BrowserDownloadManager.shared
     let initialUrl: String
     @Environment(\.dismiss) private var dismiss
 
@@ -142,6 +188,10 @@ struct BrowserView: View {
     @State private var showTabsSheet = false
     @State private var showMenuSheet = false
     @State private var showLibrarySheet = false
+    @State private var showDownloadsSheet = false
+    @State private var showNewDownloadAlert = false
+    @State private var newDownloadUrlInput = ""
+    @State private var shareDownloadURL: URL?
     @State private var librarySegment: Int = 0
     @State private var librarySearch: String = ""
 
@@ -204,7 +254,8 @@ struct BrowserView: View {
                     pageTitle: activeVideoTitle,
                     onClose: { activeVideoUrl = nil },
                     onDownload: { dl in
-                        if let u = URL(string: dl) { UIApplication.shared.open(u) }
+                        downloadManager.startDownload(urlStr: dl)
+                        toastMsg = "已开始下载，可在下载管理查看进度"
                     }
                 )
             }
@@ -218,6 +269,25 @@ struct BrowserView: View {
         .sheet(isPresented: $showTabsSheet) { tabsGridSheet }
         .sheet(isPresented: $showMenuSheet) { menuSheet }
         .sheet(isPresented: $showLibrarySheet) { librarySheet }
+        .sheet(isPresented: $showDownloadsSheet) { downloadsSheet }
+        .sheet(isPresented: Binding(get: { shareDownloadURL != nil }, set: { if !$0 { shareDownloadURL = nil } })) {
+            if let u = shareDownloadURL {
+                BrowserShareSheet(items: [u])
+            }
+        }
+        .alert("新建下载", isPresented: $showNewDownloadAlert) {
+            TextField("输入文件或 IPA 下载链接", text: $newDownloadUrlInput)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+            Button("开始下载") {
+                let raw = newDownloadUrlInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !raw.isEmpty {
+                    downloadManager.startDownload(urlStr: raw)
+                    showDownloadsSheet = true
+                }
+            }
+            Button("取消", role: .cancel) {}
+        }
         .sheet(isPresented: $showAddBookmark) {
             bookmarkEditorSheet(isNew: true)
         }
@@ -270,6 +340,18 @@ struct BrowserView: View {
                                 .font(.system(size: 18))
                                 .foregroundColor(.accentColor)
                         }
+                    }
+
+                    Button {
+                        showDownloadsSheet = true
+                    } label: {
+                        let activeCount = downloadManager.items.filter { $0.status == .downloading }.count
+                        Image(systemName: activeCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(activeCount > 0 ? .accentColor : .primary)
+                            .frame(width: 28, height: 28)
+                            .background(Color.primary.opacity(0.06))
+                            .clipShape(Circle())
                     }
 
                     Button {
@@ -971,6 +1053,21 @@ struct BrowserView: View {
                 }
 
                 Section("浏览增强") {
+                    Button {
+                        showMenuSheet = false
+                        showDownloadsSheet = true
+                    } label: {
+                        HStack {
+                            Label("下载管理", systemImage: "arrow.down.circle")
+                            Spacer()
+                            if !downloadManager.items.isEmpty {
+                                Text("\(downloadManager.items.count)")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
                     Toggle(isOn: $adBlockEnabled) {
                         Label("广告与弹窗拦截", systemImage: "hand.raised")
                     }
@@ -1140,6 +1237,10 @@ struct BrowserView: View {
                     activeVideoTitle = title
                     activeVideoUrl = src
                 }
+            },
+            onDownloadRequested: { urlStr, suggested, mime in
+                downloadManager.startDownload(urlStr: urlStr, suggestedName: suggested, mimeType: mime)
+                toastMsg = "已开始下载，若为 .ipa 将自动加入未签名 IPA 列表"
             }
         )
         coordinators[tabId] = coord
@@ -1262,4 +1363,132 @@ struct BrowserView: View {
         f.dateFormat = "MM-dd HH:mm"
         return f.string(from: Date(timeIntervalSince1970: ts))
     }
+
+    // MARK: - Downloads Sheet
+    private var downloadsSheet: some View {
+        NavigationStack {
+            List {
+                if downloadManager.items.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "arrow.down.doc")
+                            .font(.system(size: 32))
+                            .foregroundColor(.secondary)
+                        Text("暂无下载内容")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("网页中点击下载或输入直链下载；.ipa 文件完成后会自动同步到「IPA管理 → 未签名」")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 28)
+                } else {
+                    ForEach(downloadManager.items) { item in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 10) {
+                                Image(systemName: item.fileName.lowercased().hasSuffix(".ipa") ? "shippingbox.fill" : "doc.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(item.fileName.lowercased().hasSuffix(".ipa") ? .accentColor : .secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.fileName)
+                                        .font(.system(size: 14.5, weight: .semibold))
+                                        .lineLimit(1)
+                                    HStack(spacing: 6) {
+                                        if item.status == .downloading {
+                                            Text(item.totalBytes > 0
+                                                 ? "\(IpaManager.formatBytes(item.downloadedBytes)) / \(IpaManager.formatBytes(item.totalBytes))"
+                                                 : IpaManager.formatBytes(item.downloadedBytes))
+                                        } else if item.status == .completed {
+                                            Text(IpaManager.formatBytes(item.downloadedBytes))
+                                        } else {
+                                            Text(item.errorMessage ?? "下载失败")
+                                                .foregroundColor(.red)
+                                        }
+                                        if item.importedToUnsignedIpa {
+                                            Text("· 已加入未签名 IPA")
+                                                .foregroundColor(Color(red: 0.12, green: 0.65, blue: 0.36))
+                                        }
+                                    }
+                                    .font(.system(size: 11.5))
+                                    .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                            }
+
+                            if item.status == .downloading {
+                                ProgressView(value: item.progress)
+                            } else if item.status == .completed {
+                                HStack(spacing: 10) {
+                                    if item.fileName.lowercased().hasSuffix(".ipa") && !item.importedToUnsignedIpa {
+                                        Button("加入未签名 IPA") {
+                                            if downloadManager.importToIpaManager(item) {
+                                                toastMsg = "已导入到「IPA管理 → 未签名」"
+                                            } else {
+                                                toastMsg = "导入失败"
+                                            }
+                                        }
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .buttonStyle(.bordered)
+                                    }
+                                    if let localURL = downloadManager.localFileURL(for: item) {
+                                        Button {
+                                            shareDownloadURL = localURL
+                                        } label: {
+                                            Label("打开 / 分享", systemImage: "square.and.arrow.up")
+                                                .font(.system(size: 12, weight: .medium))
+                                        }
+                                        .buttonStyle(.bordered)
+                                    }
+                                }
+                            } else if item.status == .failed {
+                                Button("重试") {
+                                    downloadManager.deleteItem(item)
+                                    downloadManager.startDownload(urlStr: item.sourceUrl, suggestedName: item.fileName)
+                                }
+                                .font(.system(size: 12, weight: .semibold))
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .onDelete { offsets in
+                        for idx in offsets {
+                            downloadManager.deleteItem(downloadManager.items[idx])
+                        }
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("下载管理")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    HStack(spacing: 12) {
+                        Button {
+                            newDownloadUrlInput = ""
+                            showNewDownloadAlert = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        if downloadManager.items.contains(where: { $0.status != .downloading }) {
+                            Button("清空") {
+                                downloadManager.clearCompleted()
+                            }
+                        }
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { showDownloadsSheet = false }
+                }
+            }
+        }
+    }
+}
+
+private struct BrowserShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

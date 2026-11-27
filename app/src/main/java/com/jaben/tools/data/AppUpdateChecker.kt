@@ -9,6 +9,8 @@ import android.net.Uri
 import android.os.Environment
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -186,12 +188,42 @@ object AppUpdateChecker {
                                 val statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
                                 val status = if (statusIdx >= 0) cursor.getInt(statusIdx) else -1
                                 if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                                    val apkUri = dm.getUriForDownloadedFile(downloadId) ?: return
-                                    val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(apkUri, "application/vnd.android.package-archive")
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    val apkFile = File(
+                                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                                        "Jools/$fileName"
+                                    )
+                                    val silent = RootHelper.isSilentInstallEnabled(appCtx)
+                                    val autoDel = RootHelper.isAutoDeleteApkEnabled(appCtx)
+                                    if (silent && apkFile.exists()) {
+                                        CoroutineScope(Dispatchers.IO).launch {
+                                            val (ok, msg) = RootHelper.silentInstallApk(apkFile)
+                                            AppLogManager.i("Update", "Silent install: ok=$ok msg=$msg")
+                                            if (ok && autoDel) {
+                                                RootHelper.deleteFileWithRootFallback(apkFile)
+                                                runCatching { dm.remove(downloadId) }
+                                            } else if (!ok) {
+                                                val apkUri = dm.getUriForDownloadedFile(downloadId)
+                                                if (apkUri != null) {
+                                                    if (autoDel) RootHelper.savePendingCleanupApk(appCtx, apkFile.absolutePath)
+                                                    val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                                                        setDataAndType(apkUri, "application/vnd.android.package-archive")
+                                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                    }
+                                                    runCatching { appCtx.startActivity(installIntent) }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        val apkUri = dm.getUriForDownloadedFile(downloadId) ?: return
+                                        if (autoDel) {
+                                            RootHelper.savePendingCleanupApk(appCtx, apkFile.absolutePath)
+                                        }
+                                        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                                            setDataAndType(apkUri, "application/vnd.android.package-archive")
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        runCatching { appCtx.startActivity(installIntent) }
                                     }
-                                    runCatching { appCtx.startActivity(installIntent) }
                                 }
                             }
                         }

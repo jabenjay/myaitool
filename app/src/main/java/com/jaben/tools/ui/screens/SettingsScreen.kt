@@ -24,6 +24,9 @@ import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material.icons.rounded.AdminPanelSettings
+import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.InstallMobile
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -37,6 +40,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.jaben.tools.data.AppUpdateChecker
+import com.jaben.tools.data.RootCheckResult
+import com.jaben.tools.data.RootHelper
 import com.jaben.tools.data.UpdateChannel
 import com.jaben.tools.data.UpdateCheckResult
 import kotlinx.coroutines.launch
@@ -44,6 +49,7 @@ import java.net.Proxy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -86,6 +92,10 @@ fun SettingsScreen(
     var updateResult by remember { mutableStateOf<UpdateCheckResult?>(null) }
     var selectedChannel by remember { mutableStateOf(AppUpdateChecker.getSelectedChannel(context)) }
     var channelMenuExpanded by remember { mutableStateOf(false) }
+    var rootStatus by remember { mutableStateOf<RootCheckResult?>(null) }
+    var isCheckingRoot by remember { mutableStateOf(false) }
+    var silentInstallEnabled by remember { mutableStateOf(RootHelper.isSilentInstallEnabled(context)) }
+    var autoDeleteApkEnabled by remember { mutableStateOf(RootHelper.isAutoDeleteApkEnabled(context)) }
 
     Column(
         modifier = modifier
@@ -211,6 +221,96 @@ fun SettingsScreen(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    }
+                )
+            }
+
+            item {
+                SettingsEntryCard(
+                    icon = Icons.Rounded.AdminPanelSettings,
+                    title = "Root 权限检测",
+                    subtitle = when {
+                        isCheckingRoot -> "正在检测 su 权限..."
+                        rootStatus != null -> rootStatus!!.detail
+                        else -> "点击检测设备是否已获取 Root 权限"
+                    },
+                    onClick = {
+                        if (!isCheckingRoot) {
+                            isCheckingRoot = true
+                            scope.launch {
+                                val res = RootHelper.checkRootAccess()
+                                rootStatus = res
+                                isCheckingRoot = false
+                                Toast.makeText(context, res.detail, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    trailingContent = {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (rootStatus?.isRooted == true) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            }
+                        ) {
+                            Text(
+                                text = when {
+                                    isCheckingRoot -> "检测中"
+                                    rootStatus?.isRooted == true -> "已 Root"
+                                    rootStatus != null -> "未 Root"
+                                    else -> "检测"
+                                },
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (rootStatus?.isRooted == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                )
+            }
+
+            item {
+                SettingsEntryCard(
+                    icon = Icons.Rounded.InstallMobile,
+                    title = "静默安装更新",
+                    subtitle = "下载更新后自动通过 Root (pm install) 静默安装",
+                    onClick = {
+                        val next = !silentInstallEnabled
+                        silentInstallEnabled = next
+                        RootHelper.setSilentInstallEnabled(context, next)
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = silentInstallEnabled,
+                            onCheckedChange = {
+                                silentInstallEnabled = it
+                                RootHelper.setSilentInstallEnabled(context, it)
+                            }
+                        )
+                    }
+                )
+            }
+
+            item {
+                SettingsEntryCard(
+                    icon = Icons.Rounded.DeleteSweep,
+                    title = "安装后自动删除安装包",
+                    subtitle = "更新安装完成后自动清理下载的 APK 文件",
+                    onClick = {
+                        val next = !autoDeleteApkEnabled
+                        autoDeleteApkEnabled = next
+                        RootHelper.setAutoDeleteApkEnabled(context, next)
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = autoDeleteApkEnabled,
+                            onCheckedChange = {
+                                autoDeleteApkEnabled = it
+                                RootHelper.setAutoDeleteApkEnabled(context, it)
+                            }
+                        )
                     }
                 )
             }

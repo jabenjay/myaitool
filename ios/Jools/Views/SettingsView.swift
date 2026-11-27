@@ -5,6 +5,7 @@ struct SettingsView: View {
     @ObservedObject private var bookmarkManager = BookmarkManager.shared
     let onOpenProxy: () -> Void
     let onOpenAbout: () -> Void
+    var onOpenBrowser: ((String) -> Void)? = nil
 
     @State private var selectedChannel: UpdateChannel = AppUpdateChecker.getSelectedChannel()
     @State private var isCheckingUpdate = false
@@ -228,7 +229,7 @@ struct SettingsView: View {
         .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
         .sheet(item: $updateResult) { res in
             if case let .updateAvailable(cur, lat, name, notes, dl) = res {
-                UpdateSheet(current: cur, latest: lat, name: name, notes: notes, downloadUrl: dl)
+                UpdateSheet(current: cur, latest: lat, name: name, notes: notes, downloadUrl: dl, onOpenInBrowser: onOpenBrowser)
             }
         }
         .alert("设置默认主页", isPresented: $showHomeUrlEditor) {

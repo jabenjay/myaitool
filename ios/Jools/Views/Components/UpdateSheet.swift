@@ -7,6 +7,7 @@ struct UpdateSheet: View {
     let name: String
     let notes: String
     let downloadUrl: String
+    var onOpenInBrowser: ((String) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -33,12 +34,16 @@ struct UpdateSheet: View {
             .safeAreaInset(edge: .bottom) {
                 Button {
                     let target = GitHubMirrorHelper.buildCandidateURLs(downloadUrl).first ?? downloadUrl
-                    if let u = URL(string: target) {
+                    dismiss()
+                    if let onOpenInBrowser {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                            onOpenInBrowser(target)
+                        }
+                    } else if let u = URL(string: target) {
                         UIApplication.shared.open(u)
                     }
-                    dismiss()
                 } label: {
-                    Text("前往下载更新")
+                    Text("内置浏览器下载更新")
                         .font(.system(size: 15, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
