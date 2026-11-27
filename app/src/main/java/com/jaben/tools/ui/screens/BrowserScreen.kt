@@ -948,20 +948,13 @@ fun BrowserScreen(
                         verticalArrangement = Arrangement.spacedBy(22.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(24.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-                            modifier = Modifier.size(72.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Public,
-                                    contentDescription = "浏览器",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(38.dp)
-                                )
-                            }
-                        }
+                        Text(
+                            text = "Light Browser",
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 0.6.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
 
                         androidx.compose.material3.OutlinedTextField(
                             value = blankInput,
