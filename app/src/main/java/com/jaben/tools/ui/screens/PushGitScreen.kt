@@ -117,14 +117,6 @@ fun PushGitScreen(
     val scope = rememberCoroutineScope()
     val mainScrollState = rememberScrollState()
     var shouldStickBottom by remember { mutableStateOf(false) }
-    LaunchedEffect(mainScrollState.maxValue, isInspecting, isPushing, pushDone, diffSummary, pushStatus) {
-        if ((shouldStickBottom || isInspecting || isPushing) && mainScrollState.value < mainScrollState.maxValue) {
-            mainScrollState.animateScrollTo(mainScrollState.maxValue)
-            if (!isInspecting && !isPushing) {
-                shouldStickBottom = false
-            }
-        }
-    }
     val engine = remember(context) { PushGitEngine(context) }
 
     var pat by remember { mutableStateOf(engine.loadSavedToken()) }
@@ -157,6 +149,15 @@ fun PushGitScreen(
     var pushDone by remember { mutableIntStateOf(0) }
     var pushTotal by remember { mutableIntStateOf(0) }
     var pushStatus by remember { mutableStateOf("") }
+
+    LaunchedEffect(mainScrollState.maxValue, isInspecting, isPushing, pushDone, diffSummary, pushStatus) {
+        if ((shouldStickBottom || isInspecting || isPushing) && mainScrollState.value < mainScrollState.maxValue) {
+            mainScrollState.animateScrollTo(mainScrollState.maxValue)
+            if (!isInspecting && !isPushing) {
+                shouldStickBottom = false
+            }
+        }
+    }
 
     var workflows by remember { mutableStateOf<List<WorkflowInfo>>(emptyList()) }
     var selectedWorkflow by remember { mutableStateOf<WorkflowInfo?>(null) }

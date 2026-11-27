@@ -552,7 +552,8 @@ fun PocketToolboxApp(
                 composable("settings/about") {
                     AboutScreen(
                         onBack = { navController.popBackStack() },
-                        onOpenRepoInBrowser = { url -> navController.navigate("tool/browser?url=${Uri.encode(url)}") }
+                        onOpenRepoInBrowser = { url -> navController.navigate("tool/browser?url=${Uri.encode(url)}") },
+                        onOpenLogs = { navController.navigate("settings/logs") }
                     )
                 }
                 composable("settings/logs") {
