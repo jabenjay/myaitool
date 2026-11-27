@@ -230,7 +230,7 @@ fun PushGitScreen(
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .liquidGlassSurface(visuals, RoundedCornerShape(18.dp))
+                    .liquidGlassSurface(cornerRadius = 18.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
@@ -337,7 +337,7 @@ fun PushGitScreen(
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .liquidGlassSurface(visuals, RoundedCornerShape(18.dp))
+                    .liquidGlassSurface(cornerRadius = 18.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
@@ -378,7 +378,7 @@ fun PushGitScreen(
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .liquidGlassSurface(visuals, RoundedCornerShape(18.dp))
+                    .liquidGlassSurface(cornerRadius = 18.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
