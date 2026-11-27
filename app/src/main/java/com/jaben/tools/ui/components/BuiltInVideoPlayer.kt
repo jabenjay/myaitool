@@ -635,7 +635,12 @@ fun BuiltInVideoPlayerOverlay(
                                     )
                                 )
                                 .then(if (isFullscreen) Modifier.statusBarsPadding() else Modifier)
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                                .padding(
+                                    start = if (isFullscreen) 28.dp else 8.dp,
+                                    end = if (isFullscreen) 28.dp else 8.dp,
+                                    top = if (isFullscreen) 12.dp else 6.dp,
+                                    bottom = 6.dp
+                                ),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             IconButton(
@@ -711,16 +716,16 @@ fun BuiltInVideoPlayerOverlay(
                                 onClick = { onDownloadVideo(videoUrl) },
                                 modifier = Modifier
                                     .align(Alignment.CenterEnd)
-                                    .padding(end = if (isFullscreen) 16.dp else 6.dp)
-                                    .size(if (isFullscreen) 42.dp else 32.dp)
+                                    .padding(end = if (isFullscreen) 28.dp else 6.dp)
+                                    .size(if (isFullscreen) 40.dp else 24.dp)
                                     .clip(CircleShape)
-                                    .background(Color.Black.copy(alpha = 0.5f))
+                                    .background(Color.Black.copy(alpha = 0.45f))
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.Download,
                                     contentDescription = "下载视频",
                                     tint = Color.White,
-                                    modifier = Modifier.size(if (isFullscreen) 22.dp else 17.dp)
+                                    modifier = Modifier.size(if (isFullscreen) 20.dp else 13.dp)
                                 )
                             }
                         }
@@ -743,7 +748,12 @@ fun BuiltInVideoPlayerOverlay(
                                     )
                                 )
                                 .then(if (isFullscreen) Modifier.navigationBarsPadding() else Modifier)
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                .padding(
+                                    start = if (isFullscreen) 28.dp else 8.dp,
+                                    end = if (isFullscreen) 28.dp else 8.dp,
+                                    top = 4.dp,
+                                    bottom = if (isFullscreen) 14.dp else 4.dp
+                                ),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
