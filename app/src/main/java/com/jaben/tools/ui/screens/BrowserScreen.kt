@@ -105,6 +105,7 @@ import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.AudioFile
