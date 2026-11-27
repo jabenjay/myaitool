@@ -56,6 +56,7 @@ struct MainTabView: View {
                         case .qrScanner: QrScannerView { url in path.append(.browserWithUrl(url)) }
                         case .browser: BrowserView(prefs: prefs, initialUrl: "")
                         case .pushGit: PushGitView(prefs: prefs)
+                        case .ipaManager: IpaManagerView(prefs: prefs)
                         }
                     case .browserWithUrl(let u):
                         BrowserView(prefs: prefs, initialUrl: u)

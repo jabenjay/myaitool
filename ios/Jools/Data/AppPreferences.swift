@@ -8,6 +8,7 @@ enum JoolsToolId: String, CaseIterable, Identifiable {
     case formatFactory = "format_factory"
     case fileCompressor = "file_compressor"
     case pushGit = "push_git"
+    case ipaManager = "ipa_manager"
     case qrScanner = "qr_scanner"
 
     var id: String { rawValue }
@@ -20,6 +21,7 @@ enum JoolsToolId: String, CaseIterable, Identifiable {
         case .formatFactory: return "格式工厂"
         case .fileCompressor: return "文件压缩"
         case .pushGit: return "PushGit"
+        case .ipaManager: return "IPA管理"
         case .qrScanner: return "扫一扫"
         }
     }
@@ -32,6 +34,7 @@ enum JoolsToolId: String, CaseIterable, Identifiable {
         case .formatFactory: return "图片、视频、音频格式转换"
         case .fileCompressor: return "ZIP 与媒体体积压缩"
         case .pushGit: return "推送文件至 GitHub 并触发构建"
+        case .ipaManager: return "IPA 分库管理、P12 签名与安装"
         case .qrScanner: return "相机扫码与相册二维码识别"
         }
     }
@@ -44,6 +47,7 @@ enum JoolsToolId: String, CaseIterable, Identifiable {
         case .formatFactory: return "arrow.triangle.2.circlepath"
         case .fileCompressor: return "archivebox.fill"
         case .pushGit: return "arrow.up.circle.fill"
+        case .ipaManager: return "signature"
         case .qrScanner: return "qrcode.viewfinder"
         }
     }
@@ -56,6 +60,7 @@ enum JoolsToolId: String, CaseIterable, Identifiable {
         case .formatFactory: return Color(red: 0.69, green: 0.32, blue: 0.87)
         case .fileCompressor: return Color(red: 0.96, green: 0.55, blue: 0.14)
         case .pushGit: return Color(red: 0.16, green: 0.64, blue: 0.45)
+        case .ipaManager: return Color(red: 0.93, green: 0.27, blue: 0.45)
         case .qrScanner: return Color(red: 0.12, green: 0.68, blue: 0.85)
         }
     }
@@ -68,6 +73,7 @@ enum JoolsToolId: String, CaseIterable, Identifiable {
         case .formatFactory: return [Color(red: 0.78, green: 0.42, blue: 0.95), Color(red: 0.56, green: 0.22, blue: 0.78)]
         case .fileCompressor: return [Color(red: 1.00, green: 0.65, blue: 0.24), Color(red: 0.88, green: 0.45, blue: 0.08)]
         case .pushGit: return [Color(red: 0.22, green: 0.74, blue: 0.52), Color(red: 0.11, green: 0.52, blue: 0.35)]
+        case .ipaManager: return [Color(red: 0.98, green: 0.36, blue: 0.52), Color(red: 0.82, green: 0.18, blue: 0.36)]
         case .qrScanner: return [Color(red: 0.22, green: 0.78, blue: 0.94), Color(red: 0.06, green: 0.54, blue: 0.76)]
         }
     }

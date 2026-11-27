@@ -112,6 +112,7 @@ import com.jaben.tools.ui.screens.ProxySettingsScreen
 import com.jaben.tools.ui.screens.QrScannerScreen
 import com.jaben.tools.ui.screens.QrToolScreen
 import com.jaben.tools.ui.screens.SettingsScreen
+import com.jaben.tools.ui.screens.SshScreen
 import com.jaben.tools.ui.screens.ThemeSettingsScreen
 import com.jaben.tools.ui.screens.ToolboxHomeScreen
 import com.jaben.tools.ui.theme.LocalAppThemeVisuals
@@ -406,6 +407,7 @@ fun PocketToolboxApp(
                                         "format_factory" -> navController.navigate("tool/format_factory")
                                         "compressor" -> navController.navigate("tool/compressor")
                                         "pushgit" -> navController.navigate("tool/pushgit")
+                                        "ssh" -> navController.navigate("tool/ssh")
                                     }
                                 }
                             )
@@ -493,6 +495,9 @@ fun PocketToolboxApp(
                 }
                 composable("tool/pushgit") {
                     PushGitScreen(onBack = { navController.popBackStack() })
+                }
+                composable("tool/ssh") {
+                    SshScreen(onBack = { navController.popBackStack() })
                 }
                 composable("tool/format_factory") {
                     FormatFactoryScreen(onBack = { navController.popBackStack() })

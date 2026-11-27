@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.Compress
+import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Transform
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
@@ -134,6 +135,12 @@ fun ToolboxHomeScreen(
                 title = "PushGit",
                 subtitle = "上传压缩包、文件夹或文件至 GitHub",
                 icon = Icons.Rounded.CloudUpload
+            ),
+            "ssh" to ToolboxModule(
+                id = "ssh",
+                title = "SSH 工具",
+                subtitle = "服务器管理、SFTP 文件与终端",
+                icon = Icons.Rounded.Terminal
             )
         )
     }
