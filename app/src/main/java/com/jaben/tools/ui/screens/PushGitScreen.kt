@@ -202,6 +202,7 @@ fun PushGitScreen(
                     workflowInputValues.clear()
                     fields.forEach { f ->
                         val prefill = when {
+                            f.options.isNotEmpty() -> f.defaultValue.takeIf { it in f.options } ?: f.options.first()
                             f.key.contains("version", ignoreCase = true) && !nextVer.isNullOrBlank() -> nextVer
                             f.key.contains("changelog", ignoreCase = true) && !remoteChangelog.isNullOrBlank() -> remoteChangelog
                             else -> f.defaultValue
@@ -222,10 +223,10 @@ fun PushGitScreen(
         if (pat.isNotBlank()) refreshGitHubMeta(pat)
     }
 
+    val activeRuns = workflowRuns.filter { it.status != "completed" }
     val latestRun = workflowRuns.firstOrNull()
-    LaunchedEffect(latestRun?.id, latestRun?.status, latestRun?.conclusion, pat, targetRepo) {
-        val status = latestRun?.status
-        if (pat.isNotBlank() && (status == "queued" || status == "in_progress" || status == "waiting")) {
+    LaunchedEffect(activeRuns.size, latestRun?.id, latestRun?.status, latestRun?.conclusion, pat, targetRepo) {
+        if (pat.isNotBlank() && activeRuns.isNotEmpty()) {
             delay(5000)
             engine.listWorkflowRuns(pat, targetRepo).onSuccess { runs ->
                 workflowRuns = runs
@@ -895,112 +896,122 @@ fun PushGitScreen(
                 }
             }
 
-            latestRun?.let { run ->
-                val (badgeColor, statusText) = when {
-                    run.status == "queued" || run.status == "waiting" -> Color(0xFFD97706) to "排队中"
-                    run.status == "in_progress" -> Color(0xFF2563EB) to "构建中"
-                    run.conclusion == "success" -> Color(0xFF1B8E3E) to "构建成功"
-                    run.conclusion == "failure" -> Color(0xFFDC2626) to "构建失败"
-                    else -> Color.Gray to (run.conclusion.ifBlank { run.status })
-                }
-                Row(
+            val displayRuns = if (activeRuns.isNotEmpty()) activeRuns else listOfNotNull(latestRun)
+            if (displayRuns.isNotEmpty()) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(badgeColor.copy(alpha = 0.12f))
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .heightIn(max = 220.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = "#${run.runNumber} · ${run.name} · $statusText",
-                        color = badgeColor,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    val isRunning = run.status != "completed"
-                    var nowMs by remember(run.id) { mutableLongStateOf(System.currentTimeMillis()) }
-                    LaunchedEffect(run.id, isRunning) {
-                        while (isRunning) {
-                            nowMs = System.currentTimeMillis()
-                            delay(1000)
-                        }
-                    }
-                    val createdMs = remember(run.createdAt) {
-                        runCatching {
-                            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
-                                timeZone = TimeZone.getTimeZone("UTC")
-                            }.parse(run.createdAt)?.time ?: 0L
-                        }.getOrDefault(0L)
-                    }
-                    val elapsedSec = if (createdMs > 0L) ((nowMs - createdMs) / 1000L).coerceAtLeast(0L) else 0L
-                    val spinAngle = if (isRunning) {
-                        val inf = rememberInfiniteTransition(label = "wfSpin")
-                        inf.animateFloat(
-                            initialValue = 0f,
-                            targetValue = 360f,
-                            animationSpec = infiniteRepeatable(
-                                animation = tween(durationMillis = 1000, easing = LinearEasing),
-                                repeatMode = RepeatMode.Restart
-                            ),
-                            label = "wfSpinAngle"
-                        ).value
-                    } else {
-                        0f
-                    }
-                    if (isRunning) {
-                        if (createdMs > 0L) {
-                            Text(
-                                text = "${elapsedSec}s",
-                                color = badgeColor,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(end = 6.dp)
-                            )
-                        }
-                        TextButton(
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                            onClick = {
-                                scope.launch {
-                                    engine.cancelWorkflowRun(pat, targetRepo, run.id)
-                                        .onSuccess {
-                                            Toast.makeText(context, "已取消构建", Toast.LENGTH_SHORT).show()
-                                            delay(1000)
+                    displayRuns.forEach { run ->
+                        androidx.compose.runtime.key(run.id) {
+                            val (badgeColor, statusText) = when {
+                                run.status == "queued" || run.status == "waiting" -> Color(0xFFD97706) to "排队中"
+                                run.status == "in_progress" -> Color(0xFF2563EB) to "构建中"
+                                run.conclusion == "success" -> Color(0xFF1B8E3E) to "构建成功"
+                                run.conclusion == "failure" -> Color(0xFFDC2626) to "构建失败"
+                                else -> Color.Gray to (run.conclusion.ifBlank { run.status })
+                            }
+                            val isRunning = run.status != "completed"
+                            var nowMs by remember(run.id) { mutableLongStateOf(System.currentTimeMillis()) }
+                            LaunchedEffect(run.id, isRunning) {
+                                while (isRunning) {
+                                    nowMs = System.currentTimeMillis()
+                                    delay(1000)
+                                }
+                            }
+                            val createdMs = remember(run.createdAt) {
+                                runCatching {
+                                    SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                                        timeZone = TimeZone.getTimeZone("UTC")
+                                    }.parse(run.createdAt)?.time ?: 0L
+                                }.getOrDefault(0L)
+                            }
+                            val elapsedSec = if (createdMs > 0L) ((nowMs - createdMs) / 1000L).coerceAtLeast(0L) else 0L
+                            val spinAngle = if (isRunning) {
+                                val inf = rememberInfiniteTransition(label = "wfSpin_${run.id}")
+                                inf.animateFloat(
+                                    initialValue = 0f,
+                                    targetValue = 360f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(durationMillis = 1000, easing = LinearEasing),
+                                        repeatMode = RepeatMode.Restart
+                                    ),
+                                    label = "wfSpinAngle_${run.id}"
+                                ).value
+                            } else {
+                                0f
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(badgeColor.copy(alpha = 0.12f))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "#${run.runNumber} · ${run.name} · $statusText",
+                                    color = badgeColor,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (isRunning) {
+                                    if (createdMs > 0L) {
+                                        Text(
+                                            text = "${elapsedSec}s",
+                                            color = badgeColor,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(end = 6.dp)
+                                        )
+                                    }
+                                    TextButton(
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                        onClick = {
+                                            scope.launch {
+                                                engine.cancelWorkflowRun(pat, targetRepo, run.id)
+                                                    .onSuccess {
+                                                        Toast.makeText(context, "已取消构建", Toast.LENGTH_SHORT).show()
+                                                        delay(1000)
+                                                        engine.listWorkflowRuns(pat, targetRepo).onSuccess { workflowRuns = it }
+                                                    }
+                                                    .onFailure {
+                                                        Toast.makeText(context, "取消失败", Toast.LENGTH_SHORT).show()
+                                                    }
+                                            }
+                                        },
+                                        modifier = Modifier.height(24.dp)
+                                    ) {
+                                        Text("取消", color = Color(0xFFDC2626), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                }
+                                IconButton(
+                                    onClick = {
+                                        scope.launch {
                                             engine.listWorkflowRuns(pat, targetRepo).onSuccess { workflowRuns = it }
                                         }
-                                        .onFailure {
-                                            Toast.makeText(context, "取消失败", Toast.LENGTH_SHORT).show()
-                                        }
+                                    },
+                                    modifier = Modifier.size(22.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Refresh,
+                                        contentDescription = "刷新状态",
+                                        tint = badgeColor,
+                                        modifier = Modifier
+                                            .size(15.dp)
+                                            .graphicsLayer { rotationZ = spinAngle }
+                                    )
                                 }
-                            },
-                            modifier = Modifier.height(24.dp)
-                        ) {
-                            Text("取消", color = Color(0xFFDC2626), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                        Spacer(modifier = Modifier.width(4.dp))
-                    }
-                    IconButton(
-                        onClick = {
-                            scope.launch {
-                                engine.listWorkflowRuns(pat, targetRepo).onSuccess { workflowRuns = it }
                             }
-                        },
-                        modifier = Modifier.size(22.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Refresh,
-                            contentDescription = "刷新状态",
-                            tint = badgeColor,
-                            modifier = Modifier
-                                .size(15.dp)
-                                .graphicsLayer { rotationZ = spinAngle }
-                        )
-                    }
-                }
 
-                if (run.conclusion == "failure") {
+                            if (run.conclusion == "failure") {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = Color(0xFF1E1E1E),
@@ -1060,6 +1071,9 @@ fun PushGitScreen(
                                     )
                                 }
                             }
+                        }
+                    }
+                }
                         }
                     }
                 }
@@ -1212,23 +1226,83 @@ fun PushGitScreen(
                         Text("该工作流无需额外参数，可直接运行。", fontSize = 13.sp)
                     } else {
                         workflowInputs.forEach { field ->
-                            OutlinedTextField(
-                                value = workflowInputValues[field.key] ?: "",
-                                onValueChange = { workflowInputValues[field.key] = it },
-                                label = {
+                            if (field.options.isNotEmpty()) {
+                                var expanded by remember(field.key) { mutableStateOf(false) }
+                                val currentVal = workflowInputValues[field.key] ?: field.defaultValue.ifBlank { field.options.first() }
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text(
                                         text = if (field.required) "${field.key} *" else field.key,
-                                        fontSize = 12.sp
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                },
-                                supportingText = if (field.description.isNotBlank()) {
-                                    { Text(field.description, fontSize = 11.sp) }
-                                } else null,
-                                singleLine = !field.key.contains("changelog", ignoreCase = true),
-                                minLines = if (field.key.contains("changelog", ignoreCase = true)) 3 else 1,
-                                maxLines = if (field.key.contains("changelog", ignoreCase = true)) 6 else 1,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                                    Box(modifier = Modifier.fillMaxWidth()) {
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { expanded = true }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = currentVal,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Icon(
+                                                    imageVector = Icons.Rounded.ArrowDropDown,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                        }
+                                        DropdownMenu(
+                                            expanded = expanded,
+                                            onDismissRequest = { expanded = false }
+                                        ) {
+                                            field.options.forEach { opt ->
+                                                DropdownMenuItem(
+                                                    text = { Text(opt, fontSize = 14.sp) },
+                                                    onClick = {
+                                                        workflowInputValues[field.key] = opt
+                                                        expanded = false
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                    if (field.description.isNotBlank()) {
+                                        Text(
+                                            text = field.description,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            } else {
+                                OutlinedTextField(
+                                    value = workflowInputValues[field.key] ?: "",
+                                    onValueChange = { workflowInputValues[field.key] = it },
+                                    label = {
+                                        Text(
+                                            text = if (field.required) "${field.key} *" else field.key,
+                                            fontSize = 12.sp
+                                        )
+                                    },
+                                    supportingText = if (field.description.isNotBlank()) {
+                                        { Text(field.description, fontSize = 11.sp) }
+                                    } else null,
+                                    singleLine = !field.key.contains("changelog", ignoreCase = true),
+                                    minLines = if (field.key.contains("changelog", ignoreCase = true)) 3 else 1,
+                                    maxLines = if (field.key.contains("changelog", ignoreCase = true)) 6 else 1,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                     }
                 }

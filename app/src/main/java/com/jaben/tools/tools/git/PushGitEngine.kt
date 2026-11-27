@@ -57,7 +57,8 @@ data class WorkflowInputField(
     val key: String,
     val description: String,
     val required: Boolean,
-    val defaultValue: String
+    val defaultValue: String,
+    val options: List<String> = emptyList()
 )
 
 data class WorkflowRunInfo(
@@ -472,14 +473,20 @@ class PushGitEngine(private val context: Context) {
         var desc = ""
         var req = false
         var defVal = ""
+        val opts = ArrayList<String>()
+        var inOptions = false
+        var optionsIndent = -1
 
         fun flushCurrent() {
             val k = currentKey ?: return
-            result.add(WorkflowInputField(k, desc, req, defVal))
+            result.add(WorkflowInputField(k, desc, req, defVal, opts.toList()))
             currentKey = null
             desc = ""
             req = false
             defVal = ""
+            opts.clear()
+            inOptions = false
+            optionsIndent = -1
         }
 
         for (raw in lines) {
@@ -512,6 +519,15 @@ class PushGitEngine(private val context: Context) {
                     currentKey = trimmed.removeSuffix(":").trim()
                 }
             } else if (indent > keyIndent && currentKey != null) {
+                if (inOptions) {
+                    if (indent > optionsIndent && trimmed.startsWith("-")) {
+                        val opt = trimmed.removePrefix("-").trim().trim('\'', '"')
+                        if (opt.isNotEmpty()) opts.add(opt)
+                        continue
+                    } else {
+                        inOptions = false
+                    }
+                }
                 when {
                     trimmed.startsWith("description:") -> {
                         desc = trimmed.removePrefix("description:").trim().trim('\'', '"')
@@ -521,6 +537,20 @@ class PushGitEngine(private val context: Context) {
                     }
                     trimmed.startsWith("default:") -> {
                         defVal = trimmed.removePrefix("default:").trim().trim('\'', '"')
+                    }
+                    trimmed.startsWith("options:") -> {
+                        val inline = trimmed.removePrefix("options:").trim()
+                        if (inline.startsWith("[") && inline.endsWith("]")) {
+                            inline.removeSurrounding("[", "]")
+                                .split(",")
+                                .map { it.trim().trim('\'', '"') }
+                                .filter { it.isNotEmpty() }
+                                .forEach { opts.add(it) }
+                            inOptions = false
+                        } else {
+                            inOptions = true
+                            optionsIndent = indent
+                        }
                     }
                 }
             }

@@ -3,8 +3,18 @@ name: Build Android APK
 on:
   workflow_dispatch:
     inputs:
+      build_type:
+        description: '选择构建类型'
+        type: choice
+        required: true
+        default: 'release'
+        options:
+          - release
+          - beta
+          - pre-release
+          - debug
       release_version:
-        description: '填写发布版本号（如 0.2.6），将构建 Release 版 APK 并发布到 GitHub Release'
+        description: '填写发布版本号（如 0.2.6）'
         required: true
         default: '0.2.6'
       changelog:
@@ -38,13 +48,36 @@ jobs:
       - name: Resolve Build Version & Changelog
         id: ver
         env:
+          INPUT_TYPE: ${{ github.event.inputs.build_type }}
           INPUT_VERSION: ${{ github.event.inputs.release_version }}
           INPUT_CHANGELOG: ${{ github.event.inputs.changelog }}
         run: |
+          BTYPE="${INPUT_TYPE:-release}"
           RAW="${INPUT_VERSION#v}"
           RAW="${RAW#V}"
           RAW="${RAW:-1.0.0}"
-          TAG="v${RAW}"
+
+          if [ "$BTYPE" = "beta" ]; then
+            TAG="v${RAW}-beta"
+            IS_PRE="true"
+            IS_DEBUG="false"
+          elif [ "$BTYPE" = "pre-release" ]; then
+            TAG="v${RAW}-pre"
+            IS_PRE="true"
+            IS_DEBUG="false"
+          elif [ "$BTYPE" = "debug" ]; then
+            TAG="v${RAW}-debug"
+            IS_PRE="true"
+            IS_DEBUG="true"
+          else
+            TAG="v${RAW}"
+            IS_PRE="false"
+            IS_DEBUG="false"
+          fi
+
+          echo "build_type=${BTYPE}" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=${IS_PRE}" >> "$GITHUB_OUTPUT"
+          echo "is_debug=${IS_DEBUG}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version_name=${RAW}" >> "$GITHUB_OUTPUT"
           echo "version_code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
@@ -76,6 +109,7 @@ jobs:
           fi
 
       - name: Prepare CI Signing Key
+        if: steps.ver.outputs.is_debug != 'true'
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
         run: |
@@ -93,41 +127,68 @@ jobs:
               -dname "CN=Jools, OU=CI, O=Jools, L=Local, ST=Local, C=CN"
           fi
 
+      - name: Build Debug APK
+        if: steps.ver.outputs.is_debug == 'true'
+        run: >
+          gradle assembleDebug --no-daemon --stacktrace
+          -PappVersionName=${{ steps.ver.outputs.version_name }}
+          -PappVersionCode=${{ steps.ver.outputs.version_code }}
+
+      - name: Rename & Upload Debug APK
+        if: steps.ver.outputs.is_debug == 'true'
+        run: |
+          APK_SRC=$(ls app/build/outputs/apk/debug/*.apk | head -n 1)
+          APK_DST="app/build/outputs/apk/debug/Jools-debug-${{ steps.ver.outputs.version_name }}.apk"
+          mv "$APK_SRC" "$APK_DST"
+
+      - name: Upload Debug APK Artifact
+        if: steps.ver.outputs.is_debug == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jools-Debug-APK
+          path: app/build/outputs/apk/debug/Jools-debug-*.apk
+          if-no-files-found: error
+
       - name: Build Release APK
+        if: steps.ver.outputs.is_debug != 'true'
         run: >
           gradle assembleRelease --no-daemon --stacktrace
           -PappVersionName=${{ steps.ver.outputs.version_name }}
           -PappVersionCode=${{ steps.ver.outputs.version_code }}
 
       - name: Rename Release APK
+        if: steps.ver.outputs.is_debug != 'true'
         run: |
           APK_SRC=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
-          APK_DST="app/build/outputs/apk/release/Jools-release-${{ steps.ver.outputs.version_name }}.apk"
+          APK_DST="app/build/outputs/apk/release/Jools-${{ steps.ver.outputs.build_type }}-${{ steps.ver.outputs.version_name }}.apk"
           mv "$APK_SRC" "$APK_DST"
           echo "Renamed APK to $APK_DST"
 
       - name: Upload Release APK Artifact
+        if: steps.ver.outputs.is_debug != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: Jools-Release-APK
-          path: app/build/outputs/apk/release/Jools-release-*.apk
+          path: app/build/outputs/apk/release/Jools-*.apk
           if-no-files-found: error
 
       - name: Publish to GitHub Release (with Changelog)
-        if: steps.ver.outputs.has_changelog == 'true'
+        if: steps.ver.outputs.is_debug != 'true' && steps.ver.outputs.has_changelog == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: Jools ${{ steps.ver.outputs.tag }}
           body: ${{ steps.ver.outputs.changelog }}
-          files: app/build/outputs/apk/release/Jools-release-*.apk
+          files: app/build/outputs/apk/release/Jools-*.apk
+          prerelease: ${{ steps.ver.outputs.is_prerelease == 'true' }}
           generate_release_notes: false
 
       - name: Publish to GitHub Release (Auto Notes)
-        if: steps.ver.outputs.has_changelog != 'true'
+        if: steps.ver.outputs.is_debug != 'true' && steps.ver.outputs.has_changelog != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: Jools ${{ steps.ver.outputs.tag }}
-          files: app/build/outputs/apk/release/Jools-release-*.apk
+          files: app/build/outputs/apk/release/Jools-*.apk
+          prerelease: ${{ steps.ver.outputs.is_prerelease == 'true' }}
           generate_release_notes: true
