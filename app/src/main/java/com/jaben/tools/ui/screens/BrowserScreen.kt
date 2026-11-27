@@ -18,6 +18,18 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import com.jaben.tools.data.AdBlockManager
+import android.webkit.JavascriptInterface
+import androidx.compose.material.icons.rounded.PlayCircle
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.runtime.rememberCoroutineScope
+import com.jaben.tools.data.AdBlockSubscription
+import com.jaben.tools.data.CompiledAdBlockRules
+import com.jaben.tools.ui.components.BuiltInVideoPlayerOverlay
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import android.graphics.Bitmap
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
@@ -227,13 +239,37 @@ fun BrowserScreen(
     var showDownloadsDialog by remember { mutableStateOf(false) }
     var showMenuSheet by remember { mutableStateOf(false) }
     var showAdBlockRulesDialog by remember { mutableStateOf(false) }
-    var newRuleInput by remember { mutableStateOf("") }
+    var adBlockDialogTab by remember { mutableIntStateOf(0) }
+    var newSubNameInput by remember { mutableStateOf("") }
+    var newSubUrlInput by remember { mutableStateOf("") }
+    var newDomainInput by remember { mutableStateOf("") }
+    var isRefreshingSubs by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     val adBlockManager = remember(context) { AdBlockManager(context) }
     var adBlockEnabled by remember { mutableStateOf(adBlockManager.isEnabled()) }
-    var adBlockRules by remember { mutableStateOf(adBlockManager.getRules()) }
+    var adBlockSubscriptions by remember { mutableStateOf(adBlockManager.getSubscriptions()) }
+    var customDomains by remember { mutableStateOf(adBlockManager.getCustomDomains()) }
+    var compiledAdRules by remember { mutableStateOf(adBlockManager.compileActiveRules()) }
     val currentAdBlockEnabled by rememberUpdatedState(adBlockEnabled)
-    val currentAdBlockRules by rememberUpdatedState(adBlockRules)
+    val currentCompiledAdRules by rememberUpdatedState(compiledAdRules)
+
+    var detectedVideoUrl by remember { mutableStateOf<String?>(null) }
+    var detectedVideoPosMs by remember { mutableStateOf(0L) }
+    var activeBuiltInVideoUrl by remember { mutableStateOf<String?>(null) }
+    var webViewUserAgent by remember { mutableStateOf("Mozilla/5.0") }
+
+    LaunchedEffect(Unit) {
+        val subs = adBlockManager.getSubscriptions()
+        val needsInitialFetch = subs.any { it.enabled && it.lastUpdatedMs == 0L }
+        if (needsInitialFetch) {
+            isRefreshingSubs = true
+            adBlockManager.refreshAllEnabled()
+            adBlockSubscriptions = adBlockManager.getSubscriptions()
+            compiledAdRules = adBlockManager.compileActiveRules()
+            isRefreshingSubs = false
+        }
+    }
 
     var customVideoView by remember { mutableStateOf<View?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
@@ -528,6 +564,19 @@ fun BrowserScreen(
                         settings.mediaPlaybackRequiresUserGesture = false
                         settings.javaScriptCanOpenWindowsAutomatically = false
                         settings.setSupportMultipleWindows(false)
+                        webViewUserAgent = settings.userAgentString ?: "Mozilla/5.0"
+                        addJavascriptInterface(object {
+                            @JavascriptInterface
+                            fun onVideoFound(src: String?, posSec: Double) {
+                                val clean = src?.trim().orEmpty()
+                                if (clean.startsWith("http://") || clean.startsWith("https://")) {
+                                    post {
+                                        detectedVideoUrl = clean
+                                        detectedVideoPosMs = (posSec * 1000.0).toLong().coerceAtLeast(0L)
+                                    }
+                                }
+                            }
+                        }, "JoolsVideoBridge")
                         clipToOutline = true
                         setBackgroundColor(barBg.toArgb())
                         setDownloadListener { url, userAgent, contentDisposition, mimetype, contentLength ->
@@ -544,7 +593,7 @@ fun BrowserScreen(
                             ): android.webkit.WebResourceResponse? {
                                 if (currentAdBlockEnabled && request != null && !request.isForMainFrame) {
                                     val reqUrl = request.url?.toString().orEmpty()
-                                    if (adBlockManager.shouldBlock(reqUrl, currentAdBlockRules)) {
+                                    if (adBlockManager.shouldBlock(reqUrl, currentCompiledAdRules)) {
                                         return AdBlockManager.emptyResponse()
                                     }
                                 }
@@ -561,6 +610,8 @@ fun BrowserScreen(
 
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 isLoading = true
+                                detectedVideoUrl = null
+                                detectedVideoPosMs = 0L
                                 if (!url.isNullOrEmpty() && (url.startsWith("http://") || url.startsWith("https://"))) {
                                     urlInput = url
                                 }
@@ -569,6 +620,7 @@ fun BrowserScreen(
                                 if (currentAdBlockEnabled) {
                                     view?.evaluateJavascript(AdBlockManager.COSMETIC_JS, null)
                                 }
+                                view?.evaluateJavascript(VIDEO_DETECTOR_JS, null)
                             }
 
                             override fun onPageCommitVisible(view: WebView?, url: String?) {
@@ -709,6 +761,53 @@ fun BrowserScreen(
                             focusManager.clearFocus()
                         }
                 )
+            }
+
+            // Floating built-in video player trigger when a playable video is detected on page
+            AnimatedVisibility(
+                visible = detectedVideoUrl != null && !showBookmarks,
+                enter = fadeIn(tween(180)),
+                exit = fadeOut(tween(150)),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 14.dp, bottom = 14.dp)
+                    .zIndex(1f)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shadowElevation = 6.dp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(24.dp))
+                        .clickable {
+                            val vUrl = detectedVideoUrl ?: return@clickable
+                            runCatching {
+                                webViewRef?.evaluateJavascript(
+                                    "document.querySelectorAll('video').forEach(function(v){v.pause();});",
+                                    null
+                                )
+                            }
+                            activeBuiltInVideoUrl = vUrl
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "内置播放器",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
             }
 
             // Smooth Bookmark Dropdown Menu right below the address bar
@@ -1193,6 +1292,7 @@ fun BrowserScreen(
 
     if (showMenuSheet) {
         val activeDownloadCount = downloadItems.count { it.status == DownloadStatus.DOWNLOADING }
+        val totalRuleCount = compiledAdRules.totalCount
         ModalBottomSheet(
             onDismissRequest = { showMenuSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1247,7 +1347,7 @@ fun BrowserScreen(
                     }
                 }
 
-                // 2. 屏蔽广告（点击开关，长按编辑规则）
+                // 2. 屏蔽广告（点击开关，长按管理订阅与自定义屏蔽域名）
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
@@ -1289,7 +1389,7 @@ fun BrowserScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text("屏蔽广告", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                             Text(
-                                text = "点击开关 · 长按编辑规则 (${adBlockRules.size} 条)",
+                                text = "点击开关 · 长按管理订阅与域名 (${totalRuleCount} 条)",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1310,47 +1410,6 @@ fun BrowserScreen(
                     }
                 }
 
-                // 3. 网页视频全屏辅助
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable {
-                            showMenuSheet = false
-                            webViewRef?.evaluateJavascript(AdBlockManager.FORCE_VIDEO_FULLSCREEN_JS) { res ->
-                                val cleaned = res?.trim('"') ?: ""
-                                if (cleaned == "NO_VIDEO") {
-                                    Toast.makeText(context, "当前页面未检测到视频", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Fullscreen,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("视频全屏播放", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                text = "将当前网页视频切换为横屏全屏",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
                 Spacer(modifier = Modifier.height(12.dp))
             }
         }
@@ -1359,79 +1418,223 @@ fun BrowserScreen(
     if (showAdBlockRulesDialog) {
         AlertDialog(
             onDismissRequest = { showAdBlockRulesDialog = false },
-            title = { Text("编辑广告屏蔽规则", fontWeight = FontWeight.Bold) },
+            title = { Text("广告屏蔽订阅与规则", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = newRuleInput,
-                            onValueChange = { newRuleInput = it },
-                            placeholder = { Text("输入域名或关键词，如 doubleclick.net", fontSize = 12.sp) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
+                    TabRow(selectedTabIndex = adBlockDialogTab) {
+                        Tab(
+                            selected = adBlockDialogTab == 0,
+                            onClick = { adBlockDialogTab = 0 },
+                            text = { Text("规则订阅 (${adBlockSubscriptions.size})", fontSize = 13.sp) }
                         )
-                        FilledTonalButton(
-                            onClick = {
-                                val trimmed = newRuleInput.trim()
-                                if (trimmed.isNotEmpty()) {
-                                    adBlockRules = adBlockManager.addRule(trimmed)
-                                    newRuleInput = ""
-                                }
-                            }
-                        ) {
-                            Text("添加")
-                        }
+                        Tab(
+                            selected = adBlockDialogTab == 1,
+                            onClick = { adBlockDialogTab = 1 },
+                            text = { Text("自定义域名 (${customDomains.size})", fontSize = 13.sp) }
+                        )
                     }
 
-                    Text(
-                        text = "当前规则 (${adBlockRules.size} 条)",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 260.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        itemsIndexed(adBlockRules, key = { idx, item -> "${idx}_$item" }) { _, rule ->
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.fillMaxWidth()
+                    if (adBlockDialogTab == 0) {
+                        OutlinedTextField(
+                            value = newSubNameInput,
+                            onValueChange = { newSubNameInput = it },
+                            placeholder = { Text("订阅名称（可选）", fontSize = 12.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = newSubUrlInput,
+                                onValueChange = { newSubUrlInput = it },
+                                placeholder = { Text("订阅链接 https://...", fontSize = 12.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilledTonalButton(
+                                onClick = {
+                                    val urlStr = newSubUrlInput.trim()
+                                    if (urlStr.startsWith("http://") || urlStr.startsWith("https://")) {
+                                        val updated = adBlockManager.addSubscription(newSubNameInput, urlStr)
+                                        adBlockSubscriptions = updated
+                                        newSubNameInput = ""
+                                        newSubUrlInput = ""
+                                        val added = updated.lastOrNull { it.url.equals(urlStr, ignoreCase = true) }
+                                        if (added != null) {
+                                            coroutineScope.launch {
+                                                isRefreshingSubs = true
+                                                adBlockManager.refreshSubscription(added.id)
+                                                adBlockSubscriptions = adBlockManager.getSubscriptions()
+                                                compiledAdRules = adBlockManager.compileActiveRules()
+                                                isRefreshingSubs = false
+                                            }
+                                        }
+                                    } else {
+                                        Toast.makeText(context, "请输入有效订阅链接", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                Text("添加")
+                            }
+                        }
+
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 220.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            itemsIndexed(adBlockSubscriptions, key = { _, s -> s.id }) { _, sub ->
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text(
-                                        text = rule,
-                                        fontSize = 13.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    IconButton(
-                                        onClick = {
-                                            adBlockRules = adBlockManager.removeRule(rule)
-                                        },
-                                        modifier = Modifier.size(32.dp)
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = 10.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.DeleteOutline,
-                                            contentDescription = "删除规则",
-                                            modifier = Modifier.size(18.dp)
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = sub.name,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            val timeText = if (sub.lastUpdatedMs > 0L) {
+                                                SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(sub.lastUpdatedMs))
+                                            } else {
+                                                "未更新(内置基础)"
+                                            }
+                                            Text(
+                                                text = "${sub.ruleCount} 条 · $timeText",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    isRefreshingSubs = true
+                                                    val res = adBlockManager.refreshSubscription(sub.id)
+                                                    adBlockSubscriptions = adBlockManager.getSubscriptions()
+                                                    compiledAdRules = adBlockManager.compileActiveRules()
+                                                    isRefreshingSubs = false
+                                                    Toast.makeText(
+                                                        context,
+                                                        if (res.isSuccess) "更新成功" else "更新失败",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                            },
+                                            modifier = Modifier.size(30.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Refresh,
+                                                contentDescription = "更新订阅",
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        }
+                                        if (!sub.isBuiltIn) {
+                                            IconButton(
+                                                onClick = {
+                                                    adBlockSubscriptions = adBlockManager.removeSubscription(sub.id)
+                                                    compiledAdRules = adBlockManager.compileActiveRules()
+                                                },
+                                                modifier = Modifier.size(30.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.DeleteOutline,
+                                                    contentDescription = "删除订阅",
+                                                    modifier = Modifier.size(17.dp)
+                                                )
+                                            }
+                                        }
+                                        Switch(
+                                            checked = sub.enabled,
+                                            onCheckedChange = { checked ->
+                                                adBlockSubscriptions = adBlockManager.toggleSubscription(sub.id, checked)
+                                                compiledAdRules = adBlockManager.compileActiveRules()
+                                            }
                                         )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = newDomainInput,
+                                onValueChange = { newDomainInput = it },
+                                placeholder = { Text("输入屏蔽域名，如 ads.example.com", fontSize = 12.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilledTonalButton(
+                                onClick = {
+                                    val trimmed = newDomainInput.trim()
+                                    if (trimmed.isNotEmpty()) {
+                                        customDomains = adBlockManager.addCustomDomain(trimmed)
+                                        compiledAdRules = adBlockManager.compileActiveRules()
+                                        newDomainInput = ""
+                                    }
+                                }
+                            ) {
+                                Text("添加")
+                            }
+                        }
+
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 240.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            itemsIndexed(customDomains, key = { idx, item -> "${idx}_$item" }) { _, domain ->
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = domain,
+                                            fontSize = 13.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        IconButton(
+                                            onClick = {
+                                                customDomains = adBlockManager.removeCustomDomain(domain)
+                                                compiledAdRules = adBlockManager.compileActiveRules()
+                                            },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.DeleteOutline,
+                                                contentDescription = "删除域名",
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1453,14 +1656,36 @@ fun BrowserScreen(
             },
             dismissButton = {
                 TextButton(
+                    enabled = !isRefreshingSubs,
                     onClick = {
-                        adBlockRules = adBlockManager.resetToDefault()
-                        Toast.makeText(context, "已恢复默认规则", Toast.LENGTH_SHORT).show()
+                        coroutineScope.launch {
+                            isRefreshingSubs = true
+                            val ok = adBlockManager.refreshAllEnabled()
+                            adBlockSubscriptions = adBlockManager.getSubscriptions()
+                            compiledAdRules = adBlockManager.compileActiveRules()
+                            isRefreshingSubs = false
+                            Toast.makeText(
+                                context,
+                                if (ok > 0) "已更新 $ok 个订阅" else "更新失败，请检查网络",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
                     }
                 ) {
-                    Text("恢复默认")
+                    Text(if (isRefreshingSubs) "更新中..." else "全部更新")
                 }
             }
+        )
+    }
+
+    activeBuiltInVideoUrl?.let { vUrl ->
+        BuiltInVideoPlayerOverlay(
+            videoUrl = vUrl,
+            pageUrl = urlInput,
+            pageTitle = pageTitle,
+            userAgent = webViewUserAgent,
+            initialPositionMs = detectedVideoPosMs,
+            onClose = { activeBuiltInVideoUrl = null }
         )
     }
 
