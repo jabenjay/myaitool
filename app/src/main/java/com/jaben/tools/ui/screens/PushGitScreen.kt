@@ -42,6 +42,7 @@ import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -167,6 +168,7 @@ fun PushGitScreen(
     var showRunWorkflowDialog by remember { mutableStateOf(false) }
     var isLoadingWorkflowInputs by remember { mutableStateOf(false) }
     var isDispatchingWorkflow by remember { mutableStateOf(false) }
+    var hasPendingBuildAfterPush by remember { mutableStateOf(false) }
     var workflowRuns by remember { mutableStateOf<List<WorkflowRunInfo>>(emptyList()) }
     var showRunHistoryMenu by remember { mutableStateOf(false) }
     var isFetchingRuns by remember { mutableStateOf(false) }
@@ -818,6 +820,7 @@ fun PushGitScreen(
                             pushStatus = "推送中 ($done/$total): $cur"
                         }.onSuccess { res ->
                             pushStatus = "推送成功: ${res.fileCount} 个文件 (${res.commitSha.take(7)})"
+                            hasPendingBuildAfterPush = true
                             diffSummary = null
                             Toast.makeText(context, "推送成功", Toast.LENGTH_SHORT).show()
                         }.onFailure { err ->
@@ -867,6 +870,14 @@ fun PushGitScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilledTonalButton(
+                    colors = if (hasPendingBuildAfterPush) {
+                        ButtonDefaults.filledTonalButtonColors(
+                            containerColor = Color(0xFF1B8E3E),
+                            contentColor = Color.White
+                        )
+                    } else {
+                        ButtonDefaults.filledTonalButtonColors()
+                    },
                     onClick = {
                         scope.launch {
                             isLoadingWorkflowInputs = true
@@ -1482,6 +1493,7 @@ fun PushGitScreen(
                             engine.dispatchWorkflow(pat, targetRepo, targetWf.id, branch, inputsMap)
                                 .onSuccess {
                                     showRunWorkflowDialog = false
+                                    hasPendingBuildAfterPush = false
                                     Toast.makeText(context, "已触发 Run workflow", Toast.LENGTH_SHORT).show()
                                     delay(1500)
                                     engine.listWorkflowRuns(pat, targetRepo).onSuccess { workflowRuns = it }

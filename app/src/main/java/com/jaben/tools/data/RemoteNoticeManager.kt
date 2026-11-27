@@ -26,10 +26,10 @@ object RemoteNoticeManager {
     private const val KEY_NOTICE_HASH = "ack_usage_notice_hash"
     private const val KEY_ANNOUNCEMENT_HASH = "ack_announcement_hash"
 
-    private const val API_NOTICE_URL = "https://api.github.com/repos/jabenjay/myaitool/contents/NOTICE.md?ref=main"
-    private const val API_ANNOUNCEMENT_URL = "https://api.github.com/repos/jabenjay/myaitool/contents/ANNOUNCEMENT.md?ref=main"
-    private const val RAW_NOTICE_URL = "https://raw.githubusercontent.com/jabenjay/myaitool/main/NOTICE.md"
-    private const val RAW_ANNOUNCEMENT_URL = "https://raw.githubusercontent.com/jabenjay/myaitool/main/ANNOUNCEMENT.md"
+    private const val API_NOTICE_URL = "https://api.github.com/repos/jabenjay/myaitool/contents/notices/usage_notice/NOTICE.md?ref=main"
+    private const val API_ANNOUNCEMENT_URL = "https://api.github.com/repos/jabenjay/myaitool/contents/notices/announcement/ANNOUNCEMENT.md?ref=main"
+    private const val RAW_NOTICE_URL = "https://raw.githubusercontent.com/jabenjay/myaitool/main/notices/usage_notice/NOTICE.md"
+    private const val RAW_ANNOUNCEMENT_URL = "https://raw.githubusercontent.com/jabenjay/myaitool/main/notices/announcement/ANNOUNCEMENT.md"
 
     private const val BUNDLED_DEFAULT_NOTICE = """# Jools 使用须知
 
