@@ -564,62 +564,78 @@ private struct IpaImportersModifier: ViewModifier {
         }
     }
 
+    private enum ActiveImportKind: String, Identifiable {
+        case ipa, certZip, p12, profile
+        var id: String { rawValue }
+    }
+
+    private var activeImportBinding: Binding<ActiveImportKind?> {
+        Binding(
+            get: {
+                if showIpaImporter { return .ipa }
+                if showCertZipImporter { return .certZip }
+                if showP12Importer { return .p12 }
+                if showProfileImporter { return .profile }
+                return nil
+            },
+            set: { next in
+                if next == nil {
+                    showIpaImporter = false
+                    showCertZipImporter = false
+                    showP12Importer = false
+                    showProfileImporter = false
+                }
+            }
+        )
+    }
+
+    private func handlePickedFile(_ url: URL, kind: ActiveImportKind) {
+        switch kind {
+        case .ipa:
+            do {
+                let item = try manager.importIpa(from: url, asSigned: false)
+                selectedTab = 0
+                toastMsg = "已导入「\(item.appName)」到未签名列表"
+            } catch {
+                toastMsg = "导入失败：\(error.localizedDescription)"
+            }
+        case .certZip:
+            handleZipImport(url)
+        case .p12:
+            if url.pathExtension.lowercased() == "zip" {
+                handleZipImport(url)
+            } else {
+                pendingP12URL = url
+                p12Password = ""
+                p12Alias = url.deletingPathExtension().lastPathComponent
+                showP12PasswordAlert = true
+            }
+        case .profile:
+            do {
+                let prof = try manager.importProfile(from: url)
+                selectedTab = 2
+                toastMsg = "已导入描述文件「\(prof.name)」"
+            } catch {
+                toastMsg = "导入失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
     func body(content: Content) -> some View {
         content
-            .fileImporter(
-                isPresented: $showIpaImporter,
-                allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data, .archive],
-                allowsMultipleSelection: false
-            ) { result in
-                if case .success(let urls) = result, let url = urls.first {
-                    do {
-                        let item = try manager.importIpa(from: url, asSigned: false)
-                        selectedTab = 0
-                        toastMsg = "已导入「\(item.appName)」到未签名列表"
-                    } catch {
-                        toastMsg = "导入失败：\(error.localizedDescription)"
+            .sheet(item: activeImportBinding) { kind in
+                IpaDocumentPickerView { url in
+                    showIpaImporter = false
+                    showCertZipImporter = false
+                    showP12Importer = false
+                    showProfileImporter = false
+                    if let url {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                            handlePickedFile(url, kind: kind)
+                        }
                     }
                 }
-            }
-            .fileImporter(
-                isPresented: $showCertZipImporter,
-                allowedContentTypes: [.zip, .archive, .data],
-                allowsMultipleSelection: false
-            ) { result in
-                if case .success(let urls) = result, let url = urls.first {
-                    handleZipImport(url)
-                }
-            }
-            .fileImporter(
-                isPresented: $showP12Importer,
-                allowedContentTypes: [UTType(filenameExtension: "p12") ?? .pkcs12, .zip, .archive, .data],
-                allowsMultipleSelection: false
-            ) { result in
-                if case .success(let urls) = result, let url = urls.first {
-                    if url.pathExtension.lowercased() == "zip" {
-                        handleZipImport(url)
-                    } else {
-                        pendingP12URL = url
-                        p12Password = ""
-                        p12Alias = url.deletingPathExtension().lastPathComponent
-                        showP12PasswordAlert = true
-                    }
-                }
-            }
-            .fileImporter(
-                isPresented: $showProfileImporter,
-                allowedContentTypes: [UTType(filenameExtension: "mobileprovision") ?? .data],
-                allowsMultipleSelection: false
-            ) { result in
-                if case .success(let urls) = result, let url = urls.first {
-                    do {
-                        let prof = try manager.importProfile(from: url)
-                        selectedTab = 2
-                        toastMsg = "已导入描述文件「\(prof.name)」"
-                    } catch {
-                        toastMsg = "导入失败：\(error.localizedDescription)"
-                    }
-                }
+                .ignoresSafeArea()
             }
             .alert("导入 P12 证书", isPresented: $showP12PasswordAlert) {
                 TextField("证书备注名称", text: $p12Alias)
@@ -646,4 +662,35 @@ private struct IpaShareSheet: UIViewControllerRepresentable {
         UIActivityViewController(activityItems: items, applicationActivities: nil)
     }
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+
+private struct IpaDocumentPickerView: UIViewControllerRepresentable {
+    let onPick: (URL?) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick)
+    }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
+        picker.allowsMultipleSelection = false
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onPick: (URL?) -> Void
+        init(onPick: @escaping (URL?) -> Void) { self.onPick = onPick }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            onPick(urls.first)
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onPick(nil)
+        }
+    }
 }
