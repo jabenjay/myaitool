@@ -76,9 +76,7 @@ final class AppUpdateChecker {
             let tag = (matched["tag_name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let name = ((matched["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? tag
             let rawNotes = (matched["body"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let notes = rawNotes.components(separatedBy: .newlines)
-                .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("**Full Changelog**") }
-                .joined(separator: "\n")
+            let notes = extractPlatformNotes(rawNotes, platform: "ios")
             let htmlUrl = (matched["html_url"] as? String) ?? "\(repoURL)/releases"
 
             var ipaUrl: String? = nil
@@ -105,6 +103,36 @@ final class AppUpdateChecker {
         } catch {
             return .error(message: error.localizedDescription)
         }
+    }
+
+
+    private static func extractPlatformNotes(_ body: String, platform: String) -> String {
+        let lines = body.components(separatedBy: .newlines)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("**Full Changelog**") }
+        let targetHeader = platform == "ios" ? "## ios" : "## android"
+        let hasPlatformSections = lines.contains {
+            let t = $0.trimmingCharacters(in: .whitespaces).lowercased()
+            return t.hasPrefix("## android") || t.hasPrefix("## ios")
+        }
+        guard hasPlatformSections else {
+            return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        var capturing = false
+        var collected: [String] = []
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces).lowercased()
+            if trimmed.hasPrefix("## ") {
+                if trimmed.hasPrefix(targetHeader) {
+                    capturing = true
+                    continue
+                } else if capturing {
+                    break
+                }
+            } else if capturing {
+                collected.append(line)
+            }
+        }
+        return collected.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func matchesChannel(_ release: [String: Any], channel: UpdateChannel) -> Bool {

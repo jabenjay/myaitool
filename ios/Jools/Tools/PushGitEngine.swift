@@ -315,8 +315,8 @@ final class PushGitEngine: ObservableObject {
         return nil
     }
 
-    func fetchChangelog(_ pat: String, repo: String, branch: String) async -> String? {
-        guard let d = try? await apiRequest(method: "GET", urlStr: "https://api.github.com/repos/\(repo)/contents/CHANGELOG.md?ref=\(branch)", pat: pat, body: nil),
+    func fetchChangelog(_ pat: String, repo: String, branch: String, file: String = "CHANGELOG_IOS.md") async -> String? {
+        guard let d = try? await apiRequest(method: "GET", urlStr: "https://api.github.com/repos/\(repo)/contents/\(file)?ref=\(branch)", pat: pat, body: nil),
               let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
               let b64 = (obj["content"] as? String)?.replacingOccurrences(of: "\n", with: ""),
               let raw = Data(base64Encoded: b64) else { return nil }

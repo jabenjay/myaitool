@@ -231,16 +231,20 @@ fun PushGitScreen(
         scope.launch {
             isLoadingWorkflowInputs = true
             val nextVer = engine.fetchNextReleaseVersion(pat, targetRepo)
-            val remoteChangelog = engine.fetchChangelogContent(pat, targetRepo, branch)
+            val androidChangelog = engine.fetchChangelogContent(pat, targetRepo, branch, "CHANGELOG_ANDROID.md")
+            val iosChangelog = engine.fetchChangelogContent(pat, targetRepo, branch, "CHANGELOG_IOS.md")
             engine.fetchWorkflowInputs(pat, targetRepo, wf.path, branch)
                 .onSuccess { fields ->
                     workflowInputs = fields
                     workflowInputValues.clear()
                     fields.forEach { f ->
+                        val k = f.key.lowercase()
                         val prefill = when {
                             f.options.isNotEmpty() -> f.defaultValue.takeIf { it in f.options } ?: f.options.first()
-                            f.key.contains("version", ignoreCase = true) && !nextVer.isNullOrBlank() -> nextVer
-                            f.key.contains("changelog", ignoreCase = true) && !remoteChangelog.isNullOrBlank() -> remoteChangelog
+                            k.contains("version") && !nextVer.isNullOrBlank() -> nextVer
+                            k.contains("android") && k.contains("changelog") && !androidChangelog.isNullOrBlank() -> androidChangelog
+                            k.contains("ios") && k.contains("changelog") && !iosChangelog.isNullOrBlank() -> iosChangelog
+                            k.contains("changelog") && !(androidChangelog ?: iosChangelog).isNullOrBlank() -> (androidChangelog ?: iosChangelog)!!
                             else -> f.defaultValue
                         }
                         workflowInputValues[f.key] = prefill

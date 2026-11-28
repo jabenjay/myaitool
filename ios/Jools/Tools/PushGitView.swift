@@ -485,17 +485,24 @@ struct PushGitView: View {
         }
         selectedWorkflow = wf
         let nextVer = await engine.fetchNextReleaseVersion(pat, repo: targetRepo)
-        let changelog = await engine.fetchChangelog(pat, repo: targetRepo, branch: branch)
+        async let androidClTask = engine.fetchChangelog(pat, repo: targetRepo, branch: branch, file: "CHANGELOG_ANDROID.md")
+        async let iosClTask = engine.fetchChangelog(pat, repo: targetRepo, branch: branch, file: "CHANGELOG_IOS.md")
+        let (androidChangelog, iosChangelog) = await (androidClTask, iosClTask)
         let fields = (try? await engine.fetchWorkflowInputs(pat, repo: targetRepo, workflowPath: wf.path, branch: branch)) ?? []
         workflowInputs = fields
         workflowInputValues = [:]
         for f in fields {
+            let k = f.key.lowercased()
             if !f.options.isEmpty {
                 workflowInputValues[f.key] = f.options.contains(f.defaultValue) ? f.defaultValue : f.options[0]
-            } else if f.key.lowercased().contains("version"), let nextVer {
+            } else if k.contains("version"), let nextVer {
                 workflowInputValues[f.key] = nextVer
-            } else if f.key.lowercased().contains("changelog"), let changelog {
-                workflowInputValues[f.key] = changelog
+            } else if k.contains("android") && k.contains("changelog"), let androidChangelog {
+                workflowInputValues[f.key] = androidChangelog
+            } else if k.contains("ios") && k.contains("changelog"), let iosChangelog {
+                workflowInputValues[f.key] = iosChangelog
+            } else if k.contains("changelog"), let fallbackCl = iosChangelog ?? androidChangelog {
+                workflowInputValues[f.key] = fallbackCl
             } else {
                 workflowInputValues[f.key] = f.defaultValue
             }
@@ -567,6 +574,19 @@ struct PushGitView: View {
                                 ForEach(field.options, id: \.self) { opt in
                                     Text(opt).tag(opt)
                                 }
+                            }
+                        } else if field.key.lowercased().contains("changelog") {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(field.key).font(.system(size: 12, weight: .medium)).foregroundColor(.secondary)
+                                TextEditor(text: Binding(
+                                    get: { workflowInputValues[field.key] ?? "" },
+                                    set: { workflowInputValues[field.key] = $0 }
+                                ))
+                                .font(.system(size: 12))
+                                .frame(minHeight: 88, maxHeight: 150)
+                                .padding(4)
+                                .background(Color(uiColor: .secondarySystemGroupedBackground))
+                                .cornerRadius(8)
                             }
                         } else {
                             VStack(alignment: .leading, spacing: 4) {

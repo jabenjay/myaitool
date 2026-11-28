@@ -17,8 +17,12 @@ on:
         description: '填写发布版本号（如 0.3.12）'
         required: true
         default: '0.3.12'
-      changelog:
-        description: '单行快捷更新日志（留空则自动读取仓库根目录的 CHANGELOG.md 多行文件）'
+      android_changelog:
+        description: 'Android 更新日志（留空则自动读取仓库根目录的 CHANGELOG_ANDROID.md）'
+        required: false
+        default: ''
+      ios_changelog:
+        description: 'iOS 更新日志（留空则自动读取仓库根目录的 CHANGELOG_IOS.md）'
         required: false
         default: ''
       ios_runner:
@@ -59,7 +63,8 @@ jobs:
         env:
           INPUT_TYPE: ${{ github.event.inputs.build_type }}
           INPUT_VERSION: ${{ github.event.inputs.release_version }}
-          INPUT_CHANGELOG: ${{ github.event.inputs.changelog }}
+          INPUT_ANDROID_CHANGELOG: ${{ github.event.inputs.android_changelog }}
+          INPUT_IOS_CHANGELOG: ${{ github.event.inputs.ios_changelog }}
         run: |
           BTYPE="${INPUT_TYPE:-release}"
           RAW="${INPUT_VERSION#v}"
@@ -96,24 +101,42 @@ jobs:
           echo "version_code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           echo "cfg=${CFG}" >> "$GITHUB_OUTPUT"
 
-          if [ -n "$INPUT_CHANGELOG" ]; then
-            FORMATTED=$(printf '%s' "$INPUT_CHANGELOG" | sed 's/；/;/g; s/;/\n- /g')
-            NL=$(printf '\n')
-            case "$FORMATTED" in
-              -*|\#*|*"$NL"*) ;;
-              *) FORMATTED="- $FORMATTED" ;;
-            esac
+          format_cl() {
+            local raw="$1"
+            local file="$2"
+            if [ -n "$raw" ]; then
+              local fmt
+              fmt=$(printf '%s' "$raw" | sed '/^# /d' | sed '/./,$!d' | sed 's/；/;/g; s/;/\n- /g')
+              local nl
+              nl=$(printf '\n')
+              case "$fmt" in
+                -*|\#*|*"$nl"*) ;;
+                *) [ -n "$fmt" ] && fmt="- $fmt" ;;
+              esac
+              printf '%s\n' "$fmt"
+            elif [ -f "$file" ] && [ -s "$file" ]; then
+              sed '/^# /d' "$file" | sed '/./,$!d'
+            fi
+          }
+
+          ANDROID_CL=$(format_cl "$INPUT_ANDROID_CHANGELOG" "CHANGELOG_ANDROID.md")
+          IOS_CL=$(format_cl "$INPUT_IOS_CHANGELOG" "CHANGELOG_IOS.md")
+          COMBINED_CL=""
+          if [ -n "$ANDROID_CL" ]; then
+            COMBINED_CL="## Android 更新日志"$'\n'"${ANDROID_CL}"
+          fi
+          if [ -n "$IOS_CL" ]; then
+            if [ -n "$COMBINED_CL" ]; then
+              COMBINED_CL="${COMBINED_CL}"$'\n\n'"## iOS 更新日志"$'\n'"${IOS_CL}"
+            else
+              COMBINED_CL="## iOS 更新日志"$'\n'"${IOS_CL}"
+            fi
+          fi
+
+          if [ -n "$COMBINED_CL" ]; then
             {
               echo "changelog<<EOF_CHANGELOG"
-              printf '%s\n' "$FORMATTED"
-              echo "EOF_CHANGELOG"
-            } >> "$GITHUB_OUTPUT"
-            echo "has_changelog=true" >> "$GITHUB_OUTPUT"
-          elif [ -f CHANGELOG.md ] && [ -s CHANGELOG.md ]; then
-            {
-              echo "changelog<<EOF_CHANGELOG"
-              cat CHANGELOG.md
-              echo ""
+              printf '%s\n' "$COMBINED_CL"
               echo "EOF_CHANGELOG"
             } >> "$GITHUB_OUTPUT"
             echo "has_changelog=true" >> "$GITHUB_OUTPUT"

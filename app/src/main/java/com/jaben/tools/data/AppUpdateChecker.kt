@@ -122,13 +122,7 @@ object AppUpdateChecker {
                 val tagName = json.optString("tag_name", "").trim()
                 val releaseName = json.optString("name", tagName).trim().ifBlank { tagName }
                 val rawNotes = json.optString("body", "").trim()
-                val releaseNotes = rawNotes.lines()
-                    .filterNot { line ->
-                        val t = line.trim()
-                        t.startsWith("**Full Changelog**") || t.startsWith("Full Changelog:")
-                    }
-                    .joinToString("\n")
-                    .trim()
+                val releaseNotes = extractPlatformNotes(rawNotes, "android")
                 val htmlUrl = json.optString("html_url", "$REPO_URL/releases")
 
                 var apkUrl: String? = null
@@ -161,6 +155,37 @@ object AppUpdateChecker {
                 runCatching { conn?.disconnect() }
             }
         }
+
+
+    private fun extractPlatformNotes(body: String, platform: String): String {
+        val lines = body.lines().filterNot { line ->
+            val t = line.trim()
+            t.startsWith("**Full Changelog**") || t.startsWith("Full Changelog:")
+        }
+        val targetHeader = if (platform == "android") "## android" else "## ios"
+        val hasPlatformSections = lines.any {
+            val t = it.trim().lowercase()
+            t.startsWith("## android") || t.startsWith("## ios")
+        }
+        if (!hasPlatformSections) {
+            return lines.joinToString("\n").trim()
+        }
+        var capturing = false
+        val collected = ArrayList<String>()
+        for (line in lines) {
+            val trimmed = line.trim().lowercase()
+            if (trimmed.startsWith("## ")) {
+                if (trimmed.startsWith(targetHeader)) {
+                    capturing = true
+                } else if (capturing) {
+                    break
+                }
+            } else if (capturing) {
+                collected.add(line)
+            }
+        }
+        return collected.joinToString("\n").trim()
+    }
 
     fun startSystemDownload(context: Context, downloadUrl: String, latestVersion: String): Boolean {
         return runCatching {

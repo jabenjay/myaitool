@@ -601,10 +601,15 @@ class PushGitEngine(private val context: Context) {
         }
     }
 
-    suspend fun fetchChangelogContent(pat: String, ownerRepoInput: String, branch: String): String? = withContext(Dispatchers.IO) {
+    suspend fun fetchChangelogContent(
+        pat: String,
+        ownerRepoInput: String,
+        branch: String,
+        fileName: String = "CHANGELOG_ANDROID.md"
+    ): String? = withContext(Dispatchers.IO) {
         runCatching {
             val repo = parseOwnerRepo(ownerRepoInput)
-            val resp = apiRequest("GET", "https://api.github.com/repos/$repo/contents/CHANGELOG.md?ref=${branch.trim()}", pat, null)
+            val resp = apiRequest("GET", "https://api.github.com/repos/$repo/contents/$fileName?ref=${branch.trim()}", pat, null)
             val b64 = JSONObject(resp).optString("content").replace("\n", "")
             String(Base64.decode(b64, Base64.DEFAULT), Charsets.UTF_8).trim()
         }.getOrNull()
