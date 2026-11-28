@@ -279,11 +279,6 @@ struct BrowserView: View {
         .sheet(isPresented: $showMenuSheet) { menuSheet }
         .sheet(isPresented: $showLibrarySheet) { librarySheet }
         .sheet(isPresented: $showDownloadsSheet) { downloadsSheet }
-        .sheet(isPresented: Binding(get: { shareDownloadURL != nil }, set: { if !$0 { shareDownloadURL = nil } })) {
-            if let u = shareDownloadURL {
-                BrowserShareSheet(items: [u])
-            }
-        }
         .alert(item: $pendingDownloadPrompt) { prompt in
             Alert(
                 title: Text("下载文件"),
@@ -1446,6 +1441,12 @@ struct BrowserView: View {
                                 }
                                 Spacer()
                             }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if item.status == .completed, let localURL = downloadManager.localFileURL(for: item) {
+                                    shareDownloadURL = localURL
+                                }
+                            }
 
                             if item.status == .downloading {
                                 ProgressView(value: item.progress)
@@ -1493,6 +1494,11 @@ struct BrowserView: View {
             .listStyle(.insetGrouped)
             .navigationTitle("下载管理")
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: Binding(get: { shareDownloadURL != nil }, set: { if !$0 { shareDownloadURL = nil } })) {
+                if let u = shareDownloadURL {
+                    BrowserShareSheet(items: [u])
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     HStack(spacing: 12) {

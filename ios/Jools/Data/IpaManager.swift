@@ -352,7 +352,8 @@ final class IpaManager: ObservableObject {
         profile: ProvisionProfileItem?,
         newAppName: String,
         newBundleId: String,
-        newVersion: String
+        newVersion: String,
+        newIconPngData: Data? = nil
     ) async throws -> IpaPackageItem {
         isSigning = true
         signingProgressText = "正在验证 P12 证书..."
@@ -426,6 +427,24 @@ final class IpaManager: ObservableObject {
             if !trimmedVer.isEmpty {
                 dict["CFBundleShortVersionString"] = trimmedVer
                 finalVersion = trimmedVer
+            }
+            if let iconData = newIconPngData {
+                let icon2x = appBundle.appendingPathComponent("JoolsCustomIcon60x60@2x.png")
+                let icon3x = appBundle.appendingPathComponent("JoolsCustomIcon60x60@3x.png")
+                try? iconData.write(to: icon2x, options: .atomic)
+                try? iconData.write(to: icon3x, options: .atomic)
+                dict["CFBundleIcons"] = [
+                    "CFBundlePrimaryIcon": [
+                        "CFBundleIconFiles": ["JoolsCustomIcon60x60"],
+                        "UIPrerenderedIcon": true
+                    ]
+                ]
+                dict["CFBundleIcons~ipad"] = [
+                    "CFBundlePrimaryIcon": [
+                        "CFBundleIconFiles": ["JoolsCustomIcon60x60"],
+                        "UIPrerenderedIcon": true
+                    ]
+                ]
             }
             let updatedData = try PropertyListSerialization.data(fromPropertyList: dict, format: .binary, options: 0)
             try updatedData.write(to: infoPlistURL, options: .atomic)

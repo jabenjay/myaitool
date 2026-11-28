@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import PhotosUI
 
 struct IpaManagerView: View {
     @ObservedObject var prefs: AppPreferences
@@ -23,6 +24,9 @@ struct IpaManagerView: View {
     @State private var editAppName = ""
     @State private var editBundleId = ""
     @State private var editVersion = ""
+    @State private var selectedIconPickerItem: PhotosPickerItem?
+    @State private var customIconImage: UIImage?
+    @State private var installAfterSign: Bool = true
 
     @State private var shareFileURL: URL?
     @State private var toastMsg: String?
@@ -162,9 +166,11 @@ struct IpaManagerView: View {
             Button {
                 prepareSigning(item)
             } label: {
-                Label("签名", systemImage: "signature")
+                Text("签名")
                     .font(.system(size: 13, weight: .semibold))
-                    .padding(.horizontal, 12)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 14)
                     .padding(.vertical, 7)
                     .background(Color.accentColor)
                     .foregroundColor(.white)
@@ -229,6 +235,8 @@ struct IpaManagerView: View {
             } label: {
                 Label("安装 / 导出", systemImage: "arrow.down.app.fill")
                     .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
                     .background(Color(red: 0.12, green: 0.65, blue: 0.36))
@@ -370,6 +378,8 @@ struct IpaManagerView: View {
         editAppName = item.appName
         editBundleId = item.bundleId
         editVersion = item.version
+        selectedIconPickerItem = nil
+        customIconImage = nil
         signingTarget = item
     }
 
@@ -390,18 +400,65 @@ struct IpaManagerView: View {
                     }
                 }
 
-                Section("应用信息（可自定义多开/改名）") {
+                Section("应用信息与图标（可自定义）") {
+                    HStack(spacing: 12) {
+                        if let customIconImage {
+                            Image(uiImage: customIconImage)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 44, height: 44)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        } else {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color.accentColor.opacity(0.15))
+                                .frame(width: 44, height: 44)
+                                .overlay(
+                                    Image(systemName: "app.fill")
+                                        .foregroundColor(.accentColor)
+                                )
+                        }
+                        PhotosPicker(selection: $selectedIconPickerItem, matching: .images) {
+                            Text(customIconImage == nil ? "更换应用图标" : "重新选择图标")
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        if customIconImage != nil {
+                            Button("恢复默认") {
+                                customIconImage = nil
+                                selectedIconPickerItem = nil
+                            }
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                        }
+                    }
+                    .onChange(of: selectedIconPickerItem) { _, newItem in
+                        guard let newItem else { return }
+                        Task {
+                            if let data = try? await newItem.loadTransferable(type: Data.self),
+                               let uiImg = UIImage(data: data) {
+                                customIconImage = uiImg
+                            }
+                        }
+                    }
+
                     TextField("应用名称", text: $editAppName)
                     TextField("Bundle ID", text: $editBundleId)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
-                    TextField("版本号", text: $editVersion)
+                    TextField("应用版本号", text: $editVersion)
+                }
+
+                Section("签名选项") {
+                    Toggle("签名后立即安装 / 导出", isOn: $installAfterSign)
                 }
 
                 Section {
                     Button {
                         guard let cert = manager.certs.first(where: { $0.id == selectedCertId }) else { return }
                         let prof = manager.profiles.first(where: { $0.id == selectedProfileId })
+                        let iconPng = customIconImage.flatMap { Self.resizedPngData($0, size: 180) }
+                        let shouldInstall = installAfterSign
                         signingTarget = nil
                         Task {
                             do {
@@ -411,17 +468,24 @@ struct IpaManagerView: View {
                                     profile: prof,
                                     newAppName: editAppName,
                                     newBundleId: editBundleId,
-                                    newVersion: editVersion
+                                    newVersion: editVersion,
+                                    newIconPngData: iconPng
                                 )
                                 selectedTab = 1
                                 toastMsg = "签名成功！「\(signed.appName)」已保存到已签名列表"
+                                if shouldInstall {
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                        shareFileURL = manager.fileURL(for: signed)
+                                    }
+                                }
                             } catch {
                                 toastMsg = "签名失败：\(error.localizedDescription)"
                             }
                         }
                     } label: {
-                        Text("开始签名")
+                        Text("确认签名")
                             .font(.system(size: 16, weight: .semibold))
+                            .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
@@ -518,6 +582,16 @@ struct IpaManagerView: View {
         .frame(maxWidth: .infinity)
         .padding(28)
         .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 22)
+    }
+
+
+    private static func resizedPngData(_ image: UIImage, size: CGFloat) -> Data? {
+        let targetSize = CGSize(width: size, height: size)
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        let img = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+        return img.pngData()
     }
 
     private func formatDate(_ ts: TimeInterval) -> String {
