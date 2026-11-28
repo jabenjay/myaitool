@@ -503,14 +503,24 @@ struct SshView: View {
                 TextEditor(text: $keyPemInput)
                     .font(.system(size: 12, design: .monospaced))
                     .frame(height: 200)
+                    .onChange(of: keyPemInput) { _, nextVal in
+                        if let derived = Self.derivePublicKey(from: nextVal) {
+                            generatedPublicKey = derived
+                        } else if nextVal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            generatedPublicKey = ""
+                        }
+                    }
             }
 
             Section {
                 Button("保存密钥") {
+                    let trimmedPriv = keyPemInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let trimmedPub = generatedPublicKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let resolvedPub = trimmedPub.isEmpty ? (Self.derivePublicKey(from: trimmedPriv) ?? "") : trimmedPub
                     let item = SshKeyItem(
                         name: keyNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "密钥 \(repo.keys.count + 1)" : keyNameInput.trimmingCharacters(in: .whitespacesAndNewlines),
-                        privateKey: keyPemInput.trimmingCharacters(in: .whitespacesAndNewlines),
-                        publicKey: generatedPublicKey.trimmingCharacters(in: .whitespacesAndNewlines),
+                        privateKey: trimmedPriv,
+                        publicKey: resolvedPub,
                         createdAt: Date().timeIntervalSince1970
                     )
                     repo.upsertKey(item)
@@ -991,6 +1001,152 @@ struct SshView: View {
         return f.string(from: Date(timeIntervalSince1970: ts))
     }
 
+
+    static func derivePublicKey(from privateKey: String) -> String? {
+        let trimmed = privateKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        func sshStr(_ d: Data) -> Data {
+            var out = Data()
+            var len = UInt32(d.count).bigEndian
+            out.append(Data(bytes: &len, count: 4))
+            out.append(d)
+            return out
+        }
+        func sshStr(_ s: String) -> Data { sshStr(Data(s.utf8)) }
+        func readSshBytes(_ data: Data, _ offset: inout Int) -> Data? {
+            guard offset + 4 <= data.count else { return nil }
+            let len = data.subdata(in: offset..<(offset + 4)).withUnsafeBytes {
+                UInt32(bigEndian: $0.load(as: UInt32.self))
+            }
+            offset += 4
+            let count = Int(len)
+            guard count >= 0, offset + count <= data.count else { return nil }
+            let slice = data.subdata(in: offset..<(offset + count))
+            offset += count
+            return slice
+        }
+
+        // 1) OpenSSH Private Key (openssh-key-v1)
+        if trimmed.contains("BEGIN OPENSSH PRIVATE KEY") {
+            let b64 = trimmed
+                .components(separatedBy: .newlines)
+                .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("-----") }
+                .joined()
+            if let raw = Data(base64Encoded: b64, options: .ignoreUnknownCharacters) {
+                let magic = Data("openssh-key-v1\0".utf8)
+                if raw.starts(with: magic) {
+                    var offset = magic.count
+                    _ = readSshBytes(raw, &offset) // ciphername
+                    _ = readSshBytes(raw, &offset) // kdfname
+                    _ = readSshBytes(raw, &offset) // kdfoptions
+                    if offset + 4 <= raw.count {
+                        let numKeys = raw.subdata(in: offset..<(offset + 4)).withUnsafeBytes {
+                            UInt32(bigEndian: $0.load(as: UInt32.self))
+                        }
+                        offset += 4
+                        if numKeys >= 1, let pubBlob = readSshBytes(raw, &offset) {
+                            var pubOff = 0
+                            if let typeData = readSshBytes(pubBlob, &pubOff),
+                               let keyType = String(data: typeData, encoding: .utf8),
+                               !keyType.isEmpty {
+                                return "\(keyType) \(pubBlob.base64EncodedString()) jools@ios"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2) ECDSA PEM via CryptoKit
+        if let p256 = try? P256.Signing.PrivateKey(pemRepresentation: trimmed) {
+            var blob = Data()
+            blob.append(sshStr("ecdsa-sha2-nistp256"))
+            blob.append(sshStr("nistp256"))
+            blob.append(sshStr(p256.publicKey.x963Representation))
+            return "ecdsa-sha2-nistp256 \(blob.base64EncodedString()) jools@ios"
+        }
+        if let p384 = try? P384.Signing.PrivateKey(pemRepresentation: trimmed) {
+            var blob = Data()
+            blob.append(sshStr("ecdsa-sha2-nistp384"))
+            blob.append(sshStr("nistp384"))
+            blob.append(sshStr(p384.publicKey.x963Representation))
+            return "ecdsa-sha2-nistp384 \(blob.base64EncodedString()) jools@ios"
+        }
+        if let p521 = try? P521.Signing.PrivateKey(pemRepresentation: trimmed) {
+            var blob = Data()
+            blob.append(sshStr("ecdsa-sha2-nistp521"))
+            blob.append(sshStr("nistp521"))
+            blob.append(sshStr(p521.publicKey.x963Representation))
+            return "ecdsa-sha2-nistp521 \(blob.base64EncodedString()) jools@ios"
+        }
+
+        // 3) PKCS#1 RSA or PKCS#8 RSA (ASN.1 DER)
+        func readDerTLV(_ data: Data, _ offset: inout Int) -> (tag: UInt8, value: Data)? {
+            guard offset < data.count else { return nil }
+            let tag = data[offset]
+            offset += 1
+            guard offset < data.count else { return nil }
+            let firstLen = data[offset]
+            offset += 1
+            let length: Int
+            if firstLen & 0x80 == 0 {
+                length = Int(firstLen)
+            } else {
+                let numBytes = Int(firstLen & 0x7F)
+                guard numBytes > 0, numBytes <= 4, offset + numBytes <= data.count else { return nil }
+                var acc = 0
+                for _ in 0..<numBytes {
+                    acc = (acc << 8) | Int(data[offset])
+                    offset += 1
+                }
+                length = acc
+            }
+            guard offset + length <= data.count else { return nil }
+            let val = data.subdata(in: offset..<(offset + length))
+            offset += length
+            return (tag, val)
+        }
+
+        func extractRsaPubFromPkcs1(_ pkcs1: Data) -> String? {
+            var off = 0
+            guard let seq = readDerTLV(pkcs1, &off), seq.tag == 0x30 else { return nil }
+            var innerOff = 0
+            guard let ver = readDerTLV(seq.value, &innerOff), ver.tag == 0x02,
+                  let n = readDerTLV(seq.value, &innerOff), n.tag == 0x02,
+                  let e = readDerTLV(seq.value, &innerOff), e.tag == 0x02 else { return nil }
+            var pubBlob = Data()
+            pubBlob.append(sshStr("ssh-rsa"))
+            pubBlob.append(sshStr(e.value))
+            pubBlob.append(sshStr(n.value))
+            return "ssh-rsa \(pubBlob.base64EncodedString()) jools@ios"
+        }
+
+        let pemB64 = trimmed
+            .components(separatedBy: .newlines)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("-----") }
+            .joined()
+        if let der = Data(base64Encoded: pemB64, options: .ignoreUnknownCharacters) {
+            if trimmed.contains("BEGIN RSA PRIVATE KEY") {
+                return extractRsaPubFromPkcs1(der)
+            }
+            if trimmed.contains("BEGIN PRIVATE KEY") {
+                var off = 0
+                if let top = readDerTLV(der, &off), top.tag == 0x30 {
+                    var innerOff = 0
+                    _ = readDerTLV(top.value, &innerOff) // version
+                    _ = readDerTLV(top.value, &innerOff) // algorithmIdentifier
+                    if let oct = readDerTLV(top.value, &innerOff), oct.tag == 0x04 {
+                        if let rsa = extractRsaPubFromPkcs1(oct.value) {
+                            return rsa
+                        }
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
     private func generateEd25519KeyPair() -> (privatePem: String, publicLine: String) {
         let priv = Curve25519.Signing.PrivateKey()
         let pubRaw = priv.publicKey.rawRepresentation
@@ -1072,7 +1228,10 @@ private struct SshKeyDetailSheet: View {
     init(keyItem: SshKeyItem, onSave: @escaping (SshKeyItem) -> Void) {
         self.keyItem = keyItem
         self.onSave = onSave
-        _editPublicKey = State(initialValue: keyItem.publicKey)
+        let initialPub = keyItem.publicKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? (SshView.derivePublicKey(from: keyItem.privateKey) ?? "")
+            : keyItem.publicKey
+        _editPublicKey = State(initialValue: initialPub)
         _editPrivateKey = State(initialValue: keyItem.privateKey)
     }
 

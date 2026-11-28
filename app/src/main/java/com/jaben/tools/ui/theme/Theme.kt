@@ -13,6 +13,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
@@ -406,8 +407,11 @@ fun PocketToolboxTheme(
         MaterialTheme(
             colorScheme = colorScheme,
             typography = ExpressiveTypography,
-            shapes = ExpressiveShapes,
-            content = content
-        )
+            shapes = ExpressiveShapes
+        ) {
+            CompositionLocalProvider(LocalContentColor provides colorScheme.onSurface) {
+                content()
+            }
+        }
     }
 }

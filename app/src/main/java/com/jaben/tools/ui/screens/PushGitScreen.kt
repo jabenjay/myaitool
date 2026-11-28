@@ -358,12 +358,17 @@ fun PushGitScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
+                Icon(
+                    Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = "返回",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
             }
             Text(
                 text = "PushGit",
                 fontSize = 19.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
             )
             if (!connectedUser.isNullOrBlank()) {
                 Spacer(modifier = Modifier.width(8.dp))
@@ -382,13 +387,21 @@ fun PushGitScreen(
             }
             Spacer(modifier = Modifier.weight(1f))
             IconButton(onClick = { showTokenManagerDialog = true }) {
-                Icon(Icons.Rounded.Key, contentDescription = "管理 Token")
+                Icon(
+                    Icons.Rounded.Key,
+                    contentDescription = "管理 Token",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
             }
             IconButton(
                 onClick = { refreshGitHubMeta(pat) },
                 enabled = !isFetchingMeta
             ) {
-                Icon(Icons.Rounded.Refresh, contentDescription = "刷新仓库")
+                Icon(
+                    Icons.Rounded.Refresh,
+                    contentDescription = "刷新仓库",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
             }
         }
 

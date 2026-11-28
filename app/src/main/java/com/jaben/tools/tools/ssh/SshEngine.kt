@@ -63,6 +63,53 @@ object SshEngine {
             session
         }
 
+
+    fun derivePublicKey(privateKey: String): String? {
+        val trimmed = privateKey.trim()
+        if (trimmed.isBlank()) return null
+        // 1) Try JSch KeyPair.load (supports OpenSSH, RSA PEM, EC PEM, PPK, etc.)
+        runCatching {
+            val kp = KeyPair.load(JSch(), trimmed.toByteArray(Charsets.UTF_8), null)
+            try {
+                val out = ByteArrayOutputStream()
+                kp.writePublicKey(out, "jools@android")
+                val line = out.toString(Charsets.UTF_8.name()).trim()
+                if (line.isNotBlank()) return line
+            } finally {
+                kp.dispose()
+            }
+        }
+        // 2) Fallback for PKCS#8 RSA ("-----BEGIN PRIVATE KEY-----")
+        runCatching {
+            val b64 = trimmed
+                .lines()
+                .filterNot { it.trim().startsWith("-----") }
+                .joinToString("")
+                .replace("\s+".toRegex(), "")
+            if (b64.isNotBlank()) {
+                val der = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                val kf = java.security.KeyFactory.getInstance("RSA")
+                val priv = kf.generatePrivate(java.security.spec.PKCS8EncodedKeySpec(der))
+                val crt = kf.getKeySpec(priv, java.security.spec.RSAPrivateCrtKeySpec::class.java)
+                val sshPubOut = ByteArrayOutputStream()
+                fun writeSshBytes(bytes: ByteArray) {
+                    val len = bytes.size
+                    sshPubOut.write((len ushr 24) and 0xFF)
+                    sshPubOut.write((len ushr 16) and 0xFF)
+                    sshPubOut.write((len ushr 8) and 0xFF)
+                    sshPubOut.write(len and 0xFF)
+                    sshPubOut.write(bytes)
+                }
+                writeSshBytes("ssh-rsa".toByteArray(Charsets.US_ASCII))
+                writeSshBytes(crt.publicExponent.toByteArray())
+                writeSshBytes(crt.modulus.toByteArray())
+                val pubB64 = android.util.Base64.encodeToString(sshPubOut.toByteArray(), android.util.Base64.NO_WRAP)
+                return "ssh-rsa $pubB64 jools@android"
+            }
+        }
+        return null
+    }
+
     fun generateRsaKeyPair(): Pair<String, String> {
         val kpg = java.security.KeyPairGenerator.getInstance("RSA")
         kpg.initialize(2048)

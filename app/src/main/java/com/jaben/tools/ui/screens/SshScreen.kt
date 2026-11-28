@@ -303,6 +303,7 @@ fun SshScreen(
             }.onSuccess { content ->
                 if (content.isNotBlank()) {
                     keyPemInput = content
+                            SshEngine.derivePublicKey(content)?.let { generatedPublicKey = it }
                     if (keyNameInput.isBlank()) {
                         keyNameInput = resolveFileName(context, uri) ?: "导入私钥"
                     }
@@ -371,7 +372,7 @@ fun SshScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = { handleBackNavigation() }) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回", tint = MaterialTheme.colorScheme.onSurface)
             }
 
             Column(modifier = Modifier.weight(1f)) {
@@ -386,6 +387,7 @@ fun SshScreen(
                     },
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -410,7 +412,7 @@ fun SshScreen(
             when (page) {
                 SshPage.SERVER_LIST -> {
                     IconButton(onClick = { page = SshPage.KEY_MANAGER }) {
-                        Icon(Icons.Rounded.Key, contentDescription = "私钥管理")
+                        Icon(Icons.Rounded.Key, contentDescription = "私钥管理", tint = MaterialTheme.colorScheme.onSurface)
                     }
                     FilledTonalButton(onClick = { openServerEditor(null) }) {
                         Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -433,7 +435,7 @@ fun SshScreen(
                         Icon(Icons.Rounded.Folder, contentDescription = "文件管理", tint = MaterialTheme.colorScheme.primary)
                     }
                     IconButton(onClick = { refreshStatus() }) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
+                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新", tint = MaterialTheme.colorScheme.onSurface)
                     }
                     IconButton(onClick = { disconnect() }) {
                         Icon(Icons.Rounded.LinkOff, contentDescription = "断开", tint = MaterialTheme.colorScheme.error)
@@ -441,16 +443,16 @@ fun SshScreen(
                 }
                 SshPage.SFTP_FILES -> {
                     IconButton(onClick = { refreshDirectory(currentPath) }) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
+                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新", tint = MaterialTheme.colorScheme.onSurface)
                     }
                     IconButton(onClick = { uploadLauncher.launch(arrayOf("*/*")) }) {
-                        Icon(Icons.Rounded.UploadFile, contentDescription = "上传")
+                        Icon(Icons.Rounded.UploadFile, contentDescription = "上传", tint = MaterialTheme.colorScheme.onSurface)
                     }
                     IconButton(onClick = {
                         mkdirName = ""
                         showMkdirDialog = true
                     }) {
-                        Icon(Icons.Rounded.CreateNewFolder, contentDescription = "新建文件夹")
+                        Icon(Icons.Rounded.CreateNewFolder, contentDescription = "新建文件夹", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 }
                 else -> {}
@@ -878,7 +880,15 @@ fun SshScreen(
 
                         OutlinedTextField(
                             value = keyPemInput,
-                            onValueChange = { keyPemInput = it },
+                            onValueChange = { nextVal ->
+                                keyPemInput = nextVal
+                                val derived = SshEngine.derivePublicKey(nextVal)
+                                if (!derived.isNullOrBlank()) {
+                                    generatedPublicKey = derived
+                                } else if (nextVal.isBlank()) {
+                                    generatedPublicKey = ""
+                                }
+                            },
                             label = { Text("私钥内容 (PEM / OpenSSH)") },
                             modifier = Modifier.fillMaxWidth().height(220.dp),
                             textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
@@ -887,10 +897,13 @@ fun SshScreen(
                         Button(
                             enabled = keyPemInput.isNotBlank(),
                             onClick = {
+                                val resolvedPub = generatedPublicKey.trim().ifBlank {
+                                    SshEngine.derivePublicKey(keyPemInput.trim()).orEmpty()
+                                }
                                 val newItem = SshKeyItem(
                                     name = keyNameInput.trim().ifBlank { "密钥 ${sshKeys.size + 1}" },
                                     privateKey = keyPemInput.trim(),
-                                    publicKey = generatedPublicKey.trim(),
+                                    publicKey = resolvedPub,
                                     createdAtMs = System.currentTimeMillis()
                                 )
                                 sshKeys = repo.upsertKey(newItem)
@@ -1380,7 +1393,9 @@ private fun SshKeyDetailDialog(
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    var editPublicKey by remember(keyItem.id) { mutableStateOf(keyItem.publicKey) }
+    var editPublicKey by remember(keyItem.id) {
+        mutableStateOf(keyItem.publicKey.ifBlank { SshEngine.derivePublicKey(keyItem.privateKey).orEmpty() })
+    }
     var editPrivateKey by remember(keyItem.id) { mutableStateOf(keyItem.privateKey) }
     var showPrivateKey by remember(keyItem.id) { mutableStateOf(false) }
     var showSaveConfirm by remember { mutableStateOf(false) }
