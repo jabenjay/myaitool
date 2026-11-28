@@ -4,6 +4,7 @@ enum JoolsRoute: Hashable {
     case tool(JoolsToolId)
     case browserWithUrl(String)
     case proxy
+    case storage
     case about
     case logs
 }
@@ -38,6 +39,7 @@ struct MainTabView: View {
                     SettingsView(
                         prefs: prefs,
                         onOpenProxy: { path.append(.proxy) },
+                        onOpenStorage: { path.append(.storage) },
                         onOpenAbout: { path.append(.about) },
                         onOpenBrowser: { url in path.append(.browserWithUrl(url)) }
                     )
@@ -64,6 +66,8 @@ struct MainTabView: View {
                         BrowserView(prefs: prefs, initialUrl: u)
                     case .proxy:
                         ProxySettingsView(prefs: prefs, proxyManager: proxyManager)
+                    case .storage:
+                        StorageSettingsView(prefs: prefs)
                     case .about:
                         AboutView(
                             prefs: prefs,

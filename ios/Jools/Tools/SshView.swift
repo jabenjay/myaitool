@@ -130,6 +130,12 @@ struct SshView: View {
             }
         }
         .onDisappear { disconnect() }
+        .sheet(item: $editingKeyItem) { keyItem in
+            SshKeyDetailSheet(keyItem: keyItem) { updated in
+                repo.upsertKey(updated)
+                toastMsg = "密钥已更新保存"
+            }
+        }
         .fileImporter(
             isPresented: $showKeyFileImporter,
             allowedContentTypes: [.data, .plainText],
@@ -418,23 +424,25 @@ struct SshView: View {
                     .foregroundColor(.secondary)
             } else {
                 ForEach(repo.keys) { k in
-                    HStack {
-                        Image(systemName: "key.fill").foregroundColor(.accentColor)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(k.name).font(.system(size: 15, weight: .semibold))
-                            Text(formatDate(k.createdAt))
-                                .font(.system(size: 11.5))
+                    Button {
+                        editingKeyItem = k
+                    } label: {
+                        HStack {
+                            Image(systemName: "key.fill").foregroundColor(.accentColor)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(k.name).font(.system(size: 15, weight: .semibold)).foregroundColor(.primary)
+                                Text(formatDate(k.createdAt))
+                                    .font(.system(size: 11.5))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(.secondary)
                         }
-                        Spacer()
-                        Button {
-                            UIPasteboard.general.string = k.privateKey
-                            toastMsg = "已复制私钥内容"
-                        } label: {
-                            Image(systemName: "doc.on.doc")
-                        }
-                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
                 .onDelete { offsets in
                     for i in offsets { repo.deleteKey(id: repo.keys[i].id) }
@@ -453,6 +461,8 @@ struct SshView: View {
                         showKeyFileImporter = true
                     } label: {
                         Label("从文件导入", systemImage: "doc.badge.plus")
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                     Spacer()
                     Button {
@@ -464,6 +474,8 @@ struct SshView: View {
                         }
                     } label: {
                         Label("新建 Ed25519", systemImage: "wand.and.stars")
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                 }
                 if !generatedPublicKey.isEmpty {
@@ -497,6 +509,7 @@ struct SshView: View {
                     let item = SshKeyItem(
                         name: keyNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "密钥 \(repo.keys.count + 1)" : keyNameInput.trimmingCharacters(in: .whitespacesAndNewlines),
                         privateKey: keyPemInput.trimmingCharacters(in: .whitespacesAndNewlines),
+                        publicKey: generatedPublicKey.trimmingCharacters(in: .whitespacesAndNewlines),
                         createdAt: Date().timeIntervalSince1970
                     )
                     repo.upsertKey(item)
@@ -1000,4 +1013,160 @@ private struct SshShareSheet: UIViewControllerRepresentable {
         UIActivityViewController(activityItems: items, applicationActivities: nil)
     }
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+private struct SshKeyDetailSheet: View {
+    let keyItem: SshKeyItem
+    let onSave: (SshKeyItem) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var editPublicKey: String
+    @State private var editPrivateKey: String
+    @State private var showPrivateKey: Bool = false
+    @State private var showSaveConfirm: Bool = false
+    @State private var toastMsg: String?
+
+    init(keyItem: SshKeyItem, onSave: @escaping (SshKeyItem) -> Void) {
+        self.keyItem = keyItem
+        self.onSave = onSave
+        _editPublicKey = State(initialValue: keyItem.publicKey)
+        _editPrivateKey = State(initialValue: keyItem.privateKey)
+    }
+
+    private var hasChanges: Bool {
+        editPublicKey.trimmingCharacters(in: .whitespacesAndNewlines) != keyItem.publicKey.trimmingCharacters(in: .whitespacesAndNewlines) ||
+        editPrivateKey.trimmingCharacters(in: .whitespacesAndNewlines) != keyItem.privateKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var maskedPrivateKeyPreview: String {
+        let lines = max(4, min(editPrivateKey.components(separatedBy: .newlines).count, 8))
+        return (0..<lines).map { _ in String(repeating: "•", count: 28) }.joined(separator: "\n")
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // 公钥区域
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("公钥")
+                                .font(.system(size: 14, weight: .semibold))
+                            Spacer()
+                            Button {
+                                UIPasteboard.general.string = editPublicKey
+                                toastMsg = "已复制公钥内容"
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 15))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        TextEditor(text: $editPublicKey)
+                            .font(.system(size: 12, design: .monospaced))
+                            .frame(height: 110)
+                            .padding(8)
+                            .background(Color(uiColor: .secondarySystemGroupedBackground))
+                            .cornerRadius(12)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                            )
+                    }
+
+                    // 私钥区域（小眼睛在复制按钮左侧，默认不显示明文）
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 14) {
+                            Text("私钥")
+                                .font(.system(size: 14, weight: .semibold))
+                            Spacer()
+                            Button {
+                                showPrivateKey.toggle()
+                            } label: {
+                                Image(systemName: showPrivateKey ? "eye.slash" : "eye")
+                                    .font(.system(size: 15.5))
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                UIPasteboard.general.string = editPrivateKey
+                                toastMsg = "已复制私钥内容"
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 15))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if showPrivateKey {
+                            TextEditor(text: $editPrivateKey)
+                                .font(.system(size: 12, design: .monospaced))
+                                .frame(height: 190)
+                                .padding(8)
+                                .background(Color(uiColor: .secondarySystemGroupedBackground))
+                                .cornerRadius(12)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                                )
+                        } else {
+                            ScrollView {
+                                Text(maskedPrivateKeyPreview)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(12)
+                            }
+                            .frame(height: 190)
+                            .background(Color(uiColor: .secondarySystemGroupedBackground))
+                            .cornerRadius(12)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                            )
+                        }
+                    }
+
+                    if let msg = toastMsg {
+                        Text(msg)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundColor(.accentColor)
+                    }
+                }
+                .padding(16)
+            }
+            .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+            .navigationTitle(keyItem.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("关闭") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("保存") {
+                        showSaveConfirm = true
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(!hasChanges || editPrivateKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .foregroundColor(
+                        (hasChanges && !editPrivateKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        ? .accentColor
+                        : .gray.opacity(0.5)
+                    )
+                }
+            }
+            .alert("确认保存", isPresented: $showSaveConfirm) {
+                Button("取消", role: .cancel) {}
+                Button("确定") {
+                    var updated = keyItem
+                    updated.publicKey = editPublicKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                    updated.privateKey = editPrivateKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                    onSave(updated)
+                    dismiss()
+                }
+            } message: {
+                Text("确定保存对密钥“\(keyItem.name)”的修改吗？")
+            }
+        }
+    }
 }

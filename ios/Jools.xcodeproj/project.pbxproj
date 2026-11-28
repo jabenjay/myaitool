@@ -40,6 +40,7 @@
 		60945D025DCA8D6BD54E8614 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF2B162A6936FDC797E7C1B1 /* Views/MainTabView.swift */; };
 		1392642869723688F20BADB5 /* ProxySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 525E05EF0AEDA90A3EA2024F /* Views/ProxySettingsView.swift */; };
 		8948F34F61D5421EFB07DBA0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C3FC57E2B2E904A9C93D7C /* Views/SettingsView.swift */; };
+		D1E2F3A4B5C6000100000001 /* StorageSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1E2F3A4B5C6000100000002 /* Views/StorageSettingsView.swift */; };
 		B1F9BF170B9E0A298A78A28B /* ToolboxHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 619D9424A68456E6BA7221D5 /* Views/ToolboxHomeView.swift */; };
 		8E10783256CBF56EFCE4D3F2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E9C2B90A5DCA5D29F2BEC039 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
@@ -75,6 +76,7 @@
 		DF2B162A6936FDC797E7C1B1 /* Views/MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "MainTabView.swift"; path = "Views/MainTabView.swift"; sourceTree = "<group>"; };
 		525E05EF0AEDA90A3EA2024F /* Views/ProxySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "ProxySettingsView.swift"; path = "Views/ProxySettingsView.swift"; sourceTree = "<group>"; };
 		44C3FC57E2B2E904A9C93D7C /* Views/SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "SettingsView.swift"; path = "Views/SettingsView.swift"; sourceTree = "<group>"; };
+		D1E2F3A4B5C6000100000002 /* Views/StorageSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "StorageSettingsView.swift"; path = "Views/StorageSettingsView.swift"; sourceTree = "<group>"; };
 		619D9424A68456E6BA7221D5 /* Views/ToolboxHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "ToolboxHomeView.swift"; path = "Views/ToolboxHomeView.swift"; sourceTree = "<group>"; };
 		E9C2B90A5DCA5D29F2BEC039 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		51570F093954B65F706F7C19 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -138,6 +140,7 @@
 				DF2B162A6936FDC797E7C1B1,
 				525E05EF0AEDA90A3EA2024F,
 				44C3FC57E2B2E904A9C93D7C,
+				D1E2F3A4B5C6000100000002,
 				619D9424A68456E6BA7221D5,
 			);
 			path = Jools;
@@ -260,6 +263,7 @@
 				60945D025DCA8D6BD54E8614 /* MainTabView.swift in Sources */,
 				1392642869723688F20BADB5 /* ProxySettingsView.swift in Sources */,
 				8948F34F61D5421EFB07DBA0 /* SettingsView.swift in Sources */,
+				D1E2F3A4B5C6000100000001 /* StorageSettingsView.swift in Sources */,
 				B1F9BF170B9E0A298A78A28B /* ToolboxHomeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -274,7 +278,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
@@ -289,7 +293,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -306,7 +310,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Jools/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -329,7 +333,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Jools/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

@@ -16,7 +16,29 @@ struct SshKeyItem: Identifiable, Codable, Equatable {
     var id: String = UUID().uuidString
     var name: String
     var privateKey: String
+    var publicKey: String = ""
     var createdAt: TimeInterval = Date().timeIntervalSince1970
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, privateKey, publicKey, createdAt
+    }
+
+    init(id: String = UUID().uuidString, name: String, privateKey: String, publicKey: String = "", createdAt: TimeInterval = Date().timeIntervalSince1970) {
+        self.id = id
+        self.name = name
+        self.privateKey = privateKey
+        self.publicKey = publicKey
+        self.createdAt = createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        name = try c.decode(String.self, forKey: .name)
+        privateKey = try c.decode(String.self, forKey: .privateKey)
+        publicKey = try c.decodeIfPresent(String.self, forKey: .publicKey) ?? ""
+        createdAt = try c.decodeIfPresent(TimeInterval.self, forKey: .createdAt) ?? Date().timeIntervalSince1970
+    }
 }
 
 struct SshServerProfile: Identifiable, Codable, Equatable {

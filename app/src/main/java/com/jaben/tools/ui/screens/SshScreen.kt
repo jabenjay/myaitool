@@ -53,6 +53,8 @@ import androidx.compose.material.icons.rounded.LinkOff
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.UploadFile
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -93,6 +95,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -156,6 +161,7 @@ fun SshScreen(
 
     // Key editor state
     var keyReturnToServerEditor by remember { mutableStateOf(false) }
+    var selectedKeyForDetail by remember { mutableStateOf<SshKeyItem?>(null) }
     var keyNameInput by remember { mutableStateOf("") }
     var keyPemInput by remember { mutableStateOf("") }
     var generatedPublicKey by remember { mutableStateOf("") }
@@ -772,10 +778,13 @@ fun SshScreen(
                                 Card(
                                     shape = RoundedCornerShape(18.dp),
                                     colors = CardDefaults.cardColors(containerColor = visuals.cardContainerColor),
-                                    modifier = Modifier.fillMaxWidth().liquidGlassSurface(18.dp)
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .liquidGlassSurface(18.dp)
+                                        .clickable { selectedKeyForDetail = keyItem }
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(14.dp),
+                                        modifier = Modifier.fillMaxWidth().padding(14.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(Icons.Rounded.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -787,12 +796,6 @@ fun SshScreen(
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
-                                        }
-                                        IconButton(onClick = {
-                                            clipboard.setText(AnnotatedString(keyItem.privateKey))
-                                            Toast.makeText(context, "已复制私钥内容", Toast.LENGTH_SHORT).show()
-                                        }) {
-                                            Icon(Icons.Rounded.ContentCopy, contentDescription = "复制", modifier = Modifier.size(18.dp))
                                         }
                                         IconButton(onClick = { sshKeys = repo.deleteKey(keyItem.id) }) {
                                             Icon(Icons.Rounded.DeleteOutline, contentDescription = "删除", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(19.dp))
@@ -823,11 +826,12 @@ fun SshScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                             OutlinedButton(
                                 onClick = { keyFileLauncher.launch(arrayOf("*/*")) },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(Icons.Rounded.UploadFile, contentDescription = null, modifier = Modifier.size(17.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("从文件导入")
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("从文件导入", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                             }
                             FilledTonalButton(
                                 onClick = {
@@ -839,11 +843,12 @@ fun SshScreen(
                                         }
                                         .onFailure { Toast.makeText(context, "生成失败: ${it.message}", Toast.LENGTH_SHORT).show() }
                                 },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(Icons.Rounded.AutoFixHigh, contentDescription = null, modifier = Modifier.size(17.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("新建 RSA 密钥")
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("新建 RSA 密钥", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                             }
                         }
 
@@ -885,6 +890,7 @@ fun SshScreen(
                                 val newItem = SshKeyItem(
                                     name = keyNameInput.trim().ifBlank { "密钥 ${sshKeys.size + 1}" },
                                     privateKey = keyPemInput.trim(),
+                                    publicKey = generatedPublicKey.trim(),
                                     createdAtMs = System.currentTimeMillis()
                                 )
                                 sshKeys = repo.upsertKey(newItem)
@@ -1235,6 +1241,18 @@ fun SshScreen(
     }
 
     // 新建文件夹弹窗
+    selectedKeyForDetail?.let { keyItem ->
+        SshKeyDetailDialog(
+            keyItem = keyItem,
+            onDismiss = { selectedKeyForDetail = null },
+            onSave = { updated ->
+                sshKeys = repo.upsertKey(updated)
+                selectedKeyForDetail = null
+                Toast.makeText(context, "密钥已更新保存", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
     if (showMkdirDialog) {
         AlertDialog(
             onDismissRequest = { showMkdirDialog = false },
@@ -1352,4 +1370,181 @@ private fun formatTime(ms: Long): String {
     val sdf = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
     sdf.timeZone = TimeZone.getDefault()
     return sdf.format(Date(ms))
+}
+
+@Composable
+private fun SshKeyDetailDialog(
+    keyItem: SshKeyItem,
+    onDismiss: () -> Unit,
+    onSave: (SshKeyItem) -> Unit
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    var editPublicKey by remember(keyItem.id) { mutableStateOf(keyItem.publicKey) }
+    var editPrivateKey by remember(keyItem.id) { mutableStateOf(keyItem.privateKey) }
+    var showPrivateKey by remember(keyItem.id) { mutableStateOf(false) }
+    var showSaveConfirm by remember { mutableStateOf(false) }
+
+    val hasChanges = editPublicKey.trim() != keyItem.publicKey.trim() ||
+        editPrivateKey.trim() != keyItem.privateKey.trim()
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = keyItem.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onDismiss) {
+                        Text("关闭")
+                    }
+                    TextButton(
+                        enabled = hasChanges && editPrivateKey.isNotBlank(),
+                        onClick = { showSaveConfirm = true }
+                    ) {
+                        Text(
+                            text = "保存",
+                            fontWeight = FontWeight.Bold,
+                            color = if (hasChanges && editPrivateKey.isNotBlank()) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            }
+                        )
+                    }
+                }
+
+                // 公钥区域
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "公钥",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(editPublicKey))
+                            Toast.makeText(context, "已复制公钥内容", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ContentCopy,
+                            contentDescription = "复制公钥",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = editPublicKey,
+                    onValueChange = { editPublicKey = it },
+                    placeholder = { Text("暂无公钥，可粘贴或编辑") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(110.dp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                )
+
+                // 私钥区域（小眼睛在复制按钮左侧，默认不显示明文）
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "私钥",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = { showPrivateKey = !showPrivateKey },
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (showPrivateKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                            contentDescription = if (showPrivateKey) "隐藏私钥" else "显示私钥",
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    IconButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(editPrivateKey))
+                            Toast.makeText(context, "已复制私钥内容", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ContentCopy,
+                            contentDescription = "复制私钥",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = editPrivateKey,
+                    onValueChange = { editPrivateKey = it },
+                    visualTransformation = if (showPrivateKey) VisualTransformation.None else PasswordVisualTransformation(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(170.dp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                )
+            }
+        }
+    }
+
+    if (showSaveConfirm) {
+        AlertDialog(
+            onDismissRequest = { showSaveConfirm = false },
+            title = { Text("确认保存") },
+            text = { Text("确定保存对密钥“${keyItem.name}”的修改吗？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showSaveConfirm = false
+                    onSave(
+                        keyItem.copy(
+                            publicKey = editPublicKey.trim(),
+                            privateKey = editPrivateKey.trim()
+                        )
+                    )
+                }) {
+                    Text("确定")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSaveConfirm = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
 }

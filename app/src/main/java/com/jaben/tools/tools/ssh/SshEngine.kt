@@ -64,14 +64,31 @@ object SshEngine {
         }
 
     fun generateRsaKeyPair(): Pair<String, String> {
-        val jsch = JSch()
-        val kpair = KeyPair.genKeyPair(jsch, KeyPair.RSA, 2048)
-        val privOut = ByteArrayOutputStream()
-        val pubOut = ByteArrayOutputStream()
-        kpair.writePrivateKey(privOut)
-        kpair.writePublicKey(pubOut, "jools@android")
-        kpair.dispose()
-        return privOut.toString("UTF-8") to pubOut.toString("UTF-8").trim()
+        val kpg = java.security.KeyPairGenerator.getInstance("RSA")
+        kpg.initialize(2048)
+        val kp = kpg.generateKeyPair()
+
+        val privB64 = android.util.Base64.encodeToString(kp.private.encoded, android.util.Base64.NO_WRAP)
+        val wrappedPriv = privB64.chunked(64).joinToString("\n")
+        val privPem = "-----BEGIN PRIVATE KEY-----\n$wrappedPriv\n-----END PRIVATE KEY-----"
+
+        val rsaPub = kp.public as java.security.interfaces.RSAPublicKey
+        val sshPubOut = ByteArrayOutputStream()
+        fun writeSshBytes(bytes: ByteArray) {
+            val len = bytes.size
+            sshPubOut.write((len ushr 24) and 0xFF)
+            sshPubOut.write((len ushr 16) and 0xFF)
+            sshPubOut.write((len ushr 8) and 0xFF)
+            sshPubOut.write(len and 0xFF)
+            sshPubOut.write(bytes)
+        }
+        writeSshBytes("ssh-rsa".toByteArray(Charsets.US_ASCII))
+        writeSshBytes(rsaPub.publicExponent.toByteArray())
+        writeSshBytes(rsaPub.modulus.toByteArray())
+        val pubB64 = android.util.Base64.encodeToString(sshPubOut.toByteArray(), android.util.Base64.NO_WRAP)
+        val pubLine = "ssh-rsa $pubB64 jools@android"
+
+        return privPem to pubLine
     }
 
     suspend fun getDefaultHomeDirectory(session: Session): String = withContext(Dispatchers.IO) {

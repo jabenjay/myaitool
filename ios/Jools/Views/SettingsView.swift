@@ -4,6 +4,7 @@ struct SettingsView: View {
     @ObservedObject var prefs: AppPreferences
     @ObservedObject private var bookmarkManager = BookmarkManager.shared
     let onOpenProxy: () -> Void
+    let onOpenStorage: () -> Void
     let onOpenAbout: () -> Void
     var onOpenBrowser: ((String) -> Void)? = nil
 
@@ -126,6 +127,29 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("网络代理").font(.system(size: 15, weight: .medium)).foregroundColor(.primary)
                                 Text(ProxyManager.shared.statusMessage)
+                                    .font(.system(size: 11.5))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 15)
+                        .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 20)
+                    }
+                    .buttonStyle(JoolsScaleButtonStyle())
+
+                    // 保存路径
+                    Button(action: onOpenStorage) {
+                        HStack(spacing: 14) {
+                            Image(systemName: "folder.fill")
+                                .foregroundColor(.accentColor)
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("保存路径").font(.system(size: 15, weight: .medium)).foregroundColor(.primary)
+                                Text("文件 App / 我的 iPhone / Jools")
                                     .font(.system(size: 11.5))
                                     .foregroundColor(.secondary)
                             }

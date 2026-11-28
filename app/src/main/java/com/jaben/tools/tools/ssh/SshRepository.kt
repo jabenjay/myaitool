@@ -14,6 +14,7 @@ data class SshKeyItem(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
     val privateKey: String,
+    val publicKey: String = "",
     val createdAtMs: Long = System.currentTimeMillis()
 )
 
@@ -48,6 +49,7 @@ class SshRepository(context: Context) {
                             id = o.optString("id").ifBlank { UUID.randomUUID().toString() },
                             name = o.optString("name").ifBlank { "未命名密钥" },
                             privateKey = pem,
+                            publicKey = o.optString("publicKey", ""),
                             createdAtMs = o.optLong("createdAtMs", 0L)
                         )
                     )
@@ -64,6 +66,7 @@ class SshRepository(context: Context) {
                     put("id", k.id)
                     put("name", k.name)
                     put("privateKey", k.privateKey)
+                    put("publicKey", k.publicKey)
                     put("createdAtMs", k.createdAtMs)
                 }
             )
