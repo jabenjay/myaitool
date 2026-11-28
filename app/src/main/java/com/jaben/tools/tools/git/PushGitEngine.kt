@@ -611,7 +611,12 @@ class PushGitEngine(private val context: Context) {
             val repo = parseOwnerRepo(ownerRepoInput)
             val resp = apiRequest("GET", "https://api.github.com/repos/$repo/contents/$fileName?ref=${branch.trim()}", pat, null)
             val b64 = JSONObject(resp).optString("content").replace("\n", "")
-            String(Base64.decode(b64, Base64.DEFAULT), Charsets.UTF_8).trim()
+            val raw = String(Base64.decode(b64, Base64.DEFAULT), Charsets.UTF_8)
+            raw.lines()
+                .dropWhile { val t = it.trim(); t.isEmpty() || t.startsWith("# ") }
+                .joinToString("\n")
+                .trim()
+                .ifBlank { null }
         }.getOrNull()
     }
 

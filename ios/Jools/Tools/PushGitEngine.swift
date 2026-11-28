@@ -320,7 +320,12 @@ final class PushGitEngine: ObservableObject {
               let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
               let b64 = (obj["content"] as? String)?.replacingOccurrences(of: "\n", with: ""),
               let raw = Data(base64Encoded: b64) else { return nil }
-        return String(data: raw, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let text = String(data: raw, encoding: .utf8) else { return nil }
+        let cleaned = text.components(separatedBy: .newlines)
+            .drop(while: { let t = $0.trimmingCharacters(in: .whitespaces); return t.isEmpty || t.hasPrefix("# ") })
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? nil : cleaned
     }
 
     func listRepoContents(_ pat: String, repo: String, branch: String, path: String) async throws -> [RepoContentItem] {
