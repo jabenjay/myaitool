@@ -78,7 +78,7 @@ final class BrowserWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate,
         if let url = navigationAction.request.url {
             let ext = url.pathExtension.lowercased()
             let downloadExts = Set(["ipa", "zip", "rar", "7z", "p12", "mobileprovision", "apk", "dmg", "mp4", "m4a", "mp3", "pdf"])
-            if downloadExts.contains(ext) && navigationAction.navigationType == .linkActivated {
+            if (ext == "ipa") || (downloadExts.contains(ext) && navigationAction.navigationType == .linkActivated) {
                 DispatchQueue.main.async {
                     self.onDownloadRequested(url.absoluteString, url.lastPathComponent, "")
                 }
@@ -163,6 +163,14 @@ struct MultiTabWebViewHost: UIViewRepresentable {
     }
 }
 
+
+private struct PendingBrowserDownload: Identifiable {
+    let id = UUID().uuidString
+    let urlStr: String
+    let fileName: String
+    let mimeType: String
+}
+
 struct BrowserView: View {
     @ObservedObject var prefs: AppPreferences
     @ObservedObject private var bookmarkManager = BookmarkManager.shared
@@ -189,6 +197,7 @@ struct BrowserView: View {
     @State private var showMenuSheet = false
     @State private var showLibrarySheet = false
     @State private var showDownloadsSheet = false
+    @State private var pendingDownloadPrompt: PendingBrowserDownload?
     @State private var showNewDownloadAlert = false
     @State private var newDownloadUrlInput = ""
     @State private var shareDownloadURL: URL?
@@ -274,6 +283,18 @@ struct BrowserView: View {
             if let u = shareDownloadURL {
                 BrowserShareSheet(items: [u])
             }
+        }
+        .alert(item: $pendingDownloadPrompt) { prompt in
+            Alert(
+                title: Text("下载文件"),
+                message: Text("检测到安装包/文件：\(prompt.fileName)\n点击立即下载，.ipa 完成后将自动加入「IPA 管理 → 未签名」列表。"),
+                primaryButton: .default(Text("立即下载")) {
+                    downloadManager.startDownload(urlStr: prompt.urlStr, suggestedName: prompt.fileName, mimeType: prompt.mimeType)
+                    showDownloadsSheet = true
+                    toastMsg = "已开始下载，完成后将自动加入「IPA 管理 → 未签名」"
+                },
+                secondaryButton: .cancel(Text("取消"))
+            )
         }
         .alert("新建下载", isPresented: $showNewDownloadAlert) {
             TextField("输入文件或 IPA 下载链接", text: $newDownloadUrlInput)
@@ -1165,6 +1186,14 @@ struct BrowserView: View {
             tabs = [first]
             activeTabId = first.id
             urlInput = firstUrl == blankTabURL ? "" : firstUrl
+            if let u = URL(string: firstUrl), u.pathExtension.lowercased() == "ipa" {
+                let fname = u.lastPathComponent.isEmpty ? "Jools.ipa" : u.lastPathComponent
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    if pendingDownloadPrompt == nil {
+                        pendingDownloadPrompt = PendingBrowserDownload(urlStr: firstUrl, fileName: fname, mimeType: "")
+                    }
+                }
+            }
         }
     }
 
@@ -1239,8 +1268,11 @@ struct BrowserView: View {
                 }
             },
             onDownloadRequested: { urlStr, suggested, mime in
-                downloadManager.startDownload(urlStr: urlStr, suggestedName: suggested, mimeType: mime)
-                toastMsg = "已开始下载，若为 .ipa 将自动加入未签名 IPA 列表"
+                let fallbackName = (URL(string: urlStr)?.lastPathComponent).flatMap { $0.isEmpty ? nil : $0 } ?? "download_file"
+                let displayName = (suggested?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? fallbackName
+                DispatchQueue.main.async {
+                    pendingDownloadPrompt = PendingBrowserDownload(urlStr: urlStr, fileName: displayName, mimeType: mime)
+                }
             }
         )
         coordinators[tabId] = coord

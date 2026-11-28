@@ -36,14 +36,14 @@ struct UpdateSheet: View {
                     let target = GitHubMirrorHelper.buildCandidateURLs(downloadUrl).first ?? downloadUrl
                     dismiss()
                     if let onOpenInBrowser {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
                             onOpenInBrowser(target)
                         }
                     } else if let u = URL(string: target) {
                         UIApplication.shared.open(u)
                     }
                 } label: {
-                    Text("内置浏览器下载更新")
+                    Text("前往更新")
                         .font(.system(size: 15, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
