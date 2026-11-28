@@ -1384,6 +1384,29 @@ struct BrowserView: View {
         return LinearGradient(colors: palette[idx], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
+
+    private func presentSystemShareSheet(for url: URL) {
+        DispatchQueue.main.async {
+            guard let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive }) ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
+                  let root = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController ?? scene.windows.first?.rootViewController else {
+                return
+            }
+            var topVC = root
+            while let presented = topVC.presentedViewController {
+                topVC = presented
+            }
+            let avc = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            if let pop = avc.popoverPresentationController {
+                pop.sourceView = topVC.view
+                pop.sourceRect = CGRect(x: topVC.view.bounds.midX, y: topVC.view.bounds.midY, width: 1, height: 1)
+                pop.permittedArrowDirections = []
+            }
+            topVC.present(avc, animated: true)
+        }
+    }
+
     private func formatHistoryDate(_ ts: TimeInterval) -> String {
         let f = DateFormatter()
         f.timeZone = TimeZone.current
@@ -1444,7 +1467,7 @@ struct BrowserView: View {
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 if item.status == .completed, let localURL = downloadManager.localFileURL(for: item) {
-                                    shareDownloadURL = localURL
+                                    presentSystemShareSheet(for: localURL)
                                 }
                             }
 
@@ -1465,7 +1488,7 @@ struct BrowserView: View {
                                     }
                                     if let localURL = downloadManager.localFileURL(for: item) {
                                         Button {
-                                            shareDownloadURL = localURL
+                                            presentSystemShareSheet(for: localURL)
                                         } label: {
                                             Label("打开 / 分享", systemImage: "square.and.arrow.up")
                                                 .font(.system(size: 12, weight: .medium))
@@ -1494,11 +1517,6 @@ struct BrowserView: View {
             .listStyle(.insetGrouped)
             .navigationTitle("下载管理")
             .navigationBarTitleDisplayMode(.inline)
-            .sheet(isPresented: Binding(get: { shareDownloadURL != nil }, set: { if !$0 { shareDownloadURL = nil } })) {
-                if let u = shareDownloadURL {
-                    BrowserShareSheet(items: [u])
-                }
-            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     HStack(spacing: 12) {

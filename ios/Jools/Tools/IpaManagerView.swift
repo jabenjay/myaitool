@@ -228,18 +228,47 @@ struct IpaManagerView: View {
         }
     }
 
+    private func triggerSystemInstall(for item: IpaPackageItem) {
+        let ipaURL = manager.fileURL(for: item)
+        do {
+            let itmsURL = try LocalIpaInstallServer.shared.startAndBuildItmsURL(for: item, ipaURL: ipaURL)
+            UIApplication.shared.open(itmsURL) { ok in
+                if !ok {
+                    toastMsg = "无法调起系统安装程序，可尝试使用「导出」通过其他签名工具安装"
+                }
+            }
+        } catch {
+            toastMsg = "启动安装失败：\(error.localizedDescription)"
+        }
+    }
+
     private func signedActions(for item: IpaPackageItem) -> some View {
         HStack(spacing: 8) {
             Button {
-                shareFileURL = manager.fileURL(for: item)
+                triggerSystemInstall(for: item)
             } label: {
-                Label("安装 / 导出", systemImage: "arrow.down.app.fill")
+                Text("安装")
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 14)
                     .padding(.vertical, 7)
                     .background(Color(red: 0.12, green: 0.65, blue: 0.36))
+                    .foregroundColor(.white)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                shareFileURL = manager.fileURL(for: item)
+            } label: {
+                Text("导出")
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(Color.accentColor)
                     .foregroundColor(.white)
                     .clipShape(Capsule())
             }
@@ -475,7 +504,7 @@ struct IpaManagerView: View {
                                 toastMsg = "签名成功！「\(signed.appName)」已保存到已签名列表"
                                 if shouldInstall {
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                        shareFileURL = manager.fileURL(for: signed)
+                                        triggerSystemInstall(for: signed)
                                     }
                                 }
                             } catch {

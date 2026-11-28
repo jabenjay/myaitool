@@ -1028,3 +1028,112 @@ private enum PKCS12Fallback {
         return derived.prefix(keyLen)
     }
 }
+
+
+final class LocalIpaInstallServer {
+    static let shared = LocalIpaInstallServer()
+    private var listener: NWListener?
+    private var currentIpaURL: URL?
+    private var currentManifestData: Data?
+    private let queue = DispatchQueue(label: "com.jools.ipa.install.server")
+
+    private init() {}
+
+    func startAndBuildItmsURL(for item: IpaPackageItem, ipaURL: URL) throws -> URL {
+        stop()
+
+        let params = NWParameters.tcp
+        let newListener = try NWListener(using: params, on: .any)
+        self.listener = newListener
+        self.currentIpaURL = ipaURL
+
+        let sem = DispatchSemaphore(value: 0)
+        var boundPort: UInt16 = 0
+        var startError: Error?
+
+        newListener.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                boundPort = newListener.port?.rawValue ?? 0
+                sem.signal()
+            case .failed(let err):
+                startError = err
+                sem.signal()
+            default:
+                break
+            }
+        }
+
+        newListener.newConnectionHandler = { [weak self] conn in
+            self?.handleConnection(conn)
+        }
+
+        newListener.start(queue: queue)
+        _ = sem.wait(timeout: .now() + 3)
+
+        if let startError {
+            throw startError
+        }
+        guard boundPort > 0 else {
+            throw NSError(domain: "JoolsIPA", code: -20, userInfo: [
+                NSLocalizedDescriptionKey: "本地安装服务启动失败"
+            ])
+        }
+
+        let ipaEndpoint = "http://127.0.0.1:\(boundPort)/app.ipa"
+        let manifestObj: [String: Any] = [
+            "items": [[
+                "assets": [[
+                    "kind": "software-package",
+                    "url": ipaEndpoint
+                ]],
+                "metadata": [
+                    "bundle-identifier": item.bundleId,
+                    "bundle-version": item.version,
+                    "kind": "software",
+                    "title": item.appName
+                ]
+            ]]
+        ]
+        self.currentManifestData = try PropertyListSerialization.data(fromPropertyList: manifestObj, format: .xml, options: 0)
+
+        let manifestURL = "http://127.0.0.1:\(boundPort)/manifest.plist"
+        let encoded = manifestURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? manifestURL
+        guard let itms = URL(string: "itms-services://?action=download-manifest&url=\(encoded)") else {
+            throw NSError(domain: "JoolsIPA", code: -21, userInfo: [
+                NSLocalizedDescriptionKey: "生成安装链接失败"
+            ])
+        }
+        return itms
+    }
+
+    func stop() {
+        listener?.cancel()
+        listener = nil
+    }
+
+    private func handleConnection(_ conn: NWConnection) {
+        conn.start(queue: queue)
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 16384) { [weak self] data, _, _, _ in
+            guard let self, let data, let req = String(data: data, encoding: .utf8) else {
+                conn.cancel()
+                return
+            }
+            let firstLine = req.components(separatedBy: "\r\n").first ?? ""
+            if firstLine.contains("/manifest.plist"), let manifest = self.currentManifestData {
+                let header = "HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: \(manifest.count)\r\nConnection: close\r\n\r\n"
+                var resp = Data(header.utf8)
+                resp.append(manifest)
+                conn.send(content: resp, completion: .contentProcessed { _ in conn.cancel() })
+            } else if firstLine.contains("/app.ipa"), let ipaURL = self.currentIpaURL, let ipaData = try? Data(contentsOf: ipaURL) {
+                let header = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: \(ipaData.count)\r\nConnection: close\r\n\r\n"
+                var resp = Data(header.utf8)
+                resp.append(ipaData)
+                conn.send(content: resp, completion: .contentProcessed { _ in conn.cancel() })
+            } else {
+                let notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                conn.send(content: Data(notFound.utf8), completion: .contentProcessed { _ in conn.cancel() })
+            }
+        }
+    }
+}
