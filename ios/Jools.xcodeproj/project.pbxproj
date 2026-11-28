@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		CCE58CE6F209418286394536 /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = B06F6C9E2F15432085F1CFAB /* Citadel */; };
+		A1B2C3D4E5F6000100000001 /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F6000100000003 /* NIOCore */; };
+		A1B2C3D4E5F6000100000002 /* NIOFoundationCompat in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F6000100000004 /* NIOFoundationCompat */; };
 		56F58C9D70824AB8B5775B4D /* SshView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDAC0B5BE3B04239B98ED5D7 /* Tools/SshView.swift */; };
 		998197B811994D599530A981 /* SshRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3179DB5F81BA40FAAF7FAB27 /* Data/SshRepository.swift */; };
 		BA8D610C02344638BE96EC7C /* BrowserDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A7EEE57C065484BA412309C /* Data/BrowserDownloadManager.swift */; };
@@ -85,6 +87,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				CCE58CE6F209418286394536 /* Citadel in Frameworks */,
+				A1B2C3D4E5F6000100000001 /* NIOCore in Frameworks */,
+				A1B2C3D4E5F6000100000002 /* NIOFoundationCompat in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -165,6 +169,8 @@
 			name = Jools;
 			packageProductDependencies = (
 				B06F6C9E2F15432085F1CFAB /* Citadel */,
+				A1B2C3D4E5F6000100000003 /* NIOCore */,
+				A1B2C3D4E5F6000100000004 /* NIOFoundationCompat */,
 			);
 			productName = Jools;
 			productReference = 0AFD14C7D5CF0DDFD2199B9C /* Jools.app */;
@@ -197,6 +203,7 @@
 			mainGroup = 5C999E731352905727541C3C;
 			packageReferences = (
 				BDE9B50F5DC641CC94012E30 /* XCRemoteSwiftPackageReference "Citadel" */,
+				A1B2C3D4E5F6000100000005 /* XCRemoteSwiftPackageReference "swift-nio" */,
 			);
 			productRefGroup = 6D159F361021D92BC3E10E55 /* Products */;
 			projectDirPath = "";
@@ -357,7 +364,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-	};
 
 /* Begin XCRemoteSwiftPackageReference section */
 		BDE9B50F5DC641CC94012E30 /* XCRemoteSwiftPackageReference "Citadel" */ = {
@@ -368,6 +374,14 @@
 				kind = branch;
 			};
 		};
+		A1B2C3D4E5F6000100000005 /* XCRemoteSwiftPackageReference "swift-nio" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-nio.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.65.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -376,6 +390,17 @@
 			package = BDE9B50F5DC641CC94012E30 /* XCRemoteSwiftPackageReference "Citadel" */;
 			productName = Citadel;
 		};
+		A1B2C3D4E5F6000100000003 /* NIOCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D4E5F6000100000005 /* XCRemoteSwiftPackageReference "swift-nio" */;
+			productName = NIOCore;
+		};
+		A1B2C3D4E5F6000100000004 /* NIOFoundationCompat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D4E5F6000100000005 /* XCRemoteSwiftPackageReference "swift-nio" */;
+			productName = NIOFoundationCompat;
+		};
 /* End XCSwiftPackageProductDependency section */
+	};
 	rootObject = 5CD759D4193846E4910FD9BB /* Project object */;
 }

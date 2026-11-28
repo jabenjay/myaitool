@@ -4,8 +4,8 @@ import UniformTypeIdentifiers
 import Security
 import CryptoKit
 import Citadel
-import NIO
-import NIOSSH
+import NIOCore
+import NIOFoundationCompat
 
 struct SshRemoteFileItem: Identifiable, Equatable {
     var id: String { fullPath }
