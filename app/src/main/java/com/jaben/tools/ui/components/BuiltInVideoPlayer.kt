@@ -49,6 +49,7 @@ import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -94,6 +95,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -131,6 +133,10 @@ fun BuiltInVideoPlayerOverlay(
     val activity = remember(context) { context.findHostActivity() }
 
     var isFullscreen by remember { mutableStateOf(false) }
+    var videoWidth by remember { mutableIntStateOf(0) }
+    var videoHeight by remember { mutableIntStateOf(0) }
+    var isFullscreenLandscape by remember { mutableStateOf(true) }
+    var hasManualOrientationOverride by remember { mutableStateOf(false) }
     var isMinimized by remember { mutableStateOf(false) }
     var minimizedOnLeft by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
@@ -149,7 +155,10 @@ fun BuiltInVideoPlayerOverlay(
 
     val speeds = remember { listOf(0.5f, 0.75f, 1.0f, 1.28f, 1.5f, 2.0f) }
 
-    fun applyFullscreenSystemUi(fullscreen: Boolean) {
+    fun isPortraitVideo(): Boolean =
+        videoWidth > 0 && videoHeight > 0 && videoHeight > videoWidth
+
+    fun applyFullscreenSystemUi(fullscreen: Boolean, landscape: Boolean = isFullscreenLandscape) {
         activity?.let { act ->
             val window = act.window
             if (window != null) {
@@ -163,7 +172,11 @@ fun BuiltInVideoPlayerOverlay(
                 }
             }
             act.requestedOrientation = if (fullscreen) {
-                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                if (landscape) {
+                    ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                } else {
+                    ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                }
             } else {
                 ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             }
@@ -194,8 +207,8 @@ fun BuiltInVideoPlayerOverlay(
         }
     }
 
-    LaunchedEffect(isFullscreen) {
-        applyFullscreenSystemUi(isFullscreen)
+    LaunchedEffect(isFullscreen, isFullscreenLandscape) {
+        applyFullscreenSystemUi(isFullscreen, isFullscreenLandscape)
     }
 
     DisposableEffect(videoUrl) {
@@ -218,6 +231,21 @@ fun BuiltInVideoPlayerOverlay(
                     isBuffering = state == Player.STATE_BUFFERING
                     if (state == Player.STATE_READY) {
                         durationMs = controller.duration.coerceAtLeast(0L)
+                        val vs = controller.videoSize
+                        if (vs.width > 0 && vs.height > 0) {
+                            videoWidth = (vs.width * vs.pixelWidthHeightRatio).roundToInt().coerceAtLeast(1)
+                            videoHeight = vs.height
+                        }
+                    }
+                }
+
+                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                    if (videoSize.width > 0 && videoSize.height > 0) {
+                        videoWidth = (videoSize.width * videoSize.pixelWidthHeightRatio).roundToInt().coerceAtLeast(1)
+                        videoHeight = videoSize.height
+                        if (isFullscreen && !hasManualOrientationOverride) {
+                            isFullscreenLandscape = videoHeight <= videoWidth
+                        }
                     }
                 }
 
@@ -665,6 +693,24 @@ fun BuiltInVideoPlayerOverlay(
                                 modifier = Modifier.weight(1f)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
+                            if (isFullscreen) {
+                                IconButton(
+                                    onClick = {
+                                        controlInteractionTick++
+                                        hasManualOrientationOverride = true
+                                        isFullscreenLandscape = !isFullscreenLandscape
+                                    },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.ScreenRotation,
+                                        contentDescription = "旋转屏幕",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                            }
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = Color.White.copy(alpha = 0.2f),
@@ -784,7 +830,16 @@ fun BuiltInVideoPlayerOverlay(
                                     .padding(horizontal = 8.dp)
                             )
                             IconButton(
-                                onClick = { isFullscreen = !isFullscreen },
+                                onClick = {
+                                    controlInteractionTick++
+                                    if (!isFullscreen) {
+                                        hasManualOrientationOverride = false
+                                        isFullscreenLandscape = !isPortraitVideo()
+                                        isFullscreen = true
+                                    } else {
+                                        isFullscreen = false
+                                    }
+                                },
                                 modifier = Modifier.size(28.dp)
                             ) {
                                 Icon(

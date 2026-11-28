@@ -195,17 +195,16 @@ object AppUpdateChecker {
                                     )
                                     val silent = RootHelper.isSilentInstallEnabled(appCtx)
                                     val autoDel = RootHelper.isAutoDeleteApkEnabled(appCtx)
+                                    if (autoDel) {
+                                        RootHelper.savePendingCleanup(appCtx, downloadId, apkFile.absolutePath)
+                                    }
                                     if (silent && apkFile.exists()) {
                                         CoroutineScope(Dispatchers.IO).launch {
-                                            val (ok, msg) = RootHelper.silentInstallApk(apkFile)
+                                            val (ok, msg) = RootHelper.silentInstallApk(apkFile, deleteAfterInstall = autoDel)
                                             AppLogManager.log("Update", "Silent install: ok=$ok msg=$msg")
-                                            if (ok && autoDel) {
-                                                RootHelper.deleteFileWithRootFallback(apkFile)
-                                                runCatching { dm.remove(downloadId) }
-                                            } else if (!ok) {
+                                            if (!ok) {
                                                 val apkUri = dm.getUriForDownloadedFile(downloadId)
                                                 if (apkUri != null) {
-                                                    if (autoDel) RootHelper.savePendingCleanupApk(appCtx, apkFile.absolutePath)
                                                     val installIntent = Intent(Intent.ACTION_VIEW).apply {
                                                         setDataAndType(apkUri, "application/vnd.android.package-archive")
                                                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -216,9 +215,6 @@ object AppUpdateChecker {
                                         }
                                     } else {
                                         val apkUri = dm.getUriForDownloadedFile(downloadId) ?: return
-                                        if (autoDel) {
-                                            RootHelper.savePendingCleanupApk(appCtx, apkFile.absolutePath)
-                                        }
                                         val installIntent = Intent(Intent.ACTION_VIEW).apply {
                                             setDataAndType(apkUri, "application/vnd.android.package-archive")
                                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)

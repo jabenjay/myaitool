@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CCE58CE6F209418286394536 /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = B06F6C9E2F15432085F1CFAB /* Citadel */; };
+		56F58C9D70824AB8B5775B4D /* SshView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDAC0B5BE3B04239B98ED5D7 /* Tools/SshView.swift */; };
+		998197B811994D599530A981 /* SshRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3179DB5F81BA40FAAF7FAB27 /* Data/SshRepository.swift */; };
 		BA8D610C02344638BE96EC7C /* BrowserDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A7EEE57C065484BA412309C /* Data/BrowserDownloadManager.swift */; };
 		D18C0371FBCE4E9FADCA1EF0 /* IpaManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96FDDE4127EC47CDAD0C3BD7 /* Tools/IpaManagerView.swift */; };
 		D2DC04A25BF949BBB00956AD /* IpaManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30303F1F523740BFA94E2D21 /* Data/IpaManager.swift */; };
@@ -40,6 +43,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		BDAC0B5BE3B04239B98ED5D7 /* Tools/SshView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "SshView.swift"; path = "Tools/SshView.swift"; sourceTree = "<group>"; };
+		3179DB5F81BA40FAAF7FAB27 /* Data/SshRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "SshRepository.swift"; path = "Data/SshRepository.swift"; sourceTree = "<group>"; };
 		6A7EEE57C065484BA412309C /* Data/BrowserDownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "BrowserDownloadManager.swift"; path = "Data/BrowserDownloadManager.swift"; sourceTree = "<group>"; };
 		96FDDE4127EC47CDAD0C3BD7 /* Tools/IpaManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "IpaManagerView.swift"; path = "Tools/IpaManagerView.swift"; sourceTree = "<group>"; };
 		30303F1F523740BFA94E2D21 /* Data/IpaManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "IpaManager.swift"; path = "Data/IpaManager.swift"; sourceTree = "<group>"; };
@@ -79,6 +84,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CCE58CE6F209418286394536 /* Citadel in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -102,6 +108,8 @@
 				0CC0A24906418BD0E1B86BE1,
 				7B407B9D827B5F0D6EF3F32F,
 				D0428A502B9A4EC8A9FDC9C4,
+				BDAC0B5BE3B04239B98ED5D7,
+				3179DB5F81BA40FAAF7FAB27,
 				6A7EEE57C065484BA412309C,
 				96FDDE4127EC47CDAD0C3BD7,
 				30303F1F523740BFA94E2D21,
@@ -155,6 +163,9 @@
 			dependencies = (
 			);
 			name = Jools;
+			packageProductDependencies = (
+				B06F6C9E2F15432085F1CFAB /* Citadel */,
+			);
 			productName = Jools;
 			productReference = 0AFD14C7D5CF0DDFD2199B9C /* Jools.app */;
 			productType = "com.apple.product-type.application";
@@ -184,6 +195,9 @@
 				Base,
 			);
 			mainGroup = 5C999E731352905727541C3C;
+			packageReferences = (
+				BDE9B50F5DC641CC94012E30 /* XCRemoteSwiftPackageReference "Citadel" */,
+			);
 			productRefGroup = 6D159F361021D92BC3E10E55 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -213,6 +227,8 @@
 				9AA95989B6CE3513BF64B4F0 /* AppPreferences.swift in Sources */,
 				B24653E7F0BF78024AC7142F /* AppUpdateChecker.swift in Sources */,
 				5BDA3C96835B430FA748B72D /* BookmarkManager.swift in Sources */,
+				56F58C9D70824AB8B5775B4D /* SshView.swift in Sources */,
+				998197B811994D599530A981 /* SshRepository.swift in Sources */,
 				BA8D610C02344638BE96EC7C /* BrowserDownloadManager.swift in Sources */,
 				D18C0371FBCE4E9FADCA1EF0 /* IpaManagerView.swift in Sources */,
 				D2DC04A25BF949BBB00956AD /* IpaManager.swift in Sources */,
@@ -342,5 +358,24 @@
 		};
 /* End XCConfigurationList section */
 	};
+
+/* Begin XCRemoteSwiftPackageReference section */
+		BDE9B50F5DC641CC94012E30 /* XCRemoteSwiftPackageReference "Citadel" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/orlandos-nl/Citadel";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B06F6C9E2F15432085F1CFAB /* Citadel */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BDE9B50F5DC641CC94012E30 /* XCRemoteSwiftPackageReference "Citadel" */;
+			productName = Citadel;
+		};
+/* End XCSwiftPackageProductDependency section */
 	rootObject = 5CD759D4193846E4910FD9BB /* Project object */;
 }

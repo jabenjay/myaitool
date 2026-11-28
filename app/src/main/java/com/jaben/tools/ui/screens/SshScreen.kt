@@ -3,6 +3,7 @@ package com.jaben.tools.ui.screens
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -36,8 +37,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.Computer
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Description
@@ -54,6 +58,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -70,8 +77,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -80,7 +85,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -91,6 +98,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jaben.tools.tools.ssh.SshAuthType
 import com.jaben.tools.tools.ssh.SshEngine
+import com.jaben.tools.tools.ssh.SshKeyItem
 import com.jaben.tools.tools.ssh.SshRemoteFile
 import com.jaben.tools.tools.ssh.SshRepository
 import com.jaben.tools.tools.ssh.SshServerProfile
@@ -105,6 +113,16 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.UUID
+
+private enum class SshPage {
+    SERVER_LIST,
+    SERVER_EDITOR,
+    KEY_MANAGER,
+    KEY_EDITOR,
+    TERMINAL,
+    SFTP_FILES
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -113,24 +131,45 @@ fun SshScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val visuals = LocalAppThemeVisuals.current
     val repo = remember { SshRepository(context) }
 
+    var page by remember { mutableStateOf(SshPage.SERVER_LIST) }
     var servers by remember { mutableStateOf(repo.loadServers()) }
-    var editingServer by remember { mutableStateOf<SshServerProfile?>(null) }
-    var showServerEditor by remember { mutableStateOf(false) }
+    var sshKeys by remember { mutableStateOf(repo.loadKeys()) }
 
+    // Server editor draft state (persisted across jump to KEY_EDITOR and back!)
+    var editingServerId by remember { mutableStateOf<String?>(null) }
+    var draftName by remember { mutableStateOf("") }
+    var draftHost by remember { mutableStateOf("") }
+    var draftPort by remember { mutableStateOf("22") }
+    var draftUsername by remember { mutableStateOf("root") }
+    var draftAuthType by remember { mutableStateOf(SshAuthType.PASSWORD) }
+    var draftPassword by remember { mutableStateOf("") }
+    var draftKeyId by remember { mutableStateOf("") }
+    var draftExistingPassphrase by remember { mutableStateOf("") }
+    var draftPassphraseInput by remember { mutableStateOf("") }
+    var draftLastConnected by remember { mutableStateOf(0L) }
+    var keyDropdownExpanded by remember { mutableStateOf(false) }
+
+    // Key editor state
+    var keyReturnToServerEditor by remember { mutableStateOf(false) }
+    var keyNameInput by remember { mutableStateOf("") }
+    var keyPemInput by remember { mutableStateOf("") }
+    var generatedPublicKey by remember { mutableStateOf("") }
+
+    // Active connection state
     var activeProfile by remember { mutableStateOf<SshServerProfile?>(null) }
     var activeSession by remember { mutableStateOf<Session?>(null) }
     var isConnecting by remember { mutableStateOf(false) }
     var serverStatus by remember { mutableStateOf(SshServerStatus()) }
 
-    var workspaceTab by remember { mutableIntStateOf(0) } // 0: SFTP 文件, 1: SSH 终端
+    // SFTP state
     var currentPath by remember { mutableStateOf("/") }
     var remoteFiles by remember { mutableStateOf<List<SshRemoteFile>>(emptyList()) }
     var isLoadingFiles by remember { mutableStateOf(false) }
-
     var selectedFileForAction by remember { mutableStateOf<SshRemoteFile?>(null) }
     var pendingDownloadFile by remember { mutableStateOf<SshRemoteFile?>(null) }
     var showMkdirDialog by remember { mutableStateOf(false) }
@@ -138,12 +177,12 @@ fun SshScreen(
     var renameTarget by remember { mutableStateOf<SshRemoteFile?>(null) }
     var renameInput by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<SshRemoteFile?>(null) }
-
     var previewFile by remember { mutableStateOf<SshRemoteFile?>(null) }
     var previewContent by remember { mutableStateOf("") }
     var isSavingPreview by remember { mutableStateOf(false) }
 
-    var terminalLog by remember { mutableStateOf("已连接 SSH 终端，输入命令后回车执行。\n") }
+    // Terminal state
+    var terminalLog by remember { mutableStateOf("") }
     var commandInput by remember { mutableStateOf("") }
     var isRunningCmd by remember { mutableStateOf(false) }
 
@@ -155,6 +194,29 @@ fun SshScreen(
                 Thread { runCatching { s.disconnect() } }.start()
             }
         }
+    }
+
+    fun openServerEditor(profile: SshServerProfile?) {
+        editingServerId = profile?.id
+        draftName = profile?.name ?: ""
+        draftHost = profile?.host ?: ""
+        draftPort = (profile?.port ?: 22).toString()
+        draftUsername = profile?.username ?: "root"
+        draftAuthType = profile?.authType ?: SshAuthType.PASSWORD
+        draftPassword = profile?.password ?: ""
+        draftKeyId = profile?.keyId?.ifBlank { sshKeys.firstOrNull()?.id ?: "" } ?: (sshKeys.firstOrNull()?.id ?: "")
+        draftExistingPassphrase = profile?.keyPassphrase ?: ""
+        draftPassphraseInput = ""
+        draftLastConnected = profile?.lastConnectedAtMs ?: 0L
+        page = SshPage.SERVER_EDITOR
+    }
+
+    fun openKeyEditor(returnToServer: Boolean) {
+        keyReturnToServerEditor = returnToServer
+        keyNameInput = ""
+        keyPemInput = ""
+        generatedPublicKey = ""
+        page = SshPage.KEY_EDITOR
     }
 
     fun refreshDirectory(path: String = currentPath) {
@@ -185,16 +247,18 @@ fun SshScreen(
         if (isConnecting) return
         scope.launch {
             isConnecting = true
+            val resolvedKey = repo.resolvePrivateKey(profile)
             runCatching {
-                SshEngine.connect(profile)
+                SshEngine.connect(profile, resolvedKey)
             }.onSuccess { sess ->
                 activeSession = sess
                 activeProfile = profile
                 servers = repo.touchLastConnected(profile.id)
-                currentPath = profile.defaultPath.ifBlank { "/" }
-                terminalLog = "Connected to ${profile.username}@${profile.host}:${profile.port}\n"
+                val homeDir = runCatching { SshEngine.getDefaultHomeDirectory(sess) }.getOrDefault("/")
+                currentPath = homeDir
+                terminalLog = "Connected to ${profile.username}@${profile.host}:${profile.port}\nDefault path: $homeDir\n"
+                page = SshPage.TERMINAL
                 refreshStatus()
-                refreshDirectory(currentPath)
             }.onFailure { err ->
                 Toast.makeText(context, "连接失败: ${err.message}", Toast.LENGTH_LONG).show()
             }
@@ -207,7 +271,38 @@ fun SshScreen(
         activeSession = null
         activeProfile = null
         remoteFiles = emptyList()
+        page = SshPage.SERVER_LIST
         Thread { runCatching { sess?.disconnect() } }.start()
+    }
+
+    fun handleBackNavigation() {
+        when (page) {
+            SshPage.SERVER_LIST -> onBack()
+            SshPage.SERVER_EDITOR -> page = SshPage.SERVER_LIST
+            SshPage.KEY_MANAGER -> page = SshPage.SERVER_LIST
+            SshPage.KEY_EDITOR -> page = if (keyReturnToServerEditor) SshPage.SERVER_EDITOR else SshPage.KEY_MANAGER
+            SshPage.SFTP_FILES -> page = SshPage.TERMINAL
+            SshPage.TERMINAL -> disconnect()
+        }
+    }
+
+    BackHandler(enabled = page != SshPage.SERVER_LIST) {
+        handleBackNavigation()
+    }
+
+    val keyFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
+            }.onSuccess { content ->
+                if (content.isNotBlank()) {
+                    keyPemInput = content
+                    if (keyNameInput.isBlank()) {
+                        keyNameInput = resolveFileName(context, uri) ?: "导入私钥"
+                    }
+                }
+            }
+        }
     }
 
     val uploadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -269,20 +364,26 @@ fun SshScreen(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = {
-                if (activeSession != null) disconnect() else onBack()
-            }) {
+            IconButton(onClick = { handleBackNavigation() }) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
             }
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = activeProfile?.name ?: "SSH 工具",
+                    text = when (page) {
+                        SshPage.SERVER_LIST -> "SSH 工具"
+                        SshPage.SERVER_EDITOR -> if (editingServerId == null) "添加主机" else "编辑主机"
+                        SshPage.KEY_MANAGER -> "私钥管理"
+                        SshPage.KEY_EDITOR -> "添加新密钥"
+                        SshPage.TERMINAL -> activeProfile?.name ?: "SSH 终端"
+                        SshPage.SFTP_FILES -> "文件管理 · ${activeProfile?.name ?: ""}"
+                    },
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (activeProfile != null) {
+                if ((page == SshPage.TERMINAL || page == SshPage.SFTP_FILES) && activeProfile != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
@@ -300,25 +401,53 @@ fun SshScreen(
                 }
             }
 
-            if (activeSession != null) {
-                IconButton(onClick = {
-                    refreshStatus()
-                    if (workspaceTab == 0) refreshDirectory(currentPath)
-                }) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
+            when (page) {
+                SshPage.SERVER_LIST -> {
+                    IconButton(onClick = { page = SshPage.KEY_MANAGER }) {
+                        Icon(Icons.Rounded.Key, contentDescription = "私钥管理")
+                    }
+                    FilledTonalButton(onClick = { openServerEditor(null) }) {
+                        Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("添加")
+                    }
                 }
-                IconButton(onClick = { disconnect() }) {
-                    Icon(Icons.Rounded.LinkOff, contentDescription = "断开", tint = MaterialTheme.colorScheme.error)
+                SshPage.KEY_MANAGER -> {
+                    FilledTonalButton(onClick = { openKeyEditor(returnToServer = false) }) {
+                        Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("新建/导入")
+                    }
                 }
-            } else {
-                FilledTonalButton(onClick = {
-                    editingServer = null
-                    showServerEditor = true
-                }) {
-                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("添加")
+                SshPage.TERMINAL -> {
+                    IconButton(onClick = {
+                        page = SshPage.SFTP_FILES
+                        refreshDirectory(currentPath)
+                    }) {
+                        Icon(Icons.Rounded.Folder, contentDescription = "文件管理", tint = MaterialTheme.colorScheme.primary)
+                    }
+                    IconButton(onClick = { refreshStatus() }) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
+                    }
+                    IconButton(onClick = { disconnect() }) {
+                        Icon(Icons.Rounded.LinkOff, contentDescription = "断开", tint = MaterialTheme.colorScheme.error)
+                    }
                 }
+                SshPage.SFTP_FILES -> {
+                    IconButton(onClick = { refreshDirectory(currentPath) }) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
+                    }
+                    IconButton(onClick = { uploadLauncher.launch(arrayOf("*/*")) }) {
+                        Icon(Icons.Rounded.UploadFile, contentDescription = "上传")
+                    }
+                    IconButton(onClick = {
+                        mkdirName = ""
+                        showMkdirDialog = true
+                    }) {
+                        Icon(Icons.Rounded.CreateNewFolder, contentDescription = "新建文件夹")
+                    }
+                }
+                else -> {}
             }
         }
 
@@ -330,402 +459,683 @@ fun SshScreen(
                     Text("正在连接 SSH 服务器...", style = MaterialTheme.typography.bodyMedium)
                 }
             }
-        } else if (activeSession == null) {
-            // 服务器列表页
-            if (servers.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                    Card(
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(containerColor = visuals.cardContainerColor),
-                        modifier = Modifier.fillMaxWidth().liquidGlassSurface(24.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Icon(
-                                Icons.Rounded.Computer,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(44.dp)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text("暂无保存的服务器", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                "支持密码与私钥登录、SFTP 文件上传下载删除及终端命令执行",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(onClick = {
-                                editingServer = null
-                                showServerEditor = true
-                            }) {
-                                Icon(Icons.Rounded.Add, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("添加服务器")
-                            }
-                        }
-                    }
-                }
-            } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(servers, key = { it.id }) { server ->
-                        Card(
-                            onClick = { connectToServer(server) },
-                            shape = RoundedCornerShape(22.dp),
-                            colors = CardDefaults.cardColors(containerColor = visuals.cardContainerColor),
-                            modifier = Modifier.fillMaxWidth().liquidGlassSurface(22.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Surface(
-                                        shape = RoundedCornerShape(14.dp),
-                                        color = MaterialTheme.colorScheme.primaryContainer,
-                                        modifier = Modifier.size(44.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Rounded.Terminal,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.padding(10.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = server.name.ifBlank { server.host },
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = "${server.username}@${server.host}:${server.port}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    IconButton(onClick = {
-                                        editingServer = server
-                                        showServerEditor = true
-                                    }) {
-                                        Icon(Icons.Rounded.Edit, contentDescription = "编辑", modifier = Modifier.size(19.dp))
-                                    }
-                                    IconButton(onClick = {
-                                        servers = repo.deleteServer(server.id)
-                                    }) {
-                                        Icon(
-                                            Icons.Rounded.DeleteOutline,
-                                            contentDescription = "删除",
-                                            tint = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier.size(19.dp)
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+        } else {
+            when (page) {
+                SshPage.SERVER_LIST -> {
+                    if (servers.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                            Card(
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = visuals.cardContainerColor),
+                                modifier = Modifier.fillMaxWidth().liquidGlassSurface(24.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    Text(
-                                        text = "${server.authType.label} · 初始路径 ${server.defaultPath}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary
+                                    Icon(
+                                        Icons.Rounded.Computer,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(44.dp)
                                     )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text("暂无保存的服务器", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    Spacer(modifier = Modifier.height(6.dp))
                                     Text(
-                                        text = if (server.lastConnectedAtMs > 0) "最近: ${formatTime(server.lastConnectedAtMs)}" else "点击连接",
-                                        style = MaterialTheme.typography.labelSmall,
+                                        "支持密码与私钥管理、SFTP 文件传输及 SSH 终端",
+                                        style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Button(onClick = { openServerEditor(null) }) {
+                                        Icon(Icons.Rounded.Add, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("添加主机")
+                                    }
                                 }
                             }
-                        }
-                    }
-                }
-            }
-        } else {
-            // 已连接工作台（ServerBox 风格状态卡 + SFTP / 终端切换）
-            Column(modifier = Modifier.fillMaxSize()) {
-                // 系统状态概览卡片
-                Card(
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = visuals.cardContainerColor),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .liquidGlassSurface(18.dp)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("系统: ${serverStatus.osInfo}", style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                            Text("运行: ${serverStatus.uptime}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("内存: ${serverStatus.memoryInfo}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("磁盘: ${serverStatus.diskInfo}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                SingleChoiceSegmentedButtonRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                ) {
-                    SegmentedButton(
-                        selected = workspaceTab == 0,
-                        onClick = { workspaceTab = 0 },
-                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
-                    ) {
-                        Text("SFTP 文件")
-                    }
-                    SegmentedButton(
-                        selected = workspaceTab == 1,
-                        onClick = { workspaceTab = 1 },
-                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
-                    ) {
-                        Text("SSH 终端")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                if (workspaceTab == 0) {
-                    // SFTP 工具条
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = {
-                                if (currentPath != "/") {
-                                    val parent = currentPath.trimEnd('/').substringBeforeLast('/', "")
-                                    refreshDirectory(if (parent.isEmpty()) "/" else parent)
-                                }
-                            },
-                            enabled = currentPath != "/"
-                        ) {
-                            Icon(Icons.Rounded.ArrowUpward, contentDescription = "上一级")
-                        }
-                        Text(
-                            text = currentPath,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontFamily = FontFamily.Monospace,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(onClick = { uploadLauncher.launch(arrayOf("*/*")) }) {
-                            Icon(Icons.Rounded.UploadFile, contentDescription = "上传文件")
-                        }
-                        IconButton(onClick = {
-                            mkdirName = ""
-                            showMkdirDialog = true
-                        }) {
-                            Icon(Icons.Rounded.CreateNewFolder, contentDescription = "新建文件夹")
-                        }
-                    }
-
-                    if (isLoadingFiles) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
                         }
                     } else {
                         LazyColumn(
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.weight(1f)
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxSize()
                         ) {
-                            items(remoteFiles, key = { it.fullPath }) { item ->
+                            items(servers, key = { it.id }) { server ->
                                 Card(
-                                    onClick = {
-                                        if (item.isDir) {
-                                            refreshDirectory(item.fullPath)
-                                        } else {
-                                            selectedFileForAction = item
-                                        }
-                                    },
-                                    shape = RoundedCornerShape(16.dp),
+                                    onClick = { connectToServer(server) },
+                                    shape = RoundedCornerShape(22.dp),
                                     colors = CardDefaults.cardColors(containerColor = visuals.cardContainerColor),
-                                    modifier = Modifier.fillMaxWidth().liquidGlassSurface(16.dp)
+                                    modifier = Modifier.fillMaxWidth().liquidGlassSurface(22.dp)
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = if (item.isDir) Icons.Rounded.Folder else Icons.Rounded.Description,
-                                            contentDescription = null,
-                                            tint = if (item.isDir) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(26.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
+                                    Column(modifier = Modifier.padding(16.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Surface(
+                                                shape = RoundedCornerShape(14.dp),
+                                                color = MaterialTheme.colorScheme.primaryContainer,
+                                                modifier = Modifier.size(44.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Rounded.Terminal,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                    modifier = Modifier.padding(10.dp)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = server.name.ifBlank { server.host },
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Text(
+                                                    text = "${server.username}@${server.host}:${server.port}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            IconButton(onClick = { openServerEditor(server) }) {
+                                                Icon(Icons.Rounded.Edit, contentDescription = "编辑", modifier = Modifier.size(19.dp))
+                                            }
+                                            IconButton(onClick = { servers = repo.deleteServer(server.id) }) {
+                                                Icon(
+                                                    Icons.Rounded.DeleteOutline,
+                                                    contentDescription = "删除",
+                                                    tint = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.size(19.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
                                             Text(
-                                                text = item.name,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
+                                                text = server.authType.label,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary
                                             )
                                             Text(
-                                                text = buildString {
-                                                    if (!item.isDir) append("${formatSize(item.size)} · ")
-                                                    append(item.permissions)
-                                                    if (item.modifiedAtMs > 0) append(" · ${formatTime(item.modifiedAtMs)}")
-                                                },
+                                                text = if (server.lastConnectedAtMs > 0) "最近: ${formatTime(server.lastConnectedAtMs)}" else "点击连接",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
-                                        if (!item.isDir) {
-                                            IconButton(onClick = {
-                                                pendingDownloadFile = item
-                                                downloadLauncher.launch(item.name)
-                                            }) {
-                                                Icon(Icons.Rounded.Download, contentDescription = "下载", modifier = Modifier.size(20.dp))
-                                            }
-                                        }
-                                        IconButton(onClick = { deleteTarget = item }) {
-                                            Icon(
-                                                Icons.Rounded.DeleteOutline,
-                                                contentDescription = "删除",
-                                                tint = MaterialTheme.colorScheme.error,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
                                     }
                                 }
                             }
                         }
                     }
-                } else {
-                    // SSH 终端
-                    val quickCmds = listOf("ls -la", "df -h", "free -h", "uptime", "ps aux | head -n 15")
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        quickCmds.forEach { qc ->
-                            OutlinedButton(
-                                onClick = { commandInput = qc },
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Text(qc, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                            }
-                        }
-                    }
+                }
 
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Surface(
-                        color = Color(0xFF111418),
-                        shape = RoundedCornerShape(16.dp),
+                SshPage.SERVER_EDITOR -> {
+                    Column(
                         modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                    ) {
-                        SelectionContainer {
-                            Text(
-                                text = terminalLog,
-                                color = Color(0xFFE6EDF3),
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                lineHeight = 17.sp,
-                                modifier = Modifier
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(12.dp)
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         OutlinedTextField(
-                            value = commandInput,
-                            onValueChange = { commandInput = it },
-                            placeholder = { Text("输入 Shell 命令...") },
+                            value = draftName,
+                            onValueChange = { draftName = it },
+                            label = { Text("主机名称") },
                             singleLine = true,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(onSend = {
-                                val cmd = commandInput.trim()
-                                val sess = activeSession
-                                if (cmd.isNotEmpty() && sess != null && !isRunningCmd) {
-                                    commandInput = ""
-                                    isRunningCmd = true
-                                    terminalLog += "\n$ $cmd\n"
-                                    scope.launch {
-                                        runCatching { SshEngine.runCommand(sess, cmd, currentPath) }
-                                            .onSuccess { res ->
-                                                if (res.output.isNotEmpty()) terminalLog += "${res.output}\n"
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = draftHost,
+                            onValueChange = { draftHost = it },
+                            label = { Text("主机地址 (IP / 域名)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(
+                                value = draftUsername,
+                                onValueChange = { draftUsername = it },
+                                label = { Text("用户名") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = draftPort,
+                                onValueChange = { draftPort = it.filter { c -> c.isDigit() } },
+                                label = { Text("端口") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.width(100.dp)
+                            )
+                        }
+
+                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                            SshAuthType.entries.forEachIndexed { idx, type ->
+                                SegmentedButton(
+                                    selected = draftAuthType == type,
+                                    onClick = { draftAuthType = type },
+                                    shape = SegmentedButtonDefaults.itemShape(index = idx, count = SshAuthType.entries.size)
+                                ) {
+                                    Text(type.label)
+                                }
+                            }
+                        }
+
+                        if (draftAuthType == SshAuthType.PASSWORD) {
+                            OutlinedTextField(
+                                value = draftPassword,
+                                onValueChange = { draftPassword = it },
+                                label = { Text("登录密码") },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            // 私钥选择下拉框（按保存时间顺序，最下方为“添加新密钥”）
+                            val selectedKey = sshKeys.firstOrNull { it.id == draftKeyId }
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                OutlinedTextField(
+                                    value = selectedKey?.name ?: "请选择私钥",
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("选择私钥") },
+                                    trailingIcon = {
+                                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .clickable { keyDropdownExpanded = true }
+                                )
+                                DropdownMenu(
+                                    expanded = keyDropdownExpanded,
+                                    onDismissRequest = { keyDropdownExpanded = false }
+                                ) {
+                                    sshKeys.forEach { k ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Column {
+                                                    Text(k.name, fontWeight = FontWeight.Medium)
+                                                    Text(
+                                                        formatTime(k.createdAtMs),
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            },
+                                            onClick = {
+                                                draftKeyId = k.id
+                                                keyDropdownExpanded = false
                                             }
-                                            .onFailure { err ->
-                                                terminalLog += "[Error] ${err.message}\n"
-                                            }
-                                        isRunningCmd = false
+                                        )
+                                    }
+                                    if (sshKeys.isNotEmpty()) {
+                                        HorizontalDivider()
+                                    }
+                                    DropdownMenuItem(
+                                        leadingIcon = {
+                                            Icon(Icons.Rounded.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                        },
+                                        text = {
+                                            Text("添加新密钥", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                                        },
+                                        onClick = {
+                                            keyDropdownExpanded = false
+                                            openKeyEditor(returnToServer = true)
+                                        }
+                                    )
+                                }
+                            }
+
+                            val isEditingExistingHost = editingServerId != null && draftExistingPassphrase.isNotEmpty()
+                            OutlinedTextField(
+                                value = draftPassphraseInput,
+                                onValueChange = { draftPassphraseInput = it },
+                                label = { Text("密钥密码") },
+                                placeholder = {
+                                    Text(if (isEditingExistingHost) "输入以更改私钥密码" else "无密码可留空")
+                                },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Button(
+                            enabled = draftHost.isNotBlank() && draftUsername.isNotBlank() &&
+                                (draftAuthType == SshAuthType.PASSWORD || draftKeyId.isNotBlank()),
+                            onClick = {
+                                val p = draftPort.toIntOrNull()?.coerceIn(1, 65535) ?: 22
+                                val finalPassphrase = if (draftPassphraseInput.isNotEmpty()) {
+                                    draftPassphraseInput
+                                } else {
+                                    draftExistingPassphrase
+                                }
+                                val saved = SshServerProfile(
+                                    id = editingServerId ?: UUID.randomUUID().toString(),
+                                    name = draftName.trim().ifBlank { draftHost.trim() },
+                                    host = draftHost.trim(),
+                                    port = p,
+                                    username = draftUsername.trim(),
+                                    authType = draftAuthType,
+                                    password = draftPassword,
+                                    keyId = draftKeyId,
+                                    privateKey = "",
+                                    keyPassphrase = finalPassphrase,
+                                    lastConnectedAtMs = draftLastConnected
+                                )
+                                servers = repo.upsertServer(saved)
+                                page = SshPage.SERVER_LIST
+                            },
+                            modifier = Modifier.fillMaxWidth().height(48.dp)
+                        ) {
+                            Text("保存主机配置", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+
+                SshPage.KEY_MANAGER -> {
+                    if (sshKeys.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                            Card(
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = visuals.cardContainerColor),
+                                modifier = Modifier.fillMaxWidth().liquidGlassSurface(24.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(Icons.Rounded.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp))
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text("暂无保存的私钥", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    Button(onClick = { openKeyEditor(returnToServer = false) }) {
+                                        Text("新建或导入密钥")
                                     }
                                 }
-                            }),
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        IconButton(
-                            onClick = {
-                                val cmd = commandInput.trim()
-                                val sess = activeSession
-                                if (cmd.isNotEmpty() && sess != null && !isRunningCmd) {
-                                    commandInput = ""
-                                    isRunningCmd = true
-                                    terminalLog += "\n$ $cmd\n"
-                                    scope.launch {
-                                        runCatching { SshEngine.runCommand(sess, cmd, currentPath) }
-                                            .onSuccess { res ->
-                                                if (res.output.isNotEmpty()) terminalLog += "${res.output}\n"
-                                            }
-                                            .onFailure { err ->
-                                                terminalLog += "[Error] ${err.message}\n"
-                                            }
-                                        isRunningCmd = false
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(sshKeys, key = { it.id }) { keyItem ->
+                                Card(
+                                    shape = RoundedCornerShape(18.dp),
+                                    colors = CardDefaults.cardColors(containerColor = visuals.cardContainerColor),
+                                    modifier = Modifier.fillMaxWidth().liquidGlassSurface(18.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Rounded.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(keyItem.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                "保存于 ${formatTime(keyItem.createdAtMs)}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        IconButton(onClick = {
+                                            clipboard.setText(AnnotatedString(keyItem.privateKey))
+                                            Toast.makeText(context, "已复制私钥内容", Toast.LENGTH_SHORT).show()
+                                        }) {
+                                            Icon(Icons.Rounded.ContentCopy, contentDescription = "复制", modifier = Modifier.size(18.dp))
+                                        }
+                                        IconButton(onClick = { sshKeys = repo.deleteKey(keyItem.id) }) {
+                                            Icon(Icons.Rounded.DeleteOutline, contentDescription = "删除", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(19.dp))
+                                        }
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                SshPage.KEY_EDITOR -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = keyNameInput,
+                            onValueChange = { keyNameInput = it },
+                            label = { Text("密钥名称") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(
+                                onClick = { keyFileLauncher.launch(arrayOf("*/*")) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Rounded.UploadFile, contentDescription = null, modifier = Modifier.size(17.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("从文件导入")
+                            }
+                            FilledTonalButton(
+                                onClick = {
+                                    runCatching { SshEngine.generateRsaKeyPair() }
+                                        .onSuccess { (priv, pub) ->
+                                            keyPemInput = priv
+                                            generatedPublicKey = pub
+                                            if (keyNameInput.isBlank()) keyNameInput = "RSA_${System.currentTimeMillis() % 10000}"
+                                        }
+                                        .onFailure { Toast.makeText(context, "生成失败: ${it.message}", Toast.LENGTH_SHORT).show() }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Rounded.AutoFixHigh, contentDescription = null, modifier = Modifier.size(17.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("新建 RSA 密钥")
+                            }
+                        }
+
+                        if (generatedPublicKey.isNotEmpty()) {
+                            Card(
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f))
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("已生成公钥（可复制到服务器 authorized_keys）", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                                        TextButton(onClick = {
+                                            clipboard.setText(AnnotatedString(generatedPublicKey))
+                                            Toast.makeText(context, "已复制公钥", Toast.LENGTH_SHORT).show()
+                                        }) { Text("复制公钥") }
+                                    }
+                                    Text(
+                                        generatedPublicKey,
+                                        fontSize = 10.5.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 3,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = keyPemInput,
+                            onValueChange = { keyPemInput = it },
+                            label = { Text("私钥内容 (PEM / OpenSSH)") },
+                            modifier = Modifier.fillMaxWidth().height(220.dp),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                        )
+
+                        Button(
+                            enabled = keyPemInput.isNotBlank(),
+                            onClick = {
+                                val newItem = SshKeyItem(
+                                    name = keyNameInput.trim().ifBlank { "密钥 ${sshKeys.size + 1}" },
+                                    privateKey = keyPemInput.trim(),
+                                    createdAtMs = System.currentTimeMillis()
+                                )
+                                sshKeys = repo.upsertKey(newItem)
+                                if (keyReturnToServerEditor) {
+                                    draftKeyId = newItem.id
+                                    page = SshPage.SERVER_EDITOR
+                                } else {
+                                    page = SshPage.KEY_MANAGER
                                 }
                             },
-                            enabled = !isRunningCmd
+                            modifier = Modifier.fillMaxWidth().height(48.dp)
                         ) {
-                            Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "执行")
+                            Text("保存密钥", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+
+                SshPage.TERMINAL -> {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Card(
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(containerColor = visuals.cardContainerColor),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                                .liquidGlassSurface(18.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("系统: ${serverStatus.osInfo}", style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    Text("运行: ${serverStatus.uptime}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("内存: ${serverStatus.memoryInfo}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("磁盘: ${serverStatus.diskInfo}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        val quickCmds = listOf("ls -la", "df -h", "free -h", "uptime", "ps aux | head -n 15")
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            quickCmds.forEach { qc ->
+                                OutlinedButton(
+                                    onClick = { commandInput = qc },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(qc, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Surface(
+                            color = Color(0xFF111418),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                        ) {
+                            SelectionContainer {
+                                Text(
+                                    text = terminalLog,
+                                    color = Color(0xFFE6EDF3),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    lineHeight = 17.sp,
+                                    modifier = Modifier
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(12.dp)
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = commandInput,
+                                onValueChange = { commandInput = it },
+                                placeholder = { Text("输入 Shell 命令...") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                keyboardActions = KeyboardActions(onSend = {
+                                    val cmd = commandInput.trim()
+                                    val sess = activeSession
+                                    if (cmd.isNotEmpty() && sess != null && !isRunningCmd) {
+                                        commandInput = ""
+                                        isRunningCmd = true
+                                        terminalLog += "\n$ $cmd\n"
+                                        scope.launch {
+                                            runCatching { SshEngine.runCommand(sess, cmd, currentPath) }
+                                                .onSuccess { res ->
+                                                    if (res.output.isNotEmpty()) terminalLog += "${res.output}\n"
+                                                }
+                                                .onFailure { err ->
+                                                    terminalLog += "[Error] ${err.message}\n"
+                                                }
+                                            isRunningCmd = false
+                                        }
+                                    }
+                                }),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            IconButton(
+                                onClick = {
+                                    val cmd = commandInput.trim()
+                                    val sess = activeSession
+                                    if (cmd.isNotEmpty() && sess != null && !isRunningCmd) {
+                                        commandInput = ""
+                                        isRunningCmd = true
+                                        terminalLog += "\n$ $cmd\n"
+                                        scope.launch {
+                                            runCatching { SshEngine.runCommand(sess, cmd, currentPath) }
+                                                .onSuccess { res ->
+                                                    if (res.output.isNotEmpty()) terminalLog += "${res.output}\n"
+                                                }
+                                                .onFailure { err ->
+                                                    terminalLog += "[Error] ${err.message}\n"
+                                                }
+                                            isRunningCmd = false
+                                        }
+                                    }
+                                },
+                                enabled = !isRunningCmd
+                            ) {
+                                Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "执行")
+                            }
+                        }
+                    }
+                }
+
+                SshPage.SFTP_FILES -> {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    if (currentPath != "/") {
+                                        val parent = currentPath.trimEnd('/').substringBeforeLast('/', "")
+                                        refreshDirectory(if (parent.isEmpty()) "/" else parent)
+                                    }
+                                },
+                                enabled = currentPath != "/"
+                            ) {
+                                Icon(Icons.Rounded.ArrowUpward, contentDescription = "上一级")
+                            }
+                            Text(
+                                text = currentPath,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        if (isLoadingFiles) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator()
+                            }
+                        } else {
+                            LazyColumn(
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                items(remoteFiles, key = { it.fullPath }) { item ->
+                                    Card(
+                                        onClick = {
+                                            if (item.isDir) {
+                                                refreshDirectory(item.fullPath)
+                                            } else {
+                                                selectedFileForAction = item
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = CardDefaults.cardColors(containerColor = visuals.cardContainerColor),
+                                        modifier = Modifier.fillMaxWidth().liquidGlassSurface(16.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = if (item.isDir) Icons.Rounded.Folder else Icons.Rounded.Description,
+                                                contentDescription = null,
+                                                tint = if (item.isDir) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(26.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = item.name,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = buildString {
+                                                        if (!item.isDir) append("${formatSize(item.size)} · ")
+                                                        append(item.permissions)
+                                                        if (item.modifiedAtMs > 0) append(" · ${formatTime(item.modifiedAtMs)}")
+                                                    },
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            if (!item.isDir) {
+                                                IconButton(onClick = {
+                                                    pendingDownloadFile = item
+                                                    downloadLauncher.launch(item.name)
+                                                }) {
+                                                    Icon(Icons.Rounded.Download, contentDescription = "下载", modifier = Modifier.size(20.dp))
+                                                }
+                                            }
+                                            IconButton(onClick = { deleteTarget = item }) {
+                                                Icon(
+                                                    Icons.Rounded.DeleteOutline,
+                                                    contentDescription = "删除",
+                                                    tint = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-    }
-
-    // 服务器编辑弹窗
-    if (showServerEditor) {
-        SshServerEditorDialog(
-            initial = editingServer,
-            onDismiss = { showServerEditor = false },
-            onSave = { saved ->
-                servers = repo.upsertServer(saved)
-                showServerEditor = false
-            }
-        )
     }
 
     // 文件操作弹窗
@@ -917,141 +1327,6 @@ fun SshScreen(
             }
         )
     }
-}
-
-@Composable
-private fun SshServerEditorDialog(
-    initial: SshServerProfile?,
-    onDismiss: () -> Unit,
-    onSave: (SshServerProfile) -> Unit
-) {
-    val context = LocalContext.current
-    var name by remember { mutableStateOf(initial?.name ?: "") }
-    var host by remember { mutableStateOf(initial?.host ?: "") }
-    var port by remember { mutableStateOf((initial?.port ?: 22).toString()) }
-    var username by remember { mutableStateOf(initial?.username ?: "root") }
-    var authType by remember { mutableStateOf(initial?.authType ?: SshAuthType.PASSWORD) }
-    var password by remember { mutableStateOf(initial?.password ?: "") }
-    var privateKey by remember { mutableStateOf(initial?.privateKey ?: "") }
-    var keyPassphrase by remember { mutableStateOf(initial?.keyPassphrase ?: "") }
-    var defaultPath by remember { mutableStateOf(initial?.defaultPath ?: "/") }
-
-    val keyFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
-            }.onSuccess { content ->
-                if (content.isNotBlank()) privateKey = content
-            }
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "添加 SSH 服务器" else "编辑服务器") },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("备注名称") }, singleLine = true)
-                OutlinedTextField(value = host, onValueChange = { host = it }, label = { Text("主机地址 (IP / 域名)") }, singleLine = true)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = username,
-                        onValueChange = { username = it },
-                        label = { Text("用户名") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = port,
-                        onValueChange = { port = it.filter { c -> c.isDigit() } },
-                        label = { Text("端口") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.width(96.dp)
-                    )
-                }
-
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    SshAuthType.entries.forEachIndexed { idx, type ->
-                        SegmentedButton(
-                            selected = authType == type,
-                            onClick = { authType = type },
-                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = SshAuthType.entries.size)
-                        ) {
-                            Text(type.label, fontSize = 12.sp)
-                        }
-                    }
-                }
-
-                if (authType == SshAuthType.PASSWORD) {
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = { password = it },
-                        label = { Text("密码") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation()
-                    )
-                } else {
-                    OutlinedButton(onClick = { keyFileLauncher.launch(arrayOf("*/*")) }) {
-                        Icon(Icons.Rounded.Key, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("从文件导入私钥")
-                    }
-                    OutlinedTextField(
-                        value = privateKey,
-                        onValueChange = { privateKey = it },
-                        label = { Text("私钥内容 (PEM / OpenSSH)") },
-                        modifier = Modifier.height(100.dp)
-                    )
-                    OutlinedTextField(
-                        value = keyPassphrase,
-                        onValueChange = { keyPassphrase = it },
-                        label = { Text("私钥密码（无密码留空）") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation()
-                    )
-                }
-
-                OutlinedTextField(
-                    value = defaultPath,
-                    onValueChange = { defaultPath = it },
-                    label = { Text("默认远程目录") },
-                    singleLine = true
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                enabled = host.isNotBlank() && username.isNotBlank(),
-                onClick = {
-                    val p = port.toIntOrNull()?.coerceIn(1, 65535) ?: 22
-                    onSave(
-                        SshServerProfile(
-                            id = initial?.id ?: java.util.UUID.randomUUID().toString(),
-                            name = name.trim().ifBlank { host.trim() },
-                            host = host.trim(),
-                            port = p,
-                            username = username.trim(),
-                            authType = authType,
-                            password = password,
-                            privateKey = privateKey,
-                            keyPassphrase = keyPassphrase,
-                            defaultPath = defaultPath.trim().ifBlank { "/" },
-                            lastConnectedAtMs = initial?.lastConnectedAtMs ?: 0L
-                        )
-                    )
-                }
-            ) { Text("保存") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        }
-    )
 }
 
 private fun resolveFileName(context: android.content.Context, uri: Uri): String? {

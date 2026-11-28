@@ -10,6 +10,7 @@ struct IpaManagerView: View {
     @State private var showIpaImporter = false
     @State private var showP12Importer = false
     @State private var showProfileImporter = false
+    @State private var showCertZipImporter = false
 
     @State private var pendingP12URL: URL?
     @State private var showP12PasswordAlert = false
@@ -38,6 +39,7 @@ struct IpaManagerView: View {
                     showIpaImporter: $showIpaImporter,
                     showP12Importer: $showP12Importer,
                     showProfileImporter: $showProfileImporter,
+                    showCertZipImporter: $showCertZipImporter,
                     pendingP12URL: $pendingP12URL,
                     p12Password: $p12Password,
                     p12Alias: $p12Alias,
@@ -107,6 +109,11 @@ struct IpaManagerView: View {
                     showIpaImporter = true
                 } label: {
                     Label("导入未签名 IPA", systemImage: "doc.badge.plus")
+                }
+                Button {
+                    showCertZipImporter = true
+                } label: {
+                    Label("导入证书压缩包 (.zip)", systemImage: "doc.zipper")
                 }
                 Button {
                     showP12Importer = true
@@ -248,10 +255,12 @@ struct IpaManagerView: View {
     private var certsAndProfilesView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                HStack {
+                HStack(spacing: 12) {
                     Text("P12 签名证书 (\(manager.certs.count))")
                         .font(.system(size: 15, weight: .bold))
                     Spacer()
+                    Button("导入 ZIP") { showCertZipImporter = true }
+                        .font(.system(size: 13, weight: .semibold))
                     Button("导入 P12") { showP12Importer = true }
                         .font(.system(size: 13, weight: .semibold))
                 }
@@ -524,12 +533,36 @@ private struct IpaImportersModifier: ViewModifier {
     @Binding var showIpaImporter: Bool
     @Binding var showP12Importer: Bool
     @Binding var showProfileImporter: Bool
+    @Binding var showCertZipImporter: Bool
     @Binding var pendingP12URL: URL?
     @Binding var p12Password: String
     @Binding var p12Alias: String
     @Binding var showP12PasswordAlert: Bool
     @Binding var selectedTab: Int
     @Binding var toastMsg: String?
+
+    private func handleZipImport(_ url: URL) {
+        do {
+            let res = try manager.importCertZip(from: url)
+            selectedTab = 2
+            if let firstP12 = res.pendingP12TempURLs.first {
+                pendingP12URL = firstP12
+                p12Password = ""
+                let rawName = firstP12.deletingPathExtension().lastPathComponent
+                let cleaned = rawName.replacingOccurrences(
+                    of: "^jools_p12_[0-9A-Fa-f-]+_",
+                    with: "",
+                    options: .regularExpression
+                )
+                p12Alias = cleaned
+                showP12PasswordAlert = true
+            } else {
+                toastMsg = "已自动导入 \(res.importedCerts.count) 个证书、\(res.importedProfiles.count) 个描述文件"
+            }
+        } catch {
+            toastMsg = "导入失败：\(error.localizedDescription)"
+        }
+    }
 
     func body(content: Content) -> some View {
         content
@@ -549,15 +582,28 @@ private struct IpaImportersModifier: ViewModifier {
                 }
             }
             .fileImporter(
-                isPresented: $showP12Importer,
-                allowedContentTypes: [UTType(filenameExtension: "p12") ?? .pkcs12, .data],
+                isPresented: $showCertZipImporter,
+                allowedContentTypes: [.zip, .archive, .data],
                 allowsMultipleSelection: false
             ) { result in
                 if case .success(let urls) = result, let url = urls.first {
-                    pendingP12URL = url
-                    p12Password = ""
-                    p12Alias = url.deletingPathExtension().lastPathComponent
-                    showP12PasswordAlert = true
+                    handleZipImport(url)
+                }
+            }
+            .fileImporter(
+                isPresented: $showP12Importer,
+                allowedContentTypes: [UTType(filenameExtension: "p12") ?? .pkcs12, .zip, .archive, .data],
+                allowsMultipleSelection: false
+            ) { result in
+                if case .success(let urls) = result, let url = urls.first {
+                    if url.pathExtension.lowercased() == "zip" {
+                        handleZipImport(url)
+                    } else {
+                        pendingP12URL = url
+                        p12Password = ""
+                        p12Alias = url.deletingPathExtension().lastPathComponent
+                        showP12PasswordAlert = true
+                    }
                 }
             }
             .fileImporter(

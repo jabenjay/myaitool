@@ -10,6 +10,13 @@ enum class SshAuthType(val label: String) {
     PRIVATE_KEY("私钥认证")
 }
 
+data class SshKeyItem(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val privateKey: String,
+    val createdAtMs: Long = System.currentTimeMillis()
+)
+
 data class SshServerProfile(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
@@ -18,14 +25,76 @@ data class SshServerProfile(
     val username: String = "root",
     val authType: SshAuthType = SshAuthType.PASSWORD,
     val password: String = "",
+    val keyId: String = "",
     val privateKey: String = "",
     val keyPassphrase: String = "",
-    val defaultPath: String = "/",
     val lastConnectedAtMs: Long = 0L
 )
 
 class SshRepository(context: Context) {
     private val prefs = context.getSharedPreferences("jools_ssh_servers", Context.MODE_PRIVATE)
+
+    fun loadKeys(): List<SshKeyItem> {
+        val raw = prefs.getString(KEY_SSH_KEYS, null) ?: return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val pem = o.optString("privateKey")
+                    if (pem.isBlank()) continue
+                    add(
+                        SshKeyItem(
+                            id = o.optString("id").ifBlank { UUID.randomUUID().toString() },
+                            name = o.optString("name").ifBlank { "未命名密钥" },
+                            privateKey = pem,
+                            createdAtMs = o.optLong("createdAtMs", 0L)
+                        )
+                    )
+                }
+            }.sortedBy { it.createdAtMs }
+        }.getOrDefault(emptyList())
+    }
+
+    fun saveKeys(list: List<SshKeyItem>) {
+        val arr = JSONArray()
+        list.forEach { k ->
+            arr.put(
+                JSONObject().apply {
+                    put("id", k.id)
+                    put("name", k.name)
+                    put("privateKey", k.privateKey)
+                    put("createdAtMs", k.createdAtMs)
+                }
+            )
+        }
+        prefs.edit().putString(KEY_SSH_KEYS, arr.toString()).apply()
+    }
+
+    fun upsertKey(key: SshKeyItem): List<SshKeyItem> {
+        val current = loadKeys().toMutableList()
+        val idx = current.indexOfFirst { it.id == key.id }
+        if (idx >= 0) {
+            current[idx] = key
+        } else {
+            current.add(key)
+        }
+        saveKeys(current)
+        return current.sortedBy { it.createdAtMs }
+    }
+
+    fun deleteKey(id: String): List<SshKeyItem> {
+        val updated = loadKeys().filterNot { it.id == id }
+        saveKeys(updated)
+        return updated
+    }
+
+    fun resolvePrivateKey(profile: SshServerProfile): String {
+        if (profile.keyId.isNotBlank()) {
+            loadKeys().firstOrNull { it.id == profile.keyId }?.let { return it.privateKey }
+        }
+        return profile.privateKey
+    }
 
     fun loadServers(): List<SshServerProfile> {
         val raw = prefs.getString(KEY_SERVERS, null) ?: return emptyList()
@@ -45,9 +114,9 @@ class SshRepository(context: Context) {
                             username = o.optString("username", "root"),
                             authType = auth,
                             password = o.optString("password"),
+                            keyId = o.optString("keyId"),
                             privateKey = o.optString("privateKey"),
                             keyPassphrase = o.optString("keyPassphrase"),
-                            defaultPath = o.optString("defaultPath", "/").ifBlank { "/" },
                             lastConnectedAtMs = o.optLong("lastConnectedAtMs", 0L)
                         )
                     )
@@ -68,9 +137,9 @@ class SshRepository(context: Context) {
                     put("username", s.username)
                     put("authType", s.authType.name)
                     put("password", s.password)
+                    put("keyId", s.keyId)
                     put("privateKey", s.privateKey)
                     put("keyPassphrase", s.keyPassphrase)
-                    put("defaultPath", s.defaultPath)
                     put("lastConnectedAtMs", s.lastConnectedAtMs)
                 }
             )
@@ -107,5 +176,6 @@ class SshRepository(context: Context) {
 
     private companion object {
         const val KEY_SERVERS = "ssh_servers_json"
+        const val KEY_SSH_KEYS = "ssh_keys_json"
     }
 }

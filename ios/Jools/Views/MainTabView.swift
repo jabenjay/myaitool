@@ -58,6 +58,7 @@ struct MainTabView: View {
                         case .browser: BrowserView(prefs: prefs, initialUrl: "")
                         case .pushGit: PushGitView(prefs: prefs)
                         case .ipaManager: IpaManagerView(prefs: prefs)
+                        case .ssh: SshView(prefs: prefs)
                         }
                     case .browserWithUrl(let u):
                         BrowserView(prefs: prefs, initialUrl: u)

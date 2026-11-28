@@ -39,12 +39,20 @@ struct BuiltInVideoPlayerView: View {
     @State private var isSeeking = false
     @State private var playbackSpeed: Float = 1.0
 
+    @State private var videoSize: CGSize = .zero
+    @State private var isFullscreenLandscape = true
+    @State private var hasManualOrientationOverride = false
+
     @State private var offset: CGSize = .zero
     @State private var dragStartOffset: CGSize = .zero
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
 
     private let speeds: [Float] = [1.0, 1.25, 1.5, 2.0]
+
+    private var isPortraitVideo: Bool {
+        videoSize.width > 0 && videoSize.height > 0 && videoSize.height > videoSize.width
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -71,7 +79,12 @@ struct BuiltInVideoPlayerView: View {
                         // Top bar
                         VStack {
                             HStack(spacing: 8) {
-                                Button(action: onClose) {
+                                Button {
+                                    if isFullscreen {
+                                        applyFullscreenOrientation(fullscreen: false, landscape: false)
+                                    }
+                                    onClose()
+                                } label: {
                                     Image(systemName: "xmark")
                                         .font(.system(size: 13, weight: .bold))
                                         .foregroundColor(.white)
@@ -82,8 +95,22 @@ struct BuiltInVideoPlayerView: View {
                                     .foregroundColor(.white)
                                     .lineLimit(1)
                                 Spacer()
+                                if isFullscreen {
+                                    Button {
+                                        hasManualOrientationOverride = true
+                                        isFullscreenLandscape.toggle()
+                                        applyFullscreenOrientation(fullscreen: true, landscape: isFullscreenLandscape)
+                                    } label: {
+                                        Image(systemName: "rotate.right")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundColor(.white)
+                                            .frame(width: 28, height: 28)
+                                            .background(Color.white.opacity(0.2))
+                                            .clipShape(Circle())
+                                    }
+                                }
                                 Button {
-                                    let idx = (speeds.firstIndex(of: playbackSpeed) ?? 0 + 1) % speeds.count
+                                    let idx = ((speeds.firstIndex(of: playbackSpeed) ?? 0) + 1) % speeds.count
                                     playbackSpeed = speeds[idx]
                                     player?.rate = isPlaying ? playbackSpeed : 0
                                 } label: {
@@ -165,7 +192,16 @@ struct BuiltInVideoPlayerView: View {
                                 .tint(.white)
 
                                 Button {
-                                    withAnimation(.spring()) { isFullscreen.toggle() }
+                                    if !isFullscreen {
+                                        hasManualOrientationOverride = false
+                                        let shouldLandscape = !isPortraitVideo
+                                        isFullscreenLandscape = shouldLandscape
+                                        withAnimation(.spring()) { isFullscreen = true }
+                                        applyFullscreenOrientation(fullscreen: true, landscape: shouldLandscape)
+                                    } else {
+                                        withAnimation(.spring()) { isFullscreen = false }
+                                        applyFullscreenOrientation(fullscreen: false, landscape: false)
+                                    }
                                 } label: {
                                     Image(systemName: isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
                                         .font(.system(size: 14, weight: .semibold))
@@ -203,10 +239,23 @@ struct BuiltInVideoPlayerView: View {
                 )
             )
         }
+        .background(isFullscreen ? Color.black.ignoresSafeArea() : Color.clear)
+        .statusBarHidden(isFullscreen)
         .onAppear { startPlayer() }
         .onDisappear {
             player?.pause()
             player = nil
+            applyFullscreenOrientation(fullscreen: false, landscape: false)
+        }
+    }
+
+    private func applyFullscreenOrientation(fullscreen: Bool, landscape: Bool) {
+        if fullscreen {
+            let target: UIInterfaceOrientationMask = landscape ? .landscapeRight : .portrait
+            let lockMask: UIInterfaceOrientationMask = landscape ? .landscape : .portrait
+            OrientationManager.shared.apply(mask: lockMask, preferred: target)
+        } else {
+            OrientationManager.shared.apply(mask: .allButUpsideDown, preferred: .portrait)
         }
     }
 
@@ -228,6 +277,18 @@ struct BuiltInVideoPlayerView: View {
             }
             if let dur = p.currentItem?.duration.seconds, dur.isFinite && dur > 0 {
                 durationSec = dur
+            }
+            if let pSize = p.currentItem?.presentationSize, pSize.width > 0, pSize.height > 0 {
+                if videoSize != pSize {
+                    videoSize = pSize
+                    if isFullscreen && !hasManualOrientationOverride {
+                        let shouldLandscape = pSize.height <= pSize.width
+                        if isFullscreenLandscape != shouldLandscape {
+                            isFullscreenLandscape = shouldLandscape
+                            applyFullscreenOrientation(fullscreen: true, landscape: shouldLandscape)
+                        }
+                    }
+                }
             }
         }
     }

@@ -3,6 +3,7 @@ package com.jaben.tools.tools.ssh
 import com.jcraft.jsch.ChannelExec
 import com.jcraft.jsch.ChannelSftp
 import com.jcraft.jsch.JSch
+import com.jcraft.jsch.KeyPair
 import com.jcraft.jsch.Session
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -36,28 +37,47 @@ data class SshCommandResult(
 
 object SshEngine {
 
-    suspend fun connect(profile: SshServerProfile): Session = withContext(Dispatchers.IO) {
-        val jsch = JSch()
-        if (profile.authType == SshAuthType.PRIVATE_KEY && profile.privateKey.isNotBlank()) {
-            val keyBytes = profile.privateKey.trim().toByteArray(Charsets.UTF_8)
-            val passBytes = if (profile.keyPassphrase.isNotEmpty()) {
-                profile.keyPassphrase.toByteArray(Charsets.UTF_8)
-            } else null
-            jsch.addIdentity("jools_${profile.id}", keyBytes, null, passBytes)
+    suspend fun connect(profile: SshServerProfile, resolvedPrivateKey: String = ""): Session =
+        withContext(Dispatchers.IO) {
+            val jsch = JSch()
+            val keyPem = resolvedPrivateKey.ifBlank { profile.privateKey }.trim()
+            if (profile.authType == SshAuthType.PRIVATE_KEY && keyPem.isNotEmpty()) {
+                val keyBytes = keyPem.toByteArray(Charsets.UTF_8)
+                val passBytes = if (profile.keyPassphrase.isNotEmpty()) {
+                    profile.keyPassphrase.toByteArray(Charsets.UTF_8)
+                } else null
+                jsch.addIdentity("jools_${profile.id}", keyBytes, null, passBytes)
+            }
+
+            val session = jsch.getSession(profile.username.trim(), profile.host.trim(), profile.port)
+            if (profile.authType == SshAuthType.PASSWORD) {
+                session.setPassword(profile.password)
+            }
+            val config = Properties().apply {
+                put("StrictHostKeyChecking", "no")
+                put("PreferredAuthentications", "publickey,password,keyboard-interactive")
+            }
+            session.setConfig(config)
+            session.timeout = 12_000
+            session.connect(12_000)
+            session
         }
 
-        val session = jsch.getSession(profile.username.trim(), profile.host.trim(), profile.port)
-        if (profile.authType == SshAuthType.PASSWORD) {
-            session.setPassword(profile.password)
+    fun generateRsaKeyPair(): Pair<String, String> {
+        val jsch = JSch()
+        val kpair = KeyPair.genKeyPair(jsch, KeyPair.RSA, 2048)
+        val privOut = ByteArrayOutputStream()
+        val pubOut = ByteArrayOutputStream()
+        kpair.writePrivateKey(privOut)
+        kpair.writePublicKey(pubOut, "jools@android")
+        kpair.dispose()
+        return privOut.toString("UTF-8") to pubOut.toString("UTF-8").trim()
+    }
+
+    suspend fun getDefaultHomeDirectory(session: Session): String = withContext(Dispatchers.IO) {
+        withSftp(session) { sftp ->
+            sftp.pwd().ifBlank { "/" }
         }
-        val config = Properties().apply {
-            put("StrictHostKeyChecking", "no")
-            put("PreferredAuthentications", "publickey,password,keyboard-interactive")
-        }
-        session.setConfig(config)
-        session.timeout = 12_000
-        session.connect(12_000)
-        session
     }
 
     suspend fun fetchServerStatus(session: Session): SshServerStatus = withContext(Dispatchers.IO) {
@@ -145,7 +165,7 @@ object SshEngine {
 
     suspend fun listFiles(session: Session, remotePath: String): List<SshRemoteFile> = withContext(Dispatchers.IO) {
         withSftp(session) { sftp ->
-            val cleanDir = if (remotePath.isBlank()) "/" else remotePath
+            val cleanDir = if (remotePath.isBlank()) sftp.pwd() else remotePath
             @Suppress("UNCHECKED_CAST")
             val vec = sftp.ls(cleanDir) as Vector<ChannelSftp.LsEntry>
             vec.mapNotNull { entry ->

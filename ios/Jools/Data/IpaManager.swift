@@ -208,6 +208,60 @@ final class IpaManager: ObservableObject {
         return item
     }
 
+    struct ZipCertImportResult {
+        var importedCerts: [P12CertItem] = []
+        var importedProfiles: [ProvisionProfileItem] = []
+        var pendingP12TempURLs: [URL] = []
+    }
+
+    // MARK: - Import Certificate ZIP (.p12 + .mobileprovision)
+    func importCertZip(from sourceURL: URL) throws -> ZipCertImportResult {
+        ensureDirectories()
+        let accessing = sourceURL.startAccessingSecurityScopedResource()
+        defer { if accessing { sourceURL.stopAccessingSecurityScopedResource() } }
+
+        let workDir = fm.temporaryDirectory.appendingPathComponent("cert_zip_\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: workDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: workDir) }
+
+        try MiniZipArchive.unzip(fileURL: sourceURL, to: workDir)
+
+        var result = ZipCertImportResult()
+        if let enumerator = fm.enumerator(at: workDir, includingPropertiesForKeys: [.isRegularFileKey]) {
+            let allUrls = (enumerator.allObjects as? [URL]) ?? []
+            for fileUrl in allUrls {
+                let pathStr = fileUrl.path
+                let name = fileUrl.lastPathComponent
+                if pathStr.contains("__MACOSX") || name.hasPrefix("._") { continue }
+                let vals = try? fileUrl.resourceValues(forKeys: [.isRegularFileKey])
+                guard vals?.isRegularFile == true else { continue }
+
+                let ext = fileUrl.pathExtension.lowercased()
+                if ext == "mobileprovision" {
+                    if let prof = try? importProfile(from: fileUrl) {
+                        result.importedProfiles.append(prof)
+                    }
+                } else if ext == "p12" {
+                    if let cert = try? importP12(from: fileUrl, password: "", customName: "") {
+                        result.importedCerts.append(cert)
+                    } else {
+                        let tempP12 = fm.temporaryDirectory.appendingPathComponent("jools_p12_\(UUID().uuidString)_\(name)")
+                        try? fm.removeItem(at: tempP12)
+                        try fm.copyItem(at: fileUrl, to: tempP12)
+                        result.pendingP12TempURLs.append(tempP12)
+                    }
+                }
+            }
+        }
+
+        if result.importedCerts.isEmpty && result.importedProfiles.isEmpty && result.pendingP12TempURLs.isEmpty {
+            throw NSError(domain: "JoolsIPA", code: -3, userInfo: [
+                NSLocalizedDescriptionKey: "压缩包中未找到 .p12 证书或 .mobileprovision 描述文件"
+            ])
+        }
+        return result
+    }
+
     // MARK: - Import MobileProvision
     func importProfile(from sourceURL: URL) throws -> ProvisionProfileItem {
         ensureDirectories()
