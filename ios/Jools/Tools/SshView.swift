@@ -784,7 +784,7 @@ struct SshView: View {
                     let resolved = try await sftp.getRealPath(atPath: path)
                     let list = try await sftp.listDirectory(atPath: resolved)
                     return list.compactMap { entry -> SshRemoteFileItem? in
-                        let name = entry.path
+                        let name = entry.filename
                         if name == "." || name == ".." { return nil }
                         let isDir = entry.longname.hasPrefix("d")
                         let full = resolved == "/" ? "/\(name)" : "\(resolved.hasSuffix("/") ? String(resolved.dropLast()) : resolved)/\(name)"
