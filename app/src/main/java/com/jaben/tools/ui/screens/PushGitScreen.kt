@@ -1604,9 +1604,7 @@ fun PushGitScreen(
                 onDismissRequest = { pendingSaveOversizedRun = null },
                 title = { Text("日志内容过多") },
                 text = {
-                    Text("该构建日志共 ${logText.lines().size} 行（超过 1000 行），内容过多无法展示，是否直接保存日志文件到本地？
-
-保存路径：$saveDir/$fileName")
+                    Text("该构建日志共 ${logText.lines().size} 行（超过 1000 行），内容过多无法展示，是否直接保存日志文件到本地？\n\n保存路径：$saveDir/$fileName")
                 },
                 confirmButton = {
                     Button(
