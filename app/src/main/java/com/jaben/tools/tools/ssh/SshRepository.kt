@@ -201,15 +201,9 @@ class SshRepository(context: Context) {
                     )
                 }
             }.getOrNull()
-            if (!list.isNullOrEmpty()) return list
+            if (list != null) return list
         }
-        return listOf(
-            SshQuickCommand(title = "ls -la", command = "ls -la"),
-            SshQuickCommand(title = "df -h", command = "df -h"),
-            SshQuickCommand(title = "free -h", command = "free -h"),
-            SshQuickCommand(title = "uptime", command = "uptime"),
-            SshQuickCommand(title = "ps aux", command = "ps aux | head -n 15")
-        )
+        return emptyList()
     }
 
     fun saveQuickCommands(items: List<SshQuickCommand>) {

@@ -27,9 +27,26 @@ struct SshRemoteFileItem: Identifiable, Equatable {
 
 struct SshServerStatusInfo {
     var osInfo: String = "未知系统"
+    var hostname: String = "--"
+    var kernel: String = "--"
+    var arch: String = "--"
     var uptime: String = "--"
+    var cpuCores: Int = 0
+    var cpuPercent: Double = 0
+    var loadAvg: String = "--"
     var memoryInfo: String = "--"
+    var memoryPercent: Double = 0
+    var swapInfo: String = "--"
+    var swapPercent: Double = 0
     var diskInfo: String = "--"
+    var diskPercent: Double = 0
+    var ipAddress: String = "--"
+    var netInterface: String = "--"
+    var netRxBytes: Int64 = 0
+    var netTxBytes: Int64 = 0
+    var netInfo: String = "--"
+    var tcpConnections: Int = 0
+    var processCount: Int = 0
 }
 
 private enum SshIosPage {
@@ -85,6 +102,12 @@ struct SshView: View {
     @State private var editingQuickCmd: SshQuickCommand?
     @State private var quickCmdTitleInput = ""
     @State private var quickCmdBodyInput = ""
+    @State private var isRootMode = false
+    @State private var sudoPassword = ""
+    @State private var showSudoPasswordAlert = false
+    @State private var sudoPasswordInput = ""
+    @State private var sudoErrorMsg = ""
+    @State private var showServerDetailSheet = false
 
     // SFTP
     @State private var currentPath = "/"
@@ -251,6 +274,10 @@ struct SshView: View {
             } label: {
                 Image(systemName: "folder.fill")
             }
+            Button {
+                terminalBlocks.removeAll()
+                terminalLog = ""
+            } label: { Image(systemName: "trash") }
             Button { refreshStatus() } label: { Image(systemName: "arrow.clockwise") }
             Button { disconnect() } label: { Image(systemName: "xmark.circle").foregroundColor(.red) }
         case .sftpFiles:
@@ -271,7 +298,14 @@ struct SshView: View {
         case .serverEditor: page = .serverList
         case .keyManager: page = .serverList
         case .keyEditor: page = keyReturnToServerEditor ? .serverEditor : .keyManager
-        case .sftpFiles: page = .terminal
+        case .sftpFiles:
+            if currentPath != "/" && !currentPath.isEmpty {
+                let trimmed = currentPath.hasSuffix("/") ? String(currentPath.dropLast()) : currentPath
+                let parent = (trimmed as NSString).deletingLastPathComponent
+                refreshFiles(path: parent.isEmpty ? "/" : parent)
+            } else {
+                page = .terminal
+            }
         case .terminal: disconnect()
         }
     }
@@ -554,20 +588,49 @@ struct SshView: View {
     // MARK: - Terminal
     private var terminalView: some View {
         VStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("系统: \(statusInfo.osInfo)").font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                    Spacer()
-                    Text("运行: \(statusInfo.uptime)").font(.system(size: 12)).foregroundColor(.accentColor).lineLimit(1)
+            Button {
+                showServerDetailSheet = true
+                refreshStatus()
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("\(statusInfo.osInfo) (\(statusInfo.arch))")
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                        Spacer()
+                        Text("运行: \(statusInfo.uptime) ›")
+                            .font(.system(size: 12))
+                            .foregroundColor(.accentColor)
+                            .lineLimit(1)
+                    }
+                    HStack {
+                        Text("CPU: \(Int(statusInfo.cpuPercent))% (\(statusInfo.cpuCores)核) · 负载 \(statusInfo.loadAvg)")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                        Spacer()
+                        Text("IP: \(statusInfo.ipAddress)")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    HStack {
+                        Text("内存: \(statusInfo.memoryInfo)")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                        Spacer()
+                        Text("磁盘: \(statusInfo.diskInfo)")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
                 }
-                HStack {
-                    Text("内存: \(statusInfo.memoryInfo)").font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
-                    Spacer()
-                    Text("磁盘: \(statusInfo.diskInfo)").font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
-                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 16)
             }
-            .padding(12)
-            .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 16)
+            .buttonStyle(.plain)
             .padding(.horizontal, 14)
             .padding(.top, 8)
 
@@ -584,9 +647,9 @@ struct SshView: View {
 
                         ForEach(terminalBlocks) { block in
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("$ \(block.command)")
+                                Text("\(isRootMode ? "#" : "$") \(block.command)")
                                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                    .foregroundColor(Color(red: 0.35, green: 0.85, blue: 0.55))
+                                    .foregroundColor(isRootMode ? Color.orange : Color(red: 0.35, green: 0.85, blue: 0.55))
                                     .textSelection(.enabled)
                                 if !block.output.isEmpty {
                                     Text(block.output)
@@ -597,55 +660,12 @@ struct SshView: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 2)
-                            .contentShape(Rectangle())
-                            .contextMenu {
-                                Button {
-                                    UIPasteboard.general.string = block.command
-                                    toastMsg = "已复制命令"
-                                } label: {
-                                    Label("复制命令", systemImage: "doc.on.doc")
-                                }
-                                if !block.output.isEmpty {
-                                    Button {
-                                        UIPasteboard.general.string = block.output
-                                        toastMsg = "已复制输出"
-                                    } label: {
-                                        Label("复制输出", systemImage: "doc.plaintext")
-                                    }
-                                }
-                                Button {
-                                    commandInput = block.command
-                                    isTerminalInputFocused = true
-                                } label: {
-                                    Label("填入命令行", systemImage: "text.cursor")
-                                }
-                                Button {
-                                    executeTerminalCommand(overrideCommand: block.command)
-                                } label: {
-                                    Label("重新执行", systemImage: "arrow.clockwise")
-                                }
-                                Button {
-                                    editingQuickCmd = nil
-                                    quickCmdTitleInput = String(block.command.prefix(16))
-                                    quickCmdBodyInput = block.command
-                                    showQuickCmdEditor = true
-                                } label: {
-                                    Label("添加到快捷指令", systemImage: "star")
-                                }
-                                Divider()
-                                Button(role: .destructive) {
-                                    terminalBlocks.removeAll()
-                                    terminalLog = ""
-                                } label: {
-                                    Label("清空终端", systemImage: "trash")
-                                }
-                            }
                         }
 
                         HStack(alignment: .center, spacing: 6) {
-                            Text("\(activeProfile?.username ?? "ssh"):\(currentPath)$")
+                            Text("\(isRootMode ? "root" : (activeProfile?.username ?? "ssh")):\(currentPath)\(isRootMode ? "#" : "$")")
                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.35, green: 0.85, blue: 0.55))
+                                .foregroundColor(isRootMode ? Color.orange : Color(red: 0.35, green: 0.85, blue: 0.55))
                                 .lineLimit(1)
                             TextField(
                                 "",
@@ -770,6 +790,124 @@ struct SshView: View {
                 repo.upsertQuickCommand(item)
             }
             Button("取消", role: .cancel) {}
+        }
+        .alert("输入 sudo 密码", isPresented: $showSudoPasswordAlert) {
+            SecureField("sudo 密码", text: $sudoPasswordInput)
+            Button("确认切换") {
+                let pass = sudoPasswordInput
+                Task { await verifyAndElevateRoot(password: pass) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(sudoErrorMsg.isEmpty ? "请输入当前账户密码以切换至 root 权限" : sudoErrorMsg)
+        }
+        .sheet(isPresented: $showServerDetailSheet) {
+            serverDetailSheetView
+        }
+    }
+
+    private var serverDetailSheetView: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(activeProfile?.name ?? statusInfo.hostname)
+                            .font(.headline)
+                        Text("\(statusInfo.hostname) · \(statusInfo.ipAddress)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    HStack(spacing: 12) {
+                        iosMetricRing(label: "CPU", percent: statusInfo.cpuPercent, subtitle: "\(statusInfo.cpuCores) 核", color: .blue)
+                        iosMetricRing(label: "内存", percent: statusInfo.memoryPercent, subtitle: statusInfo.memoryInfo.components(separatedBy: " (").first ?? "--", color: .green)
+                        iosMetricRing(label: "磁盘", percent: statusInfo.diskPercent, subtitle: statusInfo.diskInfo.components(separatedBy: " (").first ?? "--", color: .orange)
+                    }
+                    .padding(.vertical, 6)
+
+                    VStack(spacing: 10) {
+                        iosProgressBar(title: "内存占用", value: statusInfo.memoryInfo, percent: statusInfo.memoryPercent, color: .green)
+                        if statusInfo.swapPercent > 0 || statusInfo.swapInfo != "未启用" {
+                            iosProgressBar(title: "Swap 交换", value: statusInfo.swapInfo, percent: statusInfo.swapPercent, color: .purple)
+                        }
+                        iosProgressBar(title: "根分区 /", value: statusInfo.diskInfo, percent: statusInfo.diskPercent, color: .orange)
+                        let totalNet = max(Double(statusInfo.netRxBytes + statusInfo.netTxBytes), 1)
+                        let rxPct = Double(statusInfo.netRxBytes) / totalNet * 100.0
+                        iosProgressBar(
+                            title: "网卡流量 (\(statusInfo.netInterface))",
+                            value: statusInfo.netInfo.components(separatedBy: "· ").last ?? "--",
+                            percent: rxPct,
+                            color: .cyan
+                        )
+                    }
+                    .padding(14)
+                    .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 14)
+
+                    VStack(spacing: 8) {
+                        iosDetailRow("操作系统", statusInfo.osInfo)
+                        iosDetailRow("内核架构", "\(statusInfo.kernel) · \(statusInfo.arch)")
+                        iosDetailRow("运行时长", statusInfo.uptime)
+                        iosDetailRow("系统负载", statusInfo.loadAvg)
+                        iosDetailRow("运行进程", "\(statusInfo.processCount) 个")
+                        iosDetailRow("TCP 连接", "\(statusInfo.tcpConnections) 个")
+                    }
+                    .padding(14)
+                    .joolsCard(uiStyle: prefs.uiStyle, cornerRadius: 14)
+                }
+                .padding()
+            }
+            .navigationTitle("服务器状态详情")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { refreshStatus() } label: { Image(systemName: "arrow.clockwise") }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { showServerDetailSheet = false }
+                }
+            }
+        }
+    }
+
+    private func iosMetricRing(label: String, percent: Double, subtitle: String, color: Color) -> some View {
+        let clamped = min(max(percent, 0), 100)
+        return VStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .stroke(color.opacity(0.18), lineWidth: 8)
+                Circle()
+                    .trim(from: 0, to: CGFloat(clamped / 100.0))
+                    .stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Text("\(Int(clamped))%")
+                    .font(.system(size: 14, weight: .bold))
+            }
+            .frame(width: 70, height: 70)
+            Text(label).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+            Text(subtitle).font(.system(size: 10.5)).foregroundColor(.secondary).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func iosProgressBar(title: String, value: String, percent: Double, color: Color) -> some View {
+        let clamped = min(max(percent, 0), 100)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                Spacer()
+                Text(value).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
+            }
+            ProgressView(value: clamped, total: 100)
+                .tint(color)
+        }
+    }
+
+    private func iosDetailRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).font(.system(size: 12.5)).foregroundColor(.secondary).lineLimit(1)
+            Spacer()
+            Text(value).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
         }
     }
 
@@ -898,6 +1036,8 @@ struct SshView: View {
                     try await sftp.getRealPath(atPath: ".")
                 }
                 currentPath = homeDir.isEmpty ? "/" : homeDir
+                isRootMode = profile.username.trimmingCharacters(in: .whitespacesAndNewlines) == "root"
+                sudoPassword = ""
                 terminalBlocks = []
                 terminalLog = "Connected to \(profile.username)@\(profile.host):\(profile.port) · \(currentPath)"
                 page = .terminal
@@ -914,27 +1054,103 @@ struct SshView: View {
         client = nil
         activeProfile = nil
         remoteFiles = []
+        isRootMode = false
+        sudoPassword = ""
         if page == .terminal || page == .sftpFiles {
             page = .serverList
         }
         Task { try? await c?.close() }
     }
 
+    private func formatTrafficBytes(_ bytes: Int64) -> String {
+        if bytes <= 0 { return "0 B" }
+        let kb = 1024.0
+        let mb = kb * 1024.0
+        let gb = mb * 1024.0
+        let d = Double(bytes)
+        if d >= gb { return String(format: "%.2f GB", d / gb) }
+        if d >= mb { return String(format: "%.1f MB", d / mb) }
+        if d >= kb { return String(format: "%.1f KB", d / kb) }
+        return "\(bytes) B"
+    }
+
     private func refreshStatus() {
         guard let c = client else { return }
         Task {
-            let cmd = "echo \"OS=$(uname -sr 2>/dev/null || echo Linux)\"; echo \"UP=$(uptime | sed 's/.*up \\([^,]*\\),.*/\\1/')\"; echo \"MEM=$(free -m 2>/dev/null | awk 'NR==2{printf \"%s/%s MB (%.0f%%)\", $3,$2,$3*100/$2}')\"; echo \"DISK=$(df -h / 2>/dev/null | awk 'NR==2{printf \"%s/%s (%s)\", $3,$2,$5}')\""
+            let cmd = """
+            OS_NAME=$(grep -m1 '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2- | tr -d '"'); [ -z "$OS_NAME" ] && OS_NAME=$(uname -s 2>/dev/null || echo Linux); echo "OS=$OS_NAME"; echo "HOST=$(hostname 2>/dev/null || echo --)"; echo "KERN=$(uname -r 2>/dev/null || echo --)"; echo "ARCH=$(uname -m 2>/dev/null || echo --)"; echo "UP=$(uptime -p 2>/dev/null | sed 's/^up //' || uptime | sed 's/.*up \([^,]*\),.*/\1/')"; echo "CORES=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 1)"; echo "CPU=$(awk '/^cpu /{u=$2+$4; t=$2+$3+$4+$5+$6+$7+$8; if(t>0) printf "%.1f", u*100/t; else print "0"}' /proc/stat 2>/dev/null || echo 0)"; echo "LOAD=$(awk '{print $1", "$2", "$3}' /proc/loadavg 2>/dev/null || echo --)"; echo "MEM=$(free -m 2>/dev/null | awk 'NR==2{printf "%s/%s MB (%.0f%%)", $3,$2,$3*100/$2}')"; echo "MEMPCT=$(free -m 2>/dev/null | awk 'NR==2{if($2>0) printf "%.1f", $3*100/$2; else print "0"}')"; echo "SWAP=$(free -m 2>/dev/null | awk 'NR==3{if($2>0) printf "%s/%s MB (%.0f%%)", $3,$2,$3*100/$2; else print "未启用"}')"; echo "SWAPPCT=$(free -m 2>/dev/null | awk 'NR==3{if($2>0) printf "%.1f", $3*100/$2; else print "0"}')"; echo "DISK=$(df -h / 2>/dev/null | awk 'NR==2{printf "%s/%s (%s)", $3,$2,$5}')"; echo "DISKPCT=$(df -P / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')"; echo "IP=$(hostname -I 2>/dev/null | awk '{print $1}')"; echo "NET=$(awk 'NR>2 && $1 !~ /^lo:/ {gsub(":","",$1); printf "%s|%s|%s\n",$1,$2,$10; exit}' /proc/net/dev 2>/dev/null)"; echo "TCP=$(ss -tun 2>/dev/null | tail -n +2 | wc -l || echo 0)"; echo "PROCS=$(ps -e --no-headers 2>/dev/null | wc -l || ps aux 2>/dev/null | wc -l || echo 0)"
+            """
             if let buf = try? await c.executeCommand(cmd) {
                 let out = String(buffer: buf)
                 var info = SshServerStatusInfo()
                 for line in out.components(separatedBy: .newlines) {
-                    if line.hasPrefix("OS=") { info.osInfo = String(line.dropFirst(3)) }
-                    else if line.hasPrefix("UP=") { info.uptime = String(line.dropFirst(3)) }
-                    else if line.hasPrefix("MEM=") { info.memoryInfo = String(line.dropFirst(4)) }
-                    else if line.hasPrefix("DISK=") { info.diskInfo = String(line.dropFirst(5)) }
+                    if line.hasPrefix("OS=") { info.osInfo = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces) }
+                    else if line.hasPrefix("HOST=") { info.hostname = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
+                    else if line.hasPrefix("KERN=") { info.kernel = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
+                    else if line.hasPrefix("ARCH=") { info.arch = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
+                    else if line.hasPrefix("UP=") { info.uptime = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces) }
+                    else if line.hasPrefix("CORES=") { info.cpuCores = Int(String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)) ?? 0 }
+                    else if line.hasPrefix("CPU=") { info.cpuPercent = min(max(Double(String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)) ?? 0, 0), 100) }
+                    else if line.hasPrefix("LOAD=") { info.loadAvg = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
+                    else if line.hasPrefix("MEM=") { info.memoryInfo = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces) }
+                    else if line.hasPrefix("MEMPCT=") { info.memoryPercent = min(max(Double(String(line.dropFirst(7)).trimmingCharacters(in: .whitespaces)) ?? 0, 0), 100) }
+                    else if line.hasPrefix("SWAP=") { info.swapInfo = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
+                    else if line.hasPrefix("SWAPPCT=") { info.swapPercent = min(max(Double(String(line.dropFirst(8)).trimmingCharacters(in: .whitespaces)) ?? 0, 0), 100) }
+                    else if line.hasPrefix("DISK=") { info.diskInfo = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
+                    else if line.hasPrefix("DISKPCT=") { info.diskPercent = min(max(Double(String(line.dropFirst(8)).trimmingCharacters(in: .whitespaces)) ?? 0, 0), 100) }
+                    else if line.hasPrefix("IP=") { info.ipAddress = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces) }
+                    else if line.hasPrefix("NET=") {
+                        let parts = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces).components(separatedBy: "|")
+                        if parts.count >= 3 {
+                            info.netInterface = parts[0].isEmpty ? "--" : parts[0]
+                            info.netRxBytes = Int64(parts[1]) ?? 0
+                            info.netTxBytes = Int64(parts[2]) ?? 0
+                            info.netInfo = "\(info.netInterface) · ↓\(formatTrafficBytes(info.netRxBytes)) / ↑\(formatTrafficBytes(info.netTxBytes))"
+                        }
+                    }
+                    else if line.hasPrefix("TCP=") { info.tcpConnections = Int(String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)) ?? 0 }
+                    else if line.hasPrefix("PROCS=") { info.processCount = Int(String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)) ?? 0 }
                 }
                 statusInfo = info
             }
+        }
+    }
+
+    private func isRootSwitchCommand(_ cmd: String) -> Bool {
+        let norm = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .whitespaces)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return ["sudo -i", "sudo -s", "sudo su", "sudo su -", "su", "su -", "su root", "su - root"].contains(norm)
+    }
+
+    private func verifyAndElevateRoot(password: String) async {
+        guard let c = client else { return }
+        if let buf = try? await c.executeCommand("sudo -n id -u 2>/dev/null", mergeStreams: true) {
+            let out = String(buffer: buf).trimmingCharacters(in: .whitespacesAndNewlines)
+            if out.components(separatedBy: .newlines).last?.trimmingCharacters(in: .whitespaces) == "0" {
+                isRootMode = true
+                sudoPassword = ""
+                terminalBlocks.append(SshTerminalBlock(command: "sudo -i", output: "已切换为 root 用户 (uid=0)，输入 exit 可退出", isError: false))
+                return
+            }
+        }
+        if !password.isEmpty {
+            let escapedPass = password.replacingOccurrences(of: "'", with: "'\\''")
+            if let buf = try? await c.executeCommand("printf '%s\n' '\(escapedPass)' | sudo -S -p '' id -u 2>&1", mergeStreams: true) {
+                let out = String(buffer: buf)
+                if out.components(separatedBy: .newlines).contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "0" }) {
+                    isRootMode = true
+                    sudoPassword = password
+                    terminalBlocks.append(SshTerminalBlock(command: "sudo -i", output: "已切换为 root 用户 (uid=0)，输入 exit 可退出", isError: false))
+                    return
+                }
+            }
+            sudoErrorMsg = "sudo 密码验证失败，请重试"
+            showSudoPasswordAlert = true
+        } else {
+            sudoErrorMsg = ""
+            showSudoPasswordAlert = true
         }
     }
 
@@ -943,6 +1159,27 @@ struct SshView: View {
         let cmd = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cmd.isEmpty, let c = client, !isRunningCmd else { return }
         if overrideCommand == nil { commandInput = "" }
+
+        if isRootSwitchCommand(cmd) {
+            if activeProfile?.username.trimmingCharacters(in: .whitespacesAndNewlines) == "root" || isRootMode {
+                terminalBlocks.append(SshTerminalBlock(command: cmd, output: "已在 root 权限下 (uid=0(root))", isError: false))
+                return
+            }
+            isRunningCmd = true
+            Task {
+                await verifyAndElevateRoot(password: activeProfile?.password ?? "")
+                isRunningCmd = false
+            }
+            return
+        }
+
+        if cmd == "exit" && isRootMode {
+            isRootMode = false
+            sudoPassword = ""
+            terminalBlocks.append(SshTerminalBlock(command: cmd, output: "已退出 root 权限，恢复为 \(activeProfile?.username ?? "ssh")", isError: false))
+            return
+        }
+
         isRunningCmd = true
         let block = SshTerminalBlock(command: cmd, output: "执行中...", isError: false)
         terminalBlocks.append(block)
@@ -950,9 +1187,35 @@ struct SshView: View {
         Task {
             do {
                 let escapedDir = currentPath.replacingOccurrences(of: "'", with: "'\\''")
-                let buf = try await c.executeCommand("cd '\(escapedDir)' 2>/dev/null; \(cmd)", mergeStreams: true)
+                let isCd = cmd == "cd" || cmd.hasPrefix("cd ")
+                let innerCmd = isCd ? "cd '\(escapedDir)' 2>/dev/null; \(cmd) && pwd" : "cd '\(escapedDir)' 2>/dev/null; \(cmd)"
+                let fullCmd: String
+                if isRootMode {
+                    let escapedInner = innerCmd.replacingOccurrences(of: "'", with: "'\\''")
+                    if sudoPassword.isEmpty {
+                        fullCmd = "sudo -n sh -c '\(escapedInner)'"
+                    } else {
+                        let escapedPass = sudoPassword.replacingOccurrences(of: "'", with: "'\\''")
+                        fullCmd = "printf '%s\n' '\(escapedPass)' | sudo -S -p '' sh -c '\(escapedInner)'"
+                    }
+                } else {
+                    fullCmd = innerCmd
+                }
+                let buf = try await c.executeCommand(fullCmd, mergeStreams: true)
                 let out = String(buffer: buf).trimmingCharacters(in: CharacterSet.newlines)
-                if let idx = terminalBlocks.firstIndex(where: { $0.id == blockId }) {
+                if isCd {
+                    let lastLine = out.components(separatedBy: .newlines).last?.trimmingCharacters(in: .whitespaces) ?? ""
+                    if lastLine.hasPrefix("/") {
+                        currentPath = lastLine
+                        if let idx = terminalBlocks.firstIndex(where: { $0.id == blockId }) {
+                            terminalBlocks[idx].output = ""
+                            terminalBlocks[idx].isError = false
+                        }
+                    } else if let idx = terminalBlocks.firstIndex(where: { $0.id == blockId }) {
+                        terminalBlocks[idx].output = out
+                        terminalBlocks[idx].isError = true
+                    }
+                } else if let idx = terminalBlocks.firstIndex(where: { $0.id == blockId }) {
                     terminalBlocks[idx].output = out
                     terminalBlocks[idx].isError = false
                 }

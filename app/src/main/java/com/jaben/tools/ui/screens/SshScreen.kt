@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -15,6 +16,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import com.jaben.tools.tools.ssh.SshQuickCommand
 
@@ -76,6 +79,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -219,30 +223,115 @@ fun SshScreen(
     var editingQuickCmd by remember { mutableStateOf<SshQuickCommand?>(null) }
     var quickCmdTitleInput by remember { mutableStateOf("") }
     var quickCmdBodyInput by remember { mutableStateOf("") }
+    var isRootMode by remember { mutableStateOf(false) }
+    var sudoPassword by remember { mutableStateOf("") }
+    var showSudoPasswordDialog by remember { mutableStateOf(false) }
+    var sudoPasswordInput by remember { mutableStateOf("") }
+    var sudoErrorMsg by remember { mutableStateOf("") }
+    var showServerDetailDialog by remember { mutableStateOf(false) }
     val terminalFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
+
+    fun isRootSwitchCommand(cmd: String): Boolean {
+        val norm = cmd.trim().replace(Regex("\\s+"), " ")
+        return norm == "sudo -i" || norm == "sudo -s" || norm == "sudo su" || norm == "sudo su -" ||
+            norm == "su" || norm == "su -" || norm == "su root" || norm == "su - root"
+    }
 
     fun executeTerminalCommand(overrideCmd: String? = null) {
         val cmd = (overrideCmd ?: commandInput).trim()
         val sess = activeSession
         if (cmd.isNotEmpty() && sess != null && !isRunningCmd) {
             if (overrideCmd == null) commandInput = ""
+
+            if (isRootSwitchCommand(cmd)) {
+                if (activeProfile?.username?.trim() == "root" || isRootMode) {
+                    terminalBlocks = terminalBlocks + SshTerminalBlock(
+                        command = cmd,
+                        output = "已在 root 权限下 (uid=0(root))",
+                        isError = false
+                    )
+                    return
+                }
+                isRunningCmd = true
+                val block = SshTerminalBlock(command = cmd, output = "正在切换 root 权限...", isError = false)
+                terminalBlocks = terminalBlocks + block
+                scope.launch {
+                    val presetPass = activeProfile?.password ?: ""
+                    val (ok, _) = SshEngine.tryElevateRoot(sess, presetPass)
+                    if (ok) {
+                        isRootMode = true
+                        sudoPassword = presetPass
+                        terminalBlocks = terminalBlocks.map {
+                            if (it.id == block.id) it.copy(output = "已切换为 root 用户 (uid=0)，输入 exit 可退出", isError = false) else it
+                        }
+                    } else {
+                        terminalBlocks = terminalBlocks.map {
+                            if (it.id == block.id) it.copy(output = "需要验证 sudo 密码以切换到 root", isError = false) else it
+                        }
+                        sudoPasswordInput = ""
+                        sudoErrorMsg = ""
+                        showSudoPasswordDialog = true
+                    }
+                    isRunningCmd = false
+                }
+                return
+            }
+
+            if (cmd == "exit" && isRootMode) {
+                isRootMode = false
+                sudoPassword = ""
+                terminalBlocks = terminalBlocks + SshTerminalBlock(
+                    command = cmd,
+                    output = "已退出 root 权限，恢复为 ${activeProfile?.username ?: "ssh"}",
+                    isError = false
+                )
+                return
+            }
+
             isRunningCmd = true
             val block = SshTerminalBlock(command = cmd, output = "执行中...", isError = false)
             terminalBlocks = terminalBlocks + block
             scope.launch {
-                runCatching { SshEngine.runCommand(sess, cmd, currentPath) }
-                    .onSuccess { res ->
-                        val out = res.output.trimEnd()
-                        terminalBlocks = terminalBlocks.map {
-                            if (it.id == block.id) it.copy(output = out, isError = false) else it
+                val isCd = cmd == "cd" || cmd.startsWith("cd ")
+                if (isCd) {
+                    val escapedCur = currentPath.replace("'", "'\\''")
+                    val cdCmd = "cd '$escapedCur' 2>/dev/null; $cmd && pwd"
+                    runCatching {
+                        if (isRootMode) SshEngine.runCommandAsRoot(sess, cdCmd, null, sudoPassword)
+                        else SshEngine.runCommand(sess, cdCmd, null)
+                    }.onSuccess { res ->
+                        val newDir = res.output.trim().lines().lastOrNull()?.trim().orEmpty()
+                        if (res.exitCode == 0 && newDir.startsWith("/")) {
+                            currentPath = newDir
+                            terminalBlocks = terminalBlocks.map {
+                                if (it.id == block.id) it.copy(output = "", isError = false) else it
+                            }
+                        } else {
+                            terminalBlocks = terminalBlocks.map {
+                                if (it.id == block.id) it.copy(output = res.output.trimEnd(), isError = res.exitCode != 0) else it
+                            }
                         }
-                    }
-                    .onFailure { err ->
+                    }.onFailure { err ->
                         terminalBlocks = terminalBlocks.map {
                             if (it.id == block.id) it.copy(output = "[Error] ${err.message}", isError = true) else it
                         }
                     }
+                } else {
+                    runCatching {
+                        if (isRootMode) SshEngine.runCommandAsRoot(sess, cmd, currentPath, sudoPassword)
+                        else SshEngine.runCommand(sess, cmd, currentPath)
+                    }.onSuccess { res ->
+                        val out = res.output.trimEnd()
+                        terminalBlocks = terminalBlocks.map {
+                            if (it.id == block.id) it.copy(output = out, isError = res.exitCode != 0 && out.isNotEmpty()) else it
+                        }
+                    }.onFailure { err ->
+                        terminalBlocks = terminalBlocks.map {
+                            if (it.id == block.id) it.copy(output = "[Error] ${err.message}", isError = true) else it
+                        }
+                    }
+                }
                 isRunningCmd = false
             }
         }
@@ -318,6 +407,8 @@ fun SshScreen(
                 servers = repo.touchLastConnected(profile.id)
                 val homeDir = runCatching { SshEngine.getDefaultHomeDirectory(sess) }.getOrDefault("/")
                 currentPath = homeDir
+                isRootMode = profile.username.trim() == "root"
+                sudoPassword = ""
                 terminalLog = "Connected to ${profile.username}@${profile.host}:${profile.port}\nDefault path: $homeDir\n"
                 page = SshPage.TERMINAL
                 refreshStatus()
@@ -333,6 +424,8 @@ fun SshScreen(
         activeSession = null
         activeProfile = null
         remoteFiles = emptyList()
+        isRootMode = false
+        sudoPassword = ""
         page = SshPage.SERVER_LIST
         Thread { runCatching { sess?.disconnect() } }.start()
     }
@@ -343,7 +436,14 @@ fun SshScreen(
             SshPage.SERVER_EDITOR -> page = SshPage.SERVER_LIST
             SshPage.KEY_MANAGER -> page = SshPage.SERVER_LIST
             SshPage.KEY_EDITOR -> page = if (keyReturnToServerEditor) SshPage.SERVER_EDITOR else SshPage.KEY_MANAGER
-            SshPage.SFTP_FILES -> page = SshPage.TERMINAL
+            SshPage.SFTP_FILES -> {
+                if (currentPath != "/" && currentPath.isNotBlank()) {
+                    val parent = currentPath.trimEnd('/').substringBeforeLast('/').ifBlank { "/" }
+                    refreshDirectory(parent)
+                } else {
+                    page = SshPage.TERMINAL
+                }
+            }
             SshPage.TERMINAL -> disconnect()
         }
     }
@@ -986,16 +1086,41 @@ fun SshScreen(
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp)
                                 .liquidGlassSurface(18.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .clickable {
+                                    showServerDetailDialog = true
+                                    refreshStatus()
+                                }
                         ) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("系统: ${serverStatus.osInfo}", style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                    Text("运行: ${serverStatus.uptime}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        "${serverStatus.osInfo} (${serverStatus.arch})",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text("运行: ${serverStatus.uptime} ›", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1)
                                 }
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("内存: ${serverStatus.memoryInfo}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text("磁盘: ${serverStatus.diskInfo}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        "CPU: ${String.format(java.util.Locale.US, "%.0f", serverStatus.cpuPercent)}% (${serverStatus.cpuCores}核) · 负载 ${serverStatus.loadAvg}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("IP: ${serverStatus.ipAddress}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                                 }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("内存: ${serverStatus.memoryInfo}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("磁盘: ${serverStatus.diskInfo}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                }
+                            }
                             }
                         }
 
@@ -1007,7 +1132,7 @@ fun SshScreen(
                             if (totalItems > 0) termListState.animateScrollToItem(totalItems - 1)
                         }
 
-                        // 点击黑色终端区域直接弹出输入法输入，回车即发送；长按历史/输出可操作
+                        // 点击黑色终端区域直接弹出输入法输入，回车即发送；长按文本原生呼出上下选择光标
                         Surface(
                             color = Color(0xFF111418),
                             shape = RoundedCornerShape(16.dp),
@@ -1023,11 +1148,12 @@ fun SshScreen(
                                     keyboardController?.show()
                                 }
                         ) {
-                            LazyColumn(
-                                state = termListState,
-                                modifier = Modifier.fillMaxSize().padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
+                            SelectionContainer {
+                                LazyColumn(
+                                    state = termListState,
+                                    modifier = Modifier.fillMaxSize().padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
                                 if (terminalLog.isNotBlank()) {
                                     item {
                                         Text(
@@ -1042,20 +1168,12 @@ fun SshScreen(
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .combinedClickable(
-                                                onClick = {
-                                                    terminalFocusRequester.requestFocus()
-                                                    keyboardController?.show()
-                                                },
-                                                onLongClick = { activeTerminalBlock = block }
-                                            )
                                             .padding(vertical = 2.dp),
                                         verticalArrangement = Arrangement.spacedBy(2.dp)
                                     ) {
                                         Text(
-                                            text = "$ ${block.command}",
-                                            color = Color(0xFF59D98C),
+                                            text = "${if (isRootMode) "#" else "$"} ${block.command}",
+                                            color = if (isRootMode) Color(0xFFF59E0B) else Color(0xFF59D98C),
                                             fontFamily = FontFamily.Monospace,
                                             fontWeight = FontWeight.SemiBold,
                                             fontSize = 12.sp
@@ -1077,8 +1195,8 @@ fun SshScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "${activeProfile?.username ?: "ssh"}:$currentPath$ ",
-                                            color = Color(0xFF59D98C),
+                                            text = "${if (isRootMode) "root" else activeProfile?.username ?: "ssh"}:$currentPath${if (isRootMode) "#" else "$"} ",
+                                            color = if (isRootMode) Color(0xFFF59E0B) else Color(0xFF59D98C),
                                             fontFamily = FontFamily.Monospace,
                                             fontWeight = FontWeight.SemiBold,
                                             fontSize = 12.sp,
@@ -1482,6 +1600,162 @@ fun SshScreen(
         )
     }
 
+    if (showSudoPasswordDialog) {
+        AlertDialog(
+            onDismissRequest = { showSudoPasswordDialog = false },
+            title = { Text("输入 sudo 密码") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "请输入当前账户 (${activeProfile?.username ?: "ssh"}) 的密码以切换至 root 权限：",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = sudoPasswordInput,
+                        onValueChange = {
+                            sudoPasswordInput = it
+                            sudoErrorMsg = ""
+                        },
+                        label = { Text("sudo 密码") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (sudoErrorMsg.isNotEmpty()) {
+                        Text(sudoErrorMsg, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val sess = activeSession ?: return@Button
+                    val pass = sudoPasswordInput
+                    scope.launch {
+                        val (ok, err) = SshEngine.tryElevateRoot(sess, pass)
+                        if (ok) {
+                            isRootMode = true
+                            sudoPassword = pass
+                            showSudoPasswordDialog = false
+                            terminalBlocks = terminalBlocks + SshTerminalBlock(
+                                command = "sudo -i",
+                                output = "已切换为 root 用户 (uid=0)，输入 exit 可退出",
+                                isError = false
+                            )
+                        } else {
+                            sudoErrorMsg = err
+                        }
+                    }
+                }) { Text("确认切换") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSudoPasswordDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
+    if (showServerDetailDialog) {
+        Dialog(
+            onDismissRequest = { showServerDetailDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                activeProfile?.name ?: serverStatus.hostname,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                "${serverStatus.hostname} · ${serverStatus.ipAddress}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
+                        IconButton(onClick = { refreshStatus() }) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
+                        }
+                    }
+
+                    // 图形化圆环占比展示：CPU / 内存 / 磁盘
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        SshMetricRing(
+                            label = "CPU",
+                            percent = serverStatus.cpuPercent,
+                            subtitle = "${serverStatus.cpuCores} 核",
+                            color = Color(0xFF3B82F6)
+                        )
+                        SshMetricRing(
+                            label = "内存",
+                            percent = serverStatus.memoryPercent,
+                            subtitle = serverStatus.memoryInfo.substringBefore(" ("),
+                            color = Color(0xFF10B981)
+                        )
+                        SshMetricRing(
+                            label = "磁盘",
+                            percent = serverStatus.diskPercent,
+                            subtitle = serverStatus.diskInfo.substringBefore(" ("),
+                            color = Color(0xFFF59E0B)
+                        )
+                    }
+
+                    // 资源占用进度条
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SshProgressRow("内存占用", serverStatus.memoryInfo, serverStatus.memoryPercent / 100f, Color(0xFF10B981))
+                        if (serverStatus.swapPercent > 0f || serverStatus.swapInfo != "未启用") {
+                            SshProgressRow("Swap 交换", serverStatus.swapInfo, serverStatus.swapPercent / 100f, Color(0xFF8B5CF6))
+                        }
+                        SshProgressRow("根分区 /", serverStatus.diskInfo, serverStatus.diskPercent / 100f, Color(0xFFF59E0B))
+                        val totalNet = (serverStatus.netRxBytes + serverStatus.netTxBytes).coerceAtLeast(1L).toFloat()
+                        SshProgressRow(
+                            "网卡流量 (${serverStatus.netInterface})",
+                            serverStatus.netInfo.substringAfter("· ").ifBlank { "--" },
+                            (serverStatus.netRxBytes.toFloat() / totalNet).coerceIn(0f, 1f),
+                            Color(0xFF06B6D4)
+                        )
+                    }
+
+                    HorizontalDivider()
+
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        SshDetailInfoRow("操作系统", serverStatus.osInfo)
+                        SshDetailInfoRow("内核架构", "${serverStatus.kernel} · ${serverStatus.arch}")
+                        SshDetailInfoRow("运行时长", serverStatus.uptime)
+                        SshDetailInfoRow("系统负载", serverStatus.loadAvg)
+                        SshDetailInfoRow("运行进程", "${serverStatus.processCount} 个")
+                        SshDetailInfoRow("TCP 连接", "${serverStatus.tcpConnections} 个")
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        Button(onClick = { showServerDetailDialog = false }) { Text("关闭") }
+                    }
+                }
+            }
+        }
+    }
+
     if (showQuickCmdEditor) {
         AlertDialog(
             onDismissRequest = { showQuickCmdEditor = false },
@@ -1821,5 +2095,68 @@ private fun SshKeyDetailDialog(
                 }
             }
         )
+    }
+}
+
+
+@Composable
+private fun SshMetricRing(
+    label: String,
+    percent: Float,
+    subtitle: String,
+    color: Color
+) {
+    val clamped = percent.coerceIn(0f, 100f)
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(74.dp)) {
+            Canvas(modifier = Modifier.fillMaxSize().padding(4.dp)) {
+                drawArc(
+                    color = color.copy(alpha = 0.18f),
+                    startAngle = -90f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    style = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round)
+                )
+                drawArc(
+                    color = color,
+                    startAngle = -90f,
+                    sweepAngle = 360f * (clamped / 100f),
+                    useCenter = false,
+                    style = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
+            Text(
+                "${String.format(java.util.Locale.US, "%.0f", clamped)}%",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+        }
+        Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+    }
+}
+
+@Composable
+private fun SshProgressRow(title: String, value: String, progress: Float, color: Color) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+            Text(value, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        }
+        LinearProgressIndicator(
+            progress = { progress.coerceIn(0f, 1f) },
+            color = color,
+            trackColor = color.copy(alpha = 0.16f),
+            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
+        )
+    }
+}
+
+@Composable
+private fun SshDetailInfoRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

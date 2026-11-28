@@ -143,17 +143,10 @@ final class SshRepository: ObservableObject {
 
     private func loadQuickCommands() {
         if let data = UserDefaults.standard.data(forKey: quickCmdsKey),
-           let decoded = try? JSONDecoder().decode([SshQuickCommand].self, from: data),
-           !decoded.isEmpty {
+           let decoded = try? JSONDecoder().decode([SshQuickCommand].self, from: data) {
             quickCommands = decoded
         } else {
-            quickCommands = [
-                SshQuickCommand(title: "ls -la", command: "ls -la"),
-                SshQuickCommand(title: "df -h", command: "df -h"),
-                SshQuickCommand(title: "free -h", command: "free -h"),
-                SshQuickCommand(title: "uptime", command: "uptime"),
-                SshQuickCommand(title: "ps aux", command: "ps aux | head -n 15")
-            ]
+            quickCommands = []
         }
     }
 
