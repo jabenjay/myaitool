@@ -752,14 +752,14 @@ struct BuildHistorySheet: View {
                             } else {
                                 expandedRunId = run.id
                                 if let existing = logsCache[run.id] {
-                                    if existing.components(separatedBy: .newlines).count > 1000 {
+                                    if existing.components(separatedBy: .newlines).count > 500 {
                                         pendingOversizedLog = (run, existing)
                                     }
                                 } else {
                                     Task {
                                         let fetched = (try? await engine.fetchRunLog(pat, repo: repo, runId: run.id)) ?? "获取日志失败"
                                         logsCache[run.id] = fetched
-                                        if expandedRunId == run.id && fetched.components(separatedBy: .newlines).count > 1000 {
+                                        if expandedRunId == run.id && fetched.components(separatedBy: .newlines).count > 500 {
                                             pendingOversizedLog = (run, fetched)
                                         }
                                     }
@@ -784,7 +784,7 @@ struct BuildHistorySheet: View {
                         if expandedRunId == run.id {
                             let logText = logsCache[run.id] ?? ""
                             let lines = logText.isEmpty ? [] : logText.components(separatedBy: .newlines)
-                            let isOversized = lines.count > 1000
+                            let isOversized = lines.count > 500
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack {
                                     Text(logText.isEmpty ? "正在拉取日志..." : "日志 (\(lines.count) 行)")
@@ -803,7 +803,7 @@ struct BuildHistorySheet: View {
                                     }
                                 }
                                 if isOversized {
-                                    Text("日志内容过多（共 \(lines.count) 行，超过 1000 行）无法展示，请保存为 TXT 文件到本地查看。")
+                                    Text("日志内容过多（共 \(lines.count) 行，超过 500 行）无法展示，请保存为 TXT 文件到本地查看。")
                                         .font(.system(size: 11.5))
                                         .foregroundColor(.secondary)
                                 } else if !lines.isEmpty {

@@ -1385,7 +1385,7 @@ fun PushGitScreen(
                                                     expandedHistoryRunId = run.id
                                                     val existing = historyLogsCache[run.id]
                                                     if (existing != null) {
-                                                        if (existing.lines().size > 1000) {
+                                                        if (existing.lines().size > 500) {
                                                             pendingSaveOversizedRun = run to existing
                                                         }
                                                     } else if (pat.isNotBlank()) {
@@ -1394,7 +1394,7 @@ fun PushGitScreen(
                                                             engine.fetchFailedRunLog(pat, targetRepo, run.id)
                                                                 .onSuccess { logText ->
                                                                     historyLogsCache[run.id] = logText
-                                                                    if (expandedHistoryRunId == run.id && logText.lines().size > 1000) {
+                                                                    if (expandedHistoryRunId == run.id && logText.lines().size > 500) {
                                                                         pendingSaveOversizedRun = run to logText
                                                                     }
                                                                 }
@@ -1459,7 +1459,7 @@ fun PushGitScreen(
                                         val previewLines = remember(cachedLog) {
                                             if (cachedLog.isBlank()) emptyList() else cachedLog.lines()
                                         }
-                                        val isOversizedLog = previewLines.size > 1000
+                                        val isOversizedLog = previewLines.size > 500
                                         Surface(
                                             shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
                                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
@@ -1521,7 +1521,7 @@ fun PushGitScreen(
                                                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                                                 } else if (isOversizedLog) {
                                                     Text(
-                                                        text = "日志内容过多（共 ${previewLines.size} 行，超过 1000 行）无法展示，请保存为 TXT 文件到本地查看。",
+                                                        text = "日志内容过多（共 ${previewLines.size} 行，超过 500 行）无法展示，请保存为 TXT 文件到本地查看。",
                                                         fontSize = 11.5.sp,
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                                     )

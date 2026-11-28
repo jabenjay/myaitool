@@ -780,34 +780,76 @@ struct SshView: View {
         isLoadingFiles = true
         Task {
             do {
-                let items = try await c.withSFTP { sftp -> [SshRemoteFileItem] in
-                    let resolved = try await sftp.getRealPath(atPath: path)
-                    let list = try await sftp.listDirectory(atPath: resolved)
-                    return list.compactMap { entry -> SshRemoteFileItem? in
-                        let name = entry.filename
-                        if name == "." || name == ".." { return nil }
-                        let isDir = entry.longname.hasPrefix("d")
-                        let full = resolved == "/" ? "/\(name)" : "\(resolved.hasSuffix("/") ? String(resolved.dropLast()) : resolved)/\(name)"
-                        return SshRemoteFileItem(
-                            name: name,
-                            fullPath: full,
-                            isDir: isDir,
-                            size: entry.attributes.size ?? 0,
-                            permissionsText: String(entry.longname.prefix(10)),
-                            modifiedAt: entry.attributes.accessModificationTime?.modificationTime
-                        )
-                    }.sorted { lhs, rhs in
-                        if lhs.isDir != rhs.isDir { return lhs.isDir && !rhs.isDir }
-                        return lhs.name.lowercased() < rhs.name.lowercased()
-                    }
+                let resolved = try await c.withSFTP { sftp in
+                    try await sftp.getRealPath(atPath: path)
                 }
-                currentPath = path
+                let targetDir = resolved.isEmpty ? path : resolved
+                let escapedDir = targetDir.replacingOccurrences(of: "'", with: "'\\''")
+                let buf = try await c.executeCommand("LC_ALL=C ls -la '\(escapedDir)'", mergeStreams: true)
+                let items = Self.parseLsOutput(String(buffer: buf), baseDir: targetDir).sorted { lhs, rhs in
+                    if lhs.isDir != rhs.isDir { return lhs.isDir && !rhs.isDir }
+                    return lhs.name.lowercased() < rhs.name.lowercased()
+                }
+                currentPath = targetDir
                 remoteFiles = items
             } catch {
                 toastMsg = "读取目录失败：\(error.localizedDescription)"
             }
             isLoadingFiles = false
         }
+    }
+
+    private static func parseLsOutput(_ output: String, baseDir: String) -> [SshRemoteFileItem] {
+        let base = baseDir.hasSuffix("/") && baseDir != "/" ? String(baseDir.dropLast()) : baseDir
+        var results: [SshRemoteFileItem] = []
+        let lines = output.components(separatedBy: .newlines)
+        for rawLine in lines {
+            let line = rawLine.trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
+            if line.isEmpty || line.hasPrefix("total ") { continue }
+            guard let first = line.first, "-dlcbps".contains(first) else { continue }
+
+            // Parse first 8 whitespace-separated tokens, keeping remainder intact for filenames with spaces
+            var idx = line.startIndex
+            var tokens: [Substring] = []
+            while tokens.count < 8 && idx < line.endIndex {
+                while idx < line.endIndex && line[idx].isWhitespace {
+                    idx = line.index(after: idx)
+                }
+                guard idx < line.endIndex else { break }
+                let start = idx
+                while idx < line.endIndex && !line[idx].isWhitespace {
+                    idx = line.index(after: idx)
+                }
+                tokens.append(line[start..<idx])
+            }
+            guard tokens.count == 8 else { continue }
+            while idx < line.endIndex && line[idx].isWhitespace {
+                idx = line.index(after: idx)
+            }
+            guard idx < line.endIndex else { continue }
+
+            let perms = String(tokens[0])
+            guard perms.count >= 10 else { continue }
+            var name = String(line[idx...])
+            if perms.hasPrefix("l"), let arrowRange = name.range(of: " -> ") {
+                name = String(name[..<arrowRange.lowerBound])
+            }
+            if name == "." || name == ".." || name.isEmpty { continue }
+
+            let isDir = perms.hasPrefix("d")
+            let size = UInt64(tokens[4]) ?? 0
+            let full = base == "/" ? "/\(name)" : "\(base)/\(name)"
+
+            results.append(SshRemoteFileItem(
+                name: name,
+                fullPath: full,
+                isDir: isDir,
+                size: size,
+                permissionsText: String(perms.prefix(10)),
+                modifiedAt: nil
+            ))
+        }
+        return results
     }
 
     private func uploadLocalFile(_ url: URL) {
