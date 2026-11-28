@@ -2,6 +2,109 @@ import SwiftUI
 import UserNotifications
 import UniformTypeIdentifiers
 
+
+@MainActor
+final class IosBuildMonitorManager {
+    static let shared = IosBuildMonitorManager()
+    private var lastKnownRunStates: [Int64: String] = [:]
+    private var hasSeeded = false
+    private var pollTask: Task<Void, Never>?
+
+    private init() {}
+
+    static func normalizeStateKey(_ r: WorkflowRunInfo) -> String {
+        switch r.status {
+        case "queued", "waiting", "pending": return "queued"
+        case "in_progress": return "in_progress"
+        case "completed": return "completed:\(r.conclusion)"
+        default: return "\(r.status):\(r.conclusion)"
+        }
+    }
+
+    static func formatStatusBody(_ stateKey: String, branch: String) -> String {
+        let label: String
+        switch stateKey {
+        case "queued": label = "工作流排队中"
+        case "in_progress": label = "工作流构建中"
+        case "completed:success": label = "工作流构建成功"
+        case "completed:failure": label = "工作流构建失败"
+        case "completed:cancelled": label = "工作流已取消"
+        default:
+            label = stateKey.hasPrefix("completed:") ? "工作流已完成" : "状态更新"
+        }
+        return "\(label)（\(branch)）"
+    }
+
+    func onRunsObserved(pat: String, repo: String, runs: [WorkflowRunInfo], engine: PushGitEngine) {
+        if !runs.isEmpty {
+            if !hasSeeded {
+                for r in runs {
+                    lastKnownRunStates[r.id] = Self.normalizeStateKey(r)
+                }
+                hasSeeded = true
+            } else {
+                for r in runs {
+                    let newKey = Self.normalizeStateKey(r)
+                    let oldKey = lastKnownRunStates[r.id]
+                    if oldKey != newKey {
+                        if oldKey != nil || r.status != "completed" {
+                            sendNotification(
+                                id: "build_\(r.id)_\(newKey)",
+                                title: "#\(r.runNumber) · \(r.name)",
+                                body: Self.formatStatusBody(newKey, branch: r.branch)
+                            )
+                        }
+                        lastKnownRunStates[r.id] = newKey
+                    }
+                }
+            }
+        }
+        if runs.contains(where: { $0.status != "completed" }) && !pat.isEmpty && !repo.isEmpty {
+            ensurePolling(pat: pat, repo: repo, engine: engine, gracePolls: 0)
+        }
+    }
+
+    func startMonitoringAfterDispatch(pat: String, repo: String, engine: PushGitEngine) {
+        guard !pat.isEmpty, !repo.isEmpty else { return }
+        ensurePolling(pat: pat, repo: repo, engine: engine, gracePolls: 24)
+    }
+
+    private func ensurePolling(pat: String, repo: String, engine: PushGitEngine, gracePolls: Int) {
+        guard pollTask == nil else { return }
+        pollTask = Task { [weak self] in
+            var remainingGrace = gracePolls
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 4_500_000_000)
+                if let runs = try? await engine.listWorkflowRuns(pat, repo: repo) {
+                    self?.onRunsObserved(pat: pat, repo: repo, runs: runs, engine: engine)
+                    if runs.contains(where: { $0.status != "completed" }) {
+                        remainingGrace = 0
+                    } else if remainingGrace > 0 {
+                        remainingGrace -= 1
+                    } else {
+                        break
+                    }
+                } else if remainingGrace > 0 {
+                    remainingGrace -= 1
+                } else {
+                    break
+                }
+            }
+            self?.pollTask = nil
+        }
+    }
+
+    private func sendNotification(id: String, title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.userInfo = ["route": "pushgit"]
+        let req = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req)
+    }
+}
+
 struct PushGitView: View {
     @ObservedObject var prefs: AppPreferences
     @StateObject private var engine = PushGitEngine()
@@ -471,43 +574,7 @@ struct PushGitView: View {
     }
 
     private func processRunStateNotifications(_ runs: [WorkflowRunInfo]) {
-        if !hasSeededRunStates {
-            for r in runs {
-                lastKnownRunStates[r.id] = Self.runStateKey(r)
-            }
-            hasSeededRunStates = true
-            return
-        }
-        for r in runs {
-            let newKey = Self.runStateKey(r)
-            let newLabel = Self.runStatusLabel(r)
-            if let oldKey = lastKnownRunStates[r.id] {
-                if oldKey != newKey {
-                    let oldLabel = Self.labelFromStateKey(oldKey)
-                    sendBuildNotification(
-                        id: "build_\(r.id)_\(newKey)",
-                        title: "#\(r.runNumber) · \(r.name)",
-                        body: "状态变更：\(oldLabel) → \(newLabel)（\(r.branch)）"
-                    )
-                }
-            } else if r.status != "completed" {
-                sendBuildNotification(
-                    id: "build_\(r.id)_\(newKey)",
-                    title: "#\(r.runNumber) · \(r.name)",
-                    body: "当前状态：\(newLabel)（\(r.branch)）"
-                )
-            }
-            lastKnownRunStates[r.id] = newKey
-        }
-    }
-
-    private func sendBuildNotification(id: String, title: String, body: String) {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        content.sound = .default
-        let req = UNNotificationRequest(identifier: id, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(req)
+        IosBuildMonitorManager.shared.onRunsObserved(pat: pat, repo: targetRepo, runs: runs, engine: engine)
     }
 
     private func runInspect() async {
@@ -702,6 +769,7 @@ struct PushGitView: View {
                                 showRunWorkflowSheet = false
                                 hasPendingBuildAfterPush = false
                                 toastMsg = "已触发构建"
+                                IosBuildMonitorManager.shared.startMonitoringAfterDispatch(pat: pat, repo: targetRepo, engine: engine)
                                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                                 if let runs = try? await engine.listWorkflowRuns(pat, repo: targetRepo) {
                                     workflowRuns = runs

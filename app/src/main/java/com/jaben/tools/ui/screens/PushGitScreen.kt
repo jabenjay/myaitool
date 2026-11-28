@@ -288,41 +288,14 @@ fun PushGitScreen(
     }
 
     val activeRuns = workflowRuns.filter { it.status != "completed" }
-    LaunchedEffect(workflowRuns) {
+    LaunchedEffect(workflowRuns, pat, targetRepo) {
         workflowRuns.forEach { run ->
             if (run.status != "completed") {
                 observedActiveRunIds[run.id] = true
             }
         }
         if (workflowRuns.isNotEmpty()) {
-            if (!hasSeededRunStates) {
-                workflowRuns.forEach { r -> lastKnownRunStates[r.id] = "${r.status}:${r.conclusion}" }
-                hasSeededRunStates = true
-            } else {
-                workflowRuns.forEach { r ->
-                    val newKey = "${r.status}:${r.conclusion}"
-                    val newLabel = formatRunStateLabel(r.status, r.conclusion)
-                    val oldKey = lastKnownRunStates[r.id]
-                    if (oldKey != null && oldKey != newKey) {
-                        val parts = oldKey.split(":")
-                        val oldLabel = formatRunStateLabel(parts.getOrElse(0) { "" }, parts.getOrElse(1) { "" })
-                        sendBuildStatusNotification(
-                            context = context,
-                            runId = r.id,
-                            title = "#${r.runNumber} · ${r.name}",
-                            body = "状态变更：$oldLabel → $newLabel（${r.branch}）"
-                        )
-                    } else if (oldKey == null && r.status != "completed") {
-                        sendBuildStatusNotification(
-                            context = context,
-                            runId = r.id,
-                            title = "#${r.runNumber} · ${r.name}",
-                            body = "当前状态：$newLabel（${r.branch}）"
-                        )
-                    }
-                    lastKnownRunStates[r.id] = newKey
-                }
-            }
+            BuildMonitorManager.onRunsObserved(context, pat, targetRepo, workflowRuns)
         }
     }
     val hasActiveRuns = activeRuns.isNotEmpty()
@@ -1917,6 +1890,7 @@ fun PushGitScreen(
                                     showRunWorkflowDialog = false
                                     hasPendingBuildAfterPush = false
                                     Toast.makeText(context, "已触发 Run workflow", Toast.LENGTH_SHORT).show()
+                                    BuildMonitorManager.startMonitoringAfterDispatch(context, pat, targetRepo)
                                     delay(1500)
                                     engine.listWorkflowRuns(pat, targetRepo).onSuccess { workflowRuns = it }
                                 }
@@ -2439,43 +2413,4 @@ private fun RepoBrowserEditorDialog(
 }
 
 
-private fun formatRunStateLabel(status: String, conclusion: String): String = when (status) {
-    "queued", "waiting", "pending" -> "排队中"
-    "in_progress" -> "构建中"
-    "completed" -> when (conclusion) {
-        "success" -> "构建成功"
-        "failure" -> "构建失败"
-        "cancelled" -> "已取消"
-        else -> conclusion.ifBlank { "已完成" }
-    }
-    else -> status
-}
 
-private fun sendBuildStatusNotification(
-    context: android.content.Context,
-    runId: Long,
-    title: String,
-    body: String
-) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-    ) {
-        return
-    }
-    val channelId = "jools_build_status"
-    val nm = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as NotificationManager
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        val ch = NotificationChannel(channelId, "构建状态通知", NotificationManager.IMPORTANCE_DEFAULT).apply {
-            description = "PushGit 工作流构建状态变更通知"
-        }
-        nm.createNotificationChannel(ch)
-    }
-    val notif = NotificationCompat.Builder(context, channelId)
-        .setSmallIcon(R.drawable.ic_launcher_foreground)
-        .setContentTitle(title)
-        .setContentText(body)
-        .setAutoCancel(true)
-        .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-        .build()
-    nm.notify((runId and 0x7FFFFFFF).toInt(), notif)
-}

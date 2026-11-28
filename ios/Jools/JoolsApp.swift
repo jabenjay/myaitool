@@ -1,3 +1,7 @@
+extension Notification.Name {
+    static let joolsOpenPushGit = Notification.Name("JoolsOpenPushGit")
+}
+
 import SwiftUI
 import UIKit
 import UserNotifications
@@ -42,6 +46,20 @@ final class JoolsAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificatio
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([.banner, .sound])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if let route = response.notification.request.content.userInfo["route"] as? String,
+           route == "pushgit" {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .joolsOpenPushGit, object: nil)
+            }
+        }
+        completionHandler()
     }
 }
 

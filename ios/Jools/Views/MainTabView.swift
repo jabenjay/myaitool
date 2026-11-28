@@ -79,6 +79,11 @@ struct MainTabView: View {
                     }
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .joolsOpenPushGit)) { _ in
+                if path.last != .tool(.pushGit) {
+                    path.append(.tool(.pushGit))
+                }
+            }
 
             if let item = pendingNotices.first {
                 NoticeConfirmSheet(item: item) {
