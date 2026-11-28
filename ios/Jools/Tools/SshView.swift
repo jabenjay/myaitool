@@ -7,6 +7,14 @@ import Citadel
 import NIOCore
 import NIOFoundationCompat
 
+
+struct SshTerminalBlock: Identifiable, Equatable {
+    let id: String = UUID().uuidString
+    let command: String
+    var output: String
+    var isError: Bool = false
+}
+
 struct SshRemoteFileItem: Identifiable, Equatable {
     var id: String { fullPath }
     let name: String
@@ -69,8 +77,14 @@ struct SshView: View {
 
     // Terminal
     @State private var terminalLog = ""
+    @State private var terminalBlocks: [SshTerminalBlock] = []
     @State private var commandInput = ""
     @State private var isRunningCmd = false
+    @FocusState private var isTerminalInputFocused: Bool
+    @State private var showQuickCmdEditor = false
+    @State private var editingQuickCmd: SshQuickCommand?
+    @State private var quickCmdTitleInput = ""
+    @State private var quickCmdBodyInput = ""
 
     // SFTP
     @State private var currentPath = "/"
@@ -544,12 +558,12 @@ struct SshView: View {
                 HStack {
                     Text("系统: \(statusInfo.osInfo)").font(.system(size: 12, weight: .semibold)).lineLimit(1)
                     Spacer()
-                    Text("运行: \(statusInfo.uptime)").font(.system(size: 12)).foregroundColor(.accentColor)
+                    Text("运行: \(statusInfo.uptime)").font(.system(size: 12)).foregroundColor(.accentColor).lineLimit(1)
                 }
                 HStack {
-                    Text("内存: \(statusInfo.memoryInfo)").font(.system(size: 11)).foregroundColor(.secondary)
+                    Text("内存: \(statusInfo.memoryInfo)").font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
                     Spacer()
-                    Text("磁盘: \(statusInfo.diskInfo)").font(.system(size: 11)).foregroundColor(.secondary)
+                    Text("磁盘: \(statusInfo.diskInfo)").font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
                 }
             }
             .padding(12)
@@ -557,48 +571,205 @@ struct SshView: View {
             .padding(.horizontal, 14)
             .padding(.top, 8)
 
+            // 点击黑色终端区域直接弹出输入法输入，回车即发送；长按历史/输出可复制、重跑或收藏为快捷指令
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        if !terminalLog.isEmpty {
+                            Text(terminalLog.trimmingCharacters(in: .whitespacesAndNewlines))
+                                .font(.system(size: 11.5, design: .monospaced))
+                                .foregroundColor(Color(red: 0.62, green: 0.70, blue: 0.78))
+                                .textSelection(.enabled)
+                        }
+
+                        ForEach(terminalBlocks) { block in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("$ \(block.command)")
+                                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(Color(red: 0.35, green: 0.85, blue: 0.55))
+                                    .textSelection(.enabled)
+                                if !block.output.isEmpty {
+                                    Text(block.output)
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundColor(block.isError ? Color(red: 0.98, green: 0.45, blue: 0.45) : Color(red: 0.90, green: 0.93, blue: 0.95))
+                                        .textSelection(.enabled)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 2)
+                            .contentShape(Rectangle())
+                            .contextMenu {
+                                Button {
+                                    UIPasteboard.general.string = block.command
+                                    toastMsg = "已复制命令"
+                                } label: {
+                                    Label("复制命令", systemImage: "doc.on.doc")
+                                }
+                                if !block.output.isEmpty {
+                                    Button {
+                                        UIPasteboard.general.string = block.output
+                                        toastMsg = "已复制输出"
+                                    } label: {
+                                        Label("复制输出", systemImage: "doc.plaintext")
+                                    }
+                                }
+                                Button {
+                                    commandInput = block.command
+                                    isTerminalInputFocused = true
+                                } label: {
+                                    Label("填入命令行", systemImage: "text.cursor")
+                                }
+                                Button {
+                                    executeTerminalCommand(overrideCommand: block.command)
+                                } label: {
+                                    Label("重新执行", systemImage: "arrow.clockwise")
+                                }
+                                Button {
+                                    editingQuickCmd = nil
+                                    quickCmdTitleInput = String(block.command.prefix(16))
+                                    quickCmdBodyInput = block.command
+                                    showQuickCmdEditor = true
+                                } label: {
+                                    Label("添加到快捷指令", systemImage: "star")
+                                }
+                                Divider()
+                                Button(role: .destructive) {
+                                    terminalBlocks.removeAll()
+                                    terminalLog = ""
+                                } label: {
+                                    Label("清空终端", systemImage: "trash")
+                                }
+                            }
+                        }
+
+                        HStack(alignment: .center, spacing: 6) {
+                            Text("\(activeProfile?.username ?? "ssh"):\(currentPath)$")
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.35, green: 0.85, blue: 0.55))
+                                .lineLimit(1)
+                            TextField(
+                                "",
+                                text: $commandInput,
+                                prompt: Text(isRunningCmd ? "执行中..." : "点击终端直接输入，回车发送")
+                                    .foregroundColor(Color.white.opacity(0.35))
+                            )
+                            .focused($isTerminalInputFocused)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(Color(red: 0.94, green: 0.96, blue: 0.98))
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                            .submitLabel(.send)
+                            .onSubmit {
+                                executeTerminalCommand()
+                                isTerminalInputFocused = true
+                            }
+                        }
+                        .id("terminal_prompt_bottom")
+                        .padding(.top, 4)
+                    }
+                    .padding(12)
+                }
+                .background(Color(red: 0.07, green: 0.08, blue: 0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    isTerminalInputFocused = true
+                }
+                .onChange(of: terminalBlocks.count) { _, _ in
+                    withAnimation { proxy.scrollTo("terminal_prompt_bottom", anchor: .bottom) }
+                }
+            }
+            .padding(.horizontal, 14)
+
+            // 快捷指令栏：点击填入命令行并聚焦输入法；长按可立即执行、复制、编辑、删除
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(["ls -la", "df -h", "free -h", "uptime", "ps aux | head -n 15"], id: \.self) { qc in
-                        Button(qc) { commandInput = qc }
-                            .font(.system(size: 11.5, design: .monospaced))
-                            .buttonStyle(.bordered)
+                    ForEach(repo.quickCommands) { qc in
+                        Button {
+                            commandInput = qc.command
+                            isTerminalInputFocused = true
+                        } label: {
+                            Text(qc.title)
+                                .font(.system(size: 11.5, design: .monospaced))
+                                .lineLimit(1)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.secondary.opacity(0.14))
+                                .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button {
+                                executeTerminalCommand(overrideCommand: qc.command)
+                            } label: {
+                                Label("立即执行", systemImage: "play.fill")
+                            }
+                            Button {
+                                UIPasteboard.general.string = qc.command
+                                toastMsg = "已复制快捷指令"
+                            } label: {
+                                Label("复制指令", systemImage: "doc.on.doc")
+                            }
+                            Button {
+                                editingQuickCmd = qc
+                                quickCmdTitleInput = qc.title
+                                quickCmdBodyInput = qc.command
+                                showQuickCmdEditor = true
+                            } label: {
+                                Label("编辑", systemImage: "pencil")
+                            }
+                            Button(role: .destructive) {
+                                repo.deleteQuickCommand(id: qc.id)
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                        }
+                    }
+
+                    Button {
+                        editingQuickCmd = nil
+                        quickCmdTitleInput = ""
+                        quickCmdBodyInput = ""
+                        showQuickCmdEditor = true
+                    } label: {
+                        Label("快捷指令", systemImage: "plus")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .lineLimit(1)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.accentColor.opacity(0.14))
+                            .foregroundColor(.accentColor)
+                            .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+
+                    if isTerminalInputFocused {
+                        Button("收起键盘") {
+                            isTerminalInputFocused = false
+                        }
+                        .font(.system(size: 11.5))
+                        .lineLimit(1)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
                     }
                 }
                 .padding(.horizontal, 14)
             }
-
-            ScrollView {
-                Text(terminalLog)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(Color(red: 0.90, green: 0.93, blue: 0.95))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-            }
-            .background(Color(red: 0.07, green: 0.08, blue: 0.10))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .padding(.horizontal, 14)
-
-            HStack(spacing: 8) {
-                TextField("输入 Shell 命令...", text: $commandInput)
-                    .textFieldStyle(.roundedBorder)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
-                    .submitLabel(.send)
-                    .onSubmit { executeTerminalCommand() }
-
-                Button { executeTerminalCommand() } label: {
-                    Image(systemName: "paperplane.fill")
-                        .frame(width: 36, height: 36)
-                        .background(Color.accentColor)
-                        .foregroundColor(.white)
-                        .clipShape(Circle())
-                }
-                .disabled(isRunningCmd)
-            }
-            .padding(.horizontal, 14)
             .padding(.bottom, 10)
+        }
+        .alert(editingQuickCmd == nil ? "添加快捷指令" : "编辑快捷指令", isPresented: $showQuickCmdEditor) {
+            TextField("按钮名称（如：查看进程）", text: $quickCmdTitleInput)
+            TextField("Shell 指令（如：ps aux）", text: $quickCmdBodyInput)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+            Button("保存") {
+                let cmd = quickCmdBodyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !cmd.isEmpty else { return }
+                let title = quickCmdTitleInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? cmd : quickCmdTitleInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                let item = SshQuickCommand(id: editingQuickCmd?.id ?? UUID().uuidString, title: title, command: cmd)
+                repo.upsertQuickCommand(item)
+            }
+            Button("取消", role: .cancel) {}
         }
     }
 
@@ -727,7 +898,8 @@ struct SshView: View {
                     try await sftp.getRealPath(atPath: ".")
                 }
                 currentPath = homeDir.isEmpty ? "/" : homeDir
-                terminalLog = "Connected to \(profile.username)@\(profile.host):\(profile.port)\nDefault path: \(currentPath)\n"
+                terminalBlocks = []
+                terminalLog = "Connected to \(profile.username)@\(profile.host):\(profile.port) · \(currentPath)"
                 page = .terminal
                 refreshStatus()
             } catch {
@@ -766,20 +938,29 @@ struct SshView: View {
         }
     }
 
-    private func executeTerminalCommand() {
-        let cmd = commandInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func executeTerminalCommand(overrideCommand: String? = nil) {
+        let raw = overrideCommand ?? commandInput
+        let cmd = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cmd.isEmpty, let c = client, !isRunningCmd else { return }
-        commandInput = ""
+        if overrideCommand == nil { commandInput = "" }
         isRunningCmd = true
-        terminalLog += "\n$ \(cmd)\n"
+        let block = SshTerminalBlock(command: cmd, output: "执行中...", isError: false)
+        terminalBlocks.append(block)
+        let blockId = block.id
         Task {
             do {
                 let escapedDir = currentPath.replacingOccurrences(of: "'", with: "'\\''")
                 let buf = try await c.executeCommand("cd '\(escapedDir)' 2>/dev/null; \(cmd)", mergeStreams: true)
-                let out = String(buffer: buf)
-                if !out.isEmpty { terminalLog += out + (out.hasSuffix("\n") ? "" : "\n") }
+                let out = String(buffer: buf).trimmingCharacters(in: CharacterSet.newlines)
+                if let idx = terminalBlocks.firstIndex(where: { $0.id == blockId }) {
+                    terminalBlocks[idx].output = out
+                    terminalBlocks[idx].isError = false
+                }
             } catch {
-                terminalLog += "[Error] \(error.localizedDescription)\n"
+                if let idx = terminalBlocks.firstIndex(where: { $0.id == blockId }) {
+                    terminalBlocks[idx].output = "[Error] \(error.localizedDescription)"
+                    terminalBlocks[idx].isError = true
+                }
             }
             isRunningCmd = false
         }

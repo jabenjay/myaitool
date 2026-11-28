@@ -67,9 +67,11 @@ final class SshRepository: ObservableObject {
     private let defaults = UserDefaults.standard
     private let serversKey = "ssh_servers_json"
     private let keysKey = "ssh_keys_json"
+    private let quickCmdsKey = "ssh_quick_commands_json"
 
     @Published var servers: [SshServerProfile] = []
     @Published var keys: [SshKeyItem] = []
+    @Published var quickCommands: [SshQuickCommand] = []
 
     private init() {
         loadAll()

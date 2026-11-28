@@ -8,6 +8,16 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import com.jaben.tools.tools.ssh.SshQuickCommand
+
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -120,6 +130,14 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
 
+
+private data class SshTerminalBlock(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val command: String,
+    val output: String,
+    val isError: Boolean = false
+)
+
 private enum class SshPage {
     SERVER_LIST,
     SERVER_EDITOR,
@@ -130,6 +148,7 @@ private enum class SshPage {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SshScreen(
     onBack: () -> Unit,
@@ -189,8 +208,44 @@ fun SshScreen(
 
     // Terminal state
     var terminalLog by remember { mutableStateOf("") }
+    var terminalBlocks by remember { mutableStateOf<List<SshTerminalBlock>>(emptyList()) }
     var commandInput by remember { mutableStateOf("") }
     var isRunningCmd by remember { mutableStateOf(false) }
+    var quickCommands by remember { mutableStateOf(repo.loadQuickCommands()) }
+    var activeTerminalBlock by remember { mutableStateOf<SshTerminalBlock?>(null) }
+    var activeQuickCommandMenu by remember { mutableStateOf<SshQuickCommand?>(null) }
+    var showQuickCmdEditor by remember { mutableStateOf(false) }
+    var editingQuickCmd by remember { mutableStateOf<SshQuickCommand?>(null) }
+    var quickCmdTitleInput by remember { mutableStateOf("") }
+    var quickCmdBodyInput by remember { mutableStateOf("") }
+    val terminalFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    fun executeTerminalCommand(overrideCmd: String? = null) {
+        val cmd = (overrideCmd ?: commandInput).trim()
+        val sess = activeSession
+        if (cmd.isNotEmpty() && sess != null && !isRunningCmd) {
+            if (overrideCmd == null) commandInput = ""
+            isRunningCmd = true
+            val block = SshTerminalBlock(command = cmd, output = "执行中...", isError = false)
+            terminalBlocks = terminalBlocks + block
+            scope.launch {
+                runCatching { SshEngine.runCommand(sess, cmd, currentPath) }
+                    .onSuccess { res ->
+                        val out = res.output.trimEnd()
+                        terminalBlocks = terminalBlocks.map {
+                            if (it.id == block.id) it.copy(output = out, isError = false) else it
+                        }
+                    }
+                    .onFailure { err ->
+                        terminalBlocks = terminalBlocks.map {
+                            if (it.id == block.id) it.copy(output = "[Error] ${err.message}", isError = true) else it
+                        }
+                    }
+                isRunningCmd = false
+            }
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -945,26 +1000,13 @@ fun SshScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        val quickCmds = listOf("ls -la", "df -h", "free -h", "uptime", "ps aux | head -n 15")
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            quickCmds.forEach { qc ->
-                                OutlinedButton(
-                                    onClick = { commandInput = qc },
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                ) {
-                                    Text(qc, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                                }
-                            }
+                        val termListState = rememberLazyListState()
+                        LaunchedEffect(terminalBlocks.size) {
+                            val totalItems = terminalBlocks.size + 2
+                            if (totalItems > 0) termListState.animateScrollToItem(totalItems - 1)
                         }
 
-                        Spacer(modifier = Modifier.height(6.dp))
-
+                        // 点击黑色终端区域直接弹出输入法输入，回车即发送；长按历史/输出可操作
                         Surface(
                             color = Color(0xFF111418),
                             shape = RoundedCornerShape(16.dp),
@@ -972,84 +1014,171 @@ fun SshScreen(
                                 .weight(1f)
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    terminalFocusRequester.requestFocus()
+                                    keyboardController?.show()
+                                }
                         ) {
-                            SelectionContainer {
-                                Text(
-                                    text = terminalLog,
-                                    color = Color(0xFFE6EDF3),
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    lineHeight = 17.sp,
-                                    modifier = Modifier
-                                        .verticalScroll(rememberScrollState())
-                                        .padding(12.dp)
-                                )
+                            LazyColumn(
+                                state = termListState,
+                                modifier = Modifier.fillMaxSize().padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (terminalLog.isNotBlank()) {
+                                    item {
+                                        Text(
+                                            text = terminalLog.trim(),
+                                            color = Color(0xFF9FB0C3),
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 11.5.sp
+                                        )
+                                    }
+                                }
+                                items(terminalBlocks, key = { it.id }) { block ->
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .combinedClickable(
+                                                onClick = {
+                                                    terminalFocusRequester.requestFocus()
+                                                    keyboardController?.show()
+                                                },
+                                                onLongClick = { activeTerminalBlock = block }
+                                            )
+                                            .padding(vertical = 2.dp),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Text(
+                                            text = "$ ${block.command}",
+                                            color = Color(0xFF59D98C),
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 12.sp
+                                        )
+                                        if (block.output.isNotEmpty()) {
+                                            Text(
+                                                text = block.output,
+                                                color = if (block.isError) Color(0xFFF87171) else Color(0xFFE6EDF3),
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 12.sp,
+                                                lineHeight = 17.sp
+                                            )
+                                        }
+                                    }
+                                }
+                                item {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "${activeProfile?.username ?: "ssh"}:$currentPath$ ",
+                                            color = Color(0xFF59D98C),
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 12.sp,
+                                            maxLines = 1
+                                        )
+                                        Box(modifier = Modifier.weight(1f)) {
+                                            if (commandInput.isEmpty()) {
+                                                Text(
+                                                    text = if (isRunningCmd) "执行中..." else "点击终端直接输入，回车发送",
+                                                    color = Color(0x66FFFFFF),
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 12.sp,
+                                                    maxLines = 1
+                                                )
+                                            }
+                                            BasicTextField(
+                                                value = commandInput,
+                                                onValueChange = { commandInput = it },
+                                                singleLine = true,
+                                                cursorBrush = SolidColor(Color(0xFF59D98C)),
+                                                textStyle = MaterialTheme.typography.bodySmall.copy(
+                                                    color = Color(0xFFE6EDF3),
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 12.sp
+                                                ),
+                                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                                keyboardActions = KeyboardActions(onSend = {
+                                                    executeTerminalCommand()
+                                                }),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .focusRequester(terminalFocusRequester)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
 
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // 自定义快捷指令栏：点击填入命令行并聚焦输入法；长按弹出操作菜单
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            OutlinedTextField(
-                                value = commandInput,
-                                onValueChange = { commandInput = it },
-                                placeholder = { Text("输入 Shell 命令...") },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                                keyboardActions = KeyboardActions(onSend = {
-                                    val cmd = commandInput.trim()
-                                    val sess = activeSession
-                                    if (cmd.isNotEmpty() && sess != null && !isRunningCmd) {
-                                        commandInput = ""
-                                        isRunningCmd = true
-                                        terminalLog += "\n$ $cmd\n"
-                                        scope.launch {
-                                            runCatching { SshEngine.runCommand(sess, cmd, currentPath) }
-                                                .onSuccess { res ->
-                                                    if (res.output.isNotEmpty()) terminalLog += "${res.output}\n"
-                                                }
-                                                .onFailure { err ->
-                                                    terminalLog += "[Error] ${err.message}\n"
-                                                }
-                                            isRunningCmd = false
-                                        }
+                            quickCommands.forEach { qc ->
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .combinedClickable(
+                                            onClick = {
+                                                commandInput = qc.command
+                                                terminalFocusRequester.requestFocus()
+                                                keyboardController?.show()
+                                            },
+                                            onLongClick = { activeQuickCommandMenu = qc }
+                                        )
+                                ) {
+                                    Text(
+                                        text = qc.title,
+                                        fontSize = 11.5.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        editingQuickCmd = null
+                                        quickCmdTitleInput = ""
+                                        quickCmdBodyInput = ""
+                                        showQuickCmdEditor = true
                                     }
-                                }),
-                                modifier = Modifier.weight(1f)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            IconButton(
-                                onClick = {
-                                    val cmd = commandInput.trim()
-                                    val sess = activeSession
-                                    if (cmd.isNotEmpty() && sess != null && !isRunningCmd) {
-                                        commandInput = ""
-                                        isRunningCmd = true
-                                        terminalLog += "\n$ $cmd\n"
-                                        scope.launch {
-                                            runCatching { SshEngine.runCommand(sess, cmd, currentPath) }
-                                                .onSuccess { res ->
-                                                    if (res.output.isNotEmpty()) terminalLog += "${res.output}\n"
-                                                }
-                                                .onFailure { err ->
-                                                    terminalLog += "[Error] ${err.message}\n"
-                                                }
-                                            isRunningCmd = false
-                                        }
-                                    }
-                                },
-                                enabled = !isRunningCmd
                             ) {
-                                Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "执行")
+                                Text(
+                                    text = "+ 快捷指令",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
                             }
                         }
                     }
                 }
 
-                SshPage.SFTP_FILES -> {
+                                SshPage.SFTP_FILES -> {
                     Column(modifier = Modifier.fillMaxSize()) {
                         Row(
                             modifier = Modifier
@@ -1262,6 +1391,136 @@ fun SshScreen(
                 sshKeys = repo.upsertKey(updated)
                 selectedKeyForDetail = null
                 Toast.makeText(context, "密钥已更新保存", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+
+    activeTerminalBlock?.let { blk ->
+        AlertDialog(
+            onDismissRequest = { activeTerminalBlock = null },
+            title = { Text(blk.command, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 15.sp, fontFamily = FontFamily.Monospace) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = {
+                        clipboard.setText(AnnotatedString(blk.command))
+                        Toast.makeText(context, "已复制命令", Toast.LENGTH_SHORT).show()
+                        activeTerminalBlock = null
+                    }) { Text("复制命令") }
+                    if (blk.output.isNotEmpty()) {
+                        TextButton(onClick = {
+                            clipboard.setText(AnnotatedString(blk.output))
+                            Toast.makeText(context, "已复制输出", Toast.LENGTH_SHORT).show()
+                            activeTerminalBlock = null
+                        }) { Text("复制输出") }
+                    }
+                    TextButton(onClick = {
+                        commandInput = blk.command
+                        activeTerminalBlock = null
+                        terminalFocusRequester.requestFocus()
+                        keyboardController?.show()
+                    }) { Text("填入命令行") }
+                    TextButton(onClick = {
+                        val cmd = blk.command
+                        activeTerminalBlock = null
+                        executeTerminalCommand(cmd)
+                    }) { Text("重新执行") }
+                    TextButton(onClick = {
+                        editingQuickCmd = null
+                        quickCmdTitleInput = blk.command.take(16)
+                        quickCmdBodyInput = blk.command
+                        activeTerminalBlock = null
+                        showQuickCmdEditor = true
+                    }) { Text("添加到快捷指令") }
+                    TextButton(onClick = {
+                        terminalBlocks = emptyList()
+                        terminalLog = ""
+                        activeTerminalBlock = null
+                    }) { Text("清空终端", color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { activeTerminalBlock = null }) { Text("关闭") }
+            }
+        )
+    }
+
+    activeQuickCommandMenu?.let { qc ->
+        AlertDialog(
+            onDismissRequest = { activeQuickCommandMenu = null },
+            title = { Text(qc.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 15.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(qc.command, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(onClick = {
+                        val cmd = qc.command
+                        activeQuickCommandMenu = null
+                        executeTerminalCommand(cmd)
+                    }) { Text("立即执行") }
+                    TextButton(onClick = {
+                        clipboard.setText(AnnotatedString(qc.command))
+                        Toast.makeText(context, "已复制快捷指令", Toast.LENGTH_SHORT).show()
+                        activeQuickCommandMenu = null
+                    }) { Text("复制指令") }
+                    TextButton(onClick = {
+                        editingQuickCmd = qc
+                        quickCmdTitleInput = qc.title
+                        quickCmdBodyInput = qc.command
+                        activeQuickCommandMenu = null
+                        showQuickCmdEditor = true
+                    }) { Text("编辑") }
+                    TextButton(onClick = {
+                        quickCommands = repo.deleteQuickCommand(qc.id)
+                        activeQuickCommandMenu = null
+                    }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { activeQuickCommandMenu = null }) { Text("关闭") }
+            }
+        )
+    }
+
+    if (showQuickCmdEditor) {
+        AlertDialog(
+            onDismissRequest = { showQuickCmdEditor = false },
+            title = { Text(if (editingQuickCmd == null) "添加快捷指令" else "编辑快捷指令") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = quickCmdTitleInput,
+                        onValueChange = { quickCmdTitleInput = it },
+                        label = { Text("按钮名称（如：查看进程）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = quickCmdBodyInput,
+                        onValueChange = { quickCmdBodyInput = it },
+                        label = { Text("Shell 指令（如：ps aux）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val cmd = quickCmdBodyInput.trim()
+                    if (cmd.isNotEmpty()) {
+                        val title = quickCmdTitleInput.trim().ifBlank { cmd }
+                        quickCommands = repo.upsertQuickCommand(
+                            SshQuickCommand(
+                                id = editingQuickCmd?.id ?: java.util.UUID.randomUUID().toString(),
+                                title = title,
+                                command = cmd
+                            )
+                        )
+                    }
+                    showQuickCmdEditor = false
+                }) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showQuickCmdEditor = false }) { Text("取消") }
             }
         )
     }

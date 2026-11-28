@@ -10,6 +10,13 @@ enum class SshAuthType(val label: String) {
     PRIVATE_KEY("私钥认证")
 }
 
+
+data class SshQuickCommand(
+    val id: String = UUID.randomUUID().toString(),
+    val title: String,
+    val command: String
+)
+
 data class SshKeyItem(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
@@ -177,8 +184,63 @@ class SshRepository(context: Context) {
         return updated
     }
 
+
+    fun loadQuickCommands(): List<SshQuickCommand> {
+        val raw = prefs.getString(KEY_QUICK_CMDS, null)
+        if (!raw.isNullOrBlank()) {
+            val list = runCatching {
+                val arr = JSONArray(raw)
+                (0 until arr.length()).mapNotNull { i ->
+                    val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                    val cmd = o.optString("command", "").trim()
+                    if (cmd.isBlank()) return@mapNotNull null
+                    SshQuickCommand(
+                        id = o.optString("id", UUID.randomUUID().toString()),
+                        title = o.optString("title", cmd).ifBlank { cmd },
+                        command = cmd
+                    )
+                }
+            }.getOrNull()
+            if (!list.isNullOrEmpty()) return list
+        }
+        return listOf(
+            SshQuickCommand(title = "ls -la", command = "ls -la"),
+            SshQuickCommand(title = "df -h", command = "df -h"),
+            SshQuickCommand(title = "free -h", command = "free -h"),
+            SshQuickCommand(title = "uptime", command = "uptime"),
+            SshQuickCommand(title = "ps aux", command = "ps aux | head -n 15")
+        )
+    }
+
+    fun saveQuickCommands(items: List<SshQuickCommand>) {
+        val arr = JSONArray()
+        items.forEach { q ->
+            arr.put(JSONObject().apply {
+                put("id", q.id)
+                put("title", q.title)
+                put("command", q.command)
+            })
+        }
+        prefs.edit().putString(KEY_QUICK_CMDS, arr.toString()).apply()
+    }
+
+    fun upsertQuickCommand(item: SshQuickCommand): List<SshQuickCommand> {
+        val cur = loadQuickCommands().toMutableList()
+        val idx = cur.indexOfFirst { it.id == item.id }
+        if (idx >= 0) cur[idx] = item else cur.add(item)
+        saveQuickCommands(cur)
+        return cur
+    }
+
+    fun deleteQuickCommand(id: String): List<SshQuickCommand> {
+        val updated = loadQuickCommands().filterNot { it.id == id }
+        saveQuickCommands(updated)
+        return updated
+    }
+
     private companion object {
         const val KEY_SERVERS = "ssh_servers_json"
         const val KEY_SSH_KEYS = "ssh_keys_json"
+        const val KEY_QUICK_CMDS = "ssh_quick_cmds_json"
     }
 }
