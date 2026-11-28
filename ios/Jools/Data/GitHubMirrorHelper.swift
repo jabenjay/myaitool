@@ -8,6 +8,15 @@ enum GitHubMirrorHelper {
         "https://github.akams.cn/"
     ]
 
+    static func unwrapMirrorUrl(_ url: String) -> String {
+        for prefix in mirrorPrefixes {
+            if url.hasPrefix(prefix) {
+                return String(url.dropFirst(prefix.count))
+            }
+        }
+        return url
+    }
+
     static func isGitHubUrl(_ url: String) -> Bool {
         let lower = url.lowercased()
         return lower.hasPrefix("https://github.com/") ||
@@ -18,9 +27,10 @@ enum GitHubMirrorHelper {
 
     @MainActor
     static func buildCandidateURLs(_ rawUrl: String) -> [String] {
-        guard AppPreferences.shared.githubMirrorEnabled, isGitHubUrl(rawUrl) else {
-            return [rawUrl]
+        let baseUrl = unwrapMirrorUrl(rawUrl)
+        guard AppPreferences.shared.githubMirrorEnabled, isGitHubUrl(baseUrl) else {
+            return [baseUrl]
         }
-        return mirrorPrefixes.map { $0 + rawUrl } + [rawUrl]
+        return mirrorPrefixes.map { $0 + baseUrl } + [baseUrl]
     }
 }
