@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 import UniformTypeIdentifiers
 
 struct PushGitView: View {
@@ -43,6 +44,8 @@ struct PushGitView: View {
 
     @State private var workflowRuns: [WorkflowRunInfo] = []
     @State private var observedActiveRunIds = Set<Int64>()
+    @State private var lastKnownRunStates: [Int64: String] = [:]
+    @State private var hasSeededRunStates = false
     @State private var dismissedRunIds = Set<Int64>()
     @State private var pendingCancelRun: WorkflowRunInfo?
 
@@ -267,7 +270,7 @@ struct PushGitView: View {
                 ForEach(displayRuns) { run in
                     let isRunning = run.status != "completed"
                     HStack {
-                        Text("#\(run.runNumber) · \(run.name) · \(isRunning ? "构建中" : (run.conclusion == "success" ? "构建成功" : "构建失败"))")
+                        Text("#\(run.runNumber) · \(run.name) · \(Self.runStatusLabel(run))")
                             .font(.system(size: 12, weight: .medium))
                             .lineLimit(1)
                         Spacer()
@@ -302,10 +305,12 @@ struct PushGitView: View {
                 if let runs = try? await engine.listWorkflowRuns(pat, repo: targetRepo) {
                     workflowRuns = runs
                     runs.filter { $0.status != "completed" }.forEach { observedActiveRunIds.insert($0.id) }
+                    processRunStateNotifications(runs)
                 }
             }
         }
         .onAppear {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
             pat = engine.loadSavedToken()
             targetRepo = engine.loadSavedRepo()
             branch = engine.loadSavedBranch()
@@ -420,7 +425,89 @@ struct PushGitView: View {
         if let runs = try? await engine.listWorkflowRuns(token, repo: targetRepo) {
             workflowRuns = runs
             runs.filter { $0.status != "completed" }.forEach { observedActiveRunIds.insert($0.id) }
+            processRunStateNotifications(runs)
         }
+    }
+
+
+    private static func runStateKey(_ run: WorkflowRunInfo) -> String {
+        "\(run.status):\(run.conclusion)"
+    }
+
+    private static func runStatusLabel(_ run: WorkflowRunInfo) -> String {
+        switch run.status {
+        case "queued", "waiting", "pending":
+            return "排队中"
+        case "in_progress":
+            return "构建中"
+        case "completed":
+            switch run.conclusion {
+            case "success": return "构建成功"
+            case "failure": return "构建失败"
+            case "cancelled": return "已取消"
+            default: return run.conclusion.isEmpty ? "已完成" : run.conclusion
+            }
+        default:
+            return run.status
+        }
+    }
+
+    private static func labelFromStateKey(_ key: String) -> String {
+        let parts = key.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        let status = parts.first ?? ""
+        let conclusion = parts.count > 1 ? parts[1] : ""
+        switch status {
+        case "queued", "waiting", "pending": return "排队中"
+        case "in_progress": return "构建中"
+        case "completed":
+            switch conclusion {
+            case "success": return "构建成功"
+            case "failure": return "构建失败"
+            case "cancelled": return "已取消"
+            default: return conclusion.isEmpty ? "已完成" : conclusion
+            }
+        default: return status
+        }
+    }
+
+    private func processRunStateNotifications(_ runs: [WorkflowRunInfo]) {
+        if !hasSeededRunStates {
+            for r in runs {
+                lastKnownRunStates[r.id] = Self.runStateKey(r)
+            }
+            hasSeededRunStates = true
+            return
+        }
+        for r in runs {
+            let newKey = Self.runStateKey(r)
+            let newLabel = Self.runStatusLabel(r)
+            if let oldKey = lastKnownRunStates[r.id] {
+                if oldKey != newKey {
+                    let oldLabel = Self.labelFromStateKey(oldKey)
+                    sendBuildNotification(
+                        id: "build_\(r.id)_\(newKey)",
+                        title: "#\(r.runNumber) · \(r.name)",
+                        body: "状态变更：\(oldLabel) → \(newLabel)（\(r.branch)）"
+                    )
+                }
+            } else if r.status != "completed" {
+                sendBuildNotification(
+                    id: "build_\(r.id)_\(newKey)",
+                    title: "#\(r.runNumber) · \(r.name)",
+                    body: "当前状态：\(newLabel)（\(r.branch)）"
+                )
+            }
+            lastKnownRunStates[r.id] = newKey
+        }
+    }
+
+    private func sendBuildNotification(id: String, title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let req = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req)
     }
 
     private func runInspect() async {
@@ -619,6 +706,7 @@ struct PushGitView: View {
                                 if let runs = try? await engine.listWorkflowRuns(pat, repo: targetRepo) {
                                     workflowRuns = runs
                                     runs.filter { $0.status != "completed" }.forEach { observedActiveRunIds.insert($0.id) }
+                                    processRunStateNotifications(runs)
                                 }
                             } catch {
                                 toastMsg = "触发失败: \(error.localizedDescription)"

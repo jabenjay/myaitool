@@ -12,6 +12,13 @@ enum SshAuthType: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+
+struct SshQuickCommand: Identifiable, Codable, Equatable {
+    var id: String = UUID().uuidString
+    var title: String
+    var command: String
+}
+
 struct SshKeyItem: Identifiable, Codable, Equatable {
     var id: String = UUID().uuidString
     var name: String
@@ -66,6 +73,7 @@ final class SshRepository: ObservableObject {
 
     private init() {
         loadAll()
+        loadQuickCommands()
     }
 
     private func loadAll() {
@@ -128,6 +136,43 @@ final class SshRepository: ObservableObject {
     func deleteKey(id: String) {
         keys.removeAll { $0.id == id }
         saveKeys()
+    }
+
+
+    private func loadQuickCommands() {
+        if let data = UserDefaults.standard.data(forKey: quickCmdsKey),
+           let decoded = try? JSONDecoder().decode([SshQuickCommand].self, from: data),
+           !decoded.isEmpty {
+            quickCommands = decoded
+        } else {
+            quickCommands = [
+                SshQuickCommand(title: "ls -la", command: "ls -la"),
+                SshQuickCommand(title: "df -h", command: "df -h"),
+                SshQuickCommand(title: "free -h", command: "free -h"),
+                SshQuickCommand(title: "uptime", command: "uptime"),
+                SshQuickCommand(title: "ps aux", command: "ps aux | head -n 15")
+            ]
+        }
+    }
+
+    private func saveQuickCommands() {
+        if let data = try? JSONEncoder().encode(quickCommands) {
+            UserDefaults.standard.set(data, forKey: quickCmdsKey)
+        }
+    }
+
+    func upsertQuickCommand(_ item: SshQuickCommand) {
+        if let idx = quickCommands.firstIndex(where: { $0.id == item.id }) {
+            quickCommands[idx] = item
+        } else {
+            quickCommands.append(item)
+        }
+        saveQuickCommands()
+    }
+
+    func deleteQuickCommand(id: String) {
+        quickCommands.removeAll { $0.id == id }
+        saveQuickCommands()
     }
 
     func resolvePrivateKey(for profile: SshServerProfile) -> String {

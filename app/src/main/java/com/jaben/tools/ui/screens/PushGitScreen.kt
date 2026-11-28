@@ -3,6 +3,15 @@ package com.jaben.tools.ui.screens
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import com.jaben.tools.R
+
 import androidx.documentfile.provider.DocumentFile
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -185,6 +194,21 @@ fun PushGitScreen(
     var isFetchingRuns by remember { mutableStateOf(false) }
     val observedActiveRunIds = remember { mutableStateMapOf<Long, Boolean>() }
     val dismissedCompletedRunIds = remember { mutableStateMapOf<Long, Boolean>() }
+    val lastKnownRunStates = remember { mutableStateMapOf<Long, String>() }
+    var hasSeededRunStates by remember { mutableStateOf(false) }
+
+    val notifPermLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
     var isFetchingFailedLog by remember { mutableStateOf(false) }
     var pendingCancelRun by remember { mutableStateOf<WorkflowRunInfo?>(null) }
 
@@ -268,6 +292,36 @@ fun PushGitScreen(
         workflowRuns.forEach { run ->
             if (run.status != "completed") {
                 observedActiveRunIds[run.id] = true
+            }
+        }
+        if (workflowRuns.isNotEmpty()) {
+            if (!hasSeededRunStates) {
+                workflowRuns.forEach { r -> lastKnownRunStates[r.id] = "${r.status}:${r.conclusion}" }
+                hasSeededRunStates = true
+            } else {
+                workflowRuns.forEach { r ->
+                    val newKey = "${r.status}:${r.conclusion}"
+                    val newLabel = formatRunStateLabel(r.status, r.conclusion)
+                    val oldKey = lastKnownRunStates[r.id]
+                    if (oldKey != null && oldKey != newKey) {
+                        val parts = oldKey.split(":")
+                        val oldLabel = formatRunStateLabel(parts.getOrElse(0) { "" }, parts.getOrElse(1) { "" })
+                        sendBuildStatusNotification(
+                            context = context,
+                            runId = r.id,
+                            title = "#${r.runNumber} · ${r.name}",
+                            body = "状态变更：$oldLabel → $newLabel（${r.branch}）"
+                        )
+                    } else if (oldKey == null && r.status != "completed") {
+                        sendBuildStatusNotification(
+                            context = context,
+                            runId = r.id,
+                            title = "#${r.runNumber} · ${r.name}",
+                            body = "当前状态：$newLabel（${r.branch}）"
+                        )
+                    }
+                    lastKnownRunStates[r.id] = newKey
+                }
             }
         }
     }
@@ -2382,4 +2436,46 @@ private fun RepoBrowserEditorDialog(
             }
         )
     }
+}
+
+
+private fun formatRunStateLabel(status: String, conclusion: String): String = when (status) {
+    "queued", "waiting", "pending" -> "排队中"
+    "in_progress" -> "构建中"
+    "completed" -> when (conclusion) {
+        "success" -> "构建成功"
+        "failure" -> "构建失败"
+        "cancelled" -> "已取消"
+        else -> conclusion.ifBlank { "已完成" }
+    }
+    else -> status
+}
+
+private fun sendBuildStatusNotification(
+    context: android.content.Context,
+    runId: Long,
+    title: String,
+    body: String
+) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+    ) {
+        return
+    }
+    val channelId = "jools_build_status"
+    val nm = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as NotificationManager
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val ch = NotificationChannel(channelId, "构建状态通知", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            description = "PushGit 工作流构建状态变更通知"
+        }
+        nm.createNotificationChannel(ch)
+    }
+    val notif = NotificationCompat.Builder(context, channelId)
+        .setSmallIcon(R.drawable.ic_launcher_foreground)
+        .setContentTitle(title)
+        .setContentText(body)
+        .setAutoCancel(true)
+        .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+        .build()
+    nm.notify((runId and 0x7FFFFFFF).toInt(), notif)
 }
