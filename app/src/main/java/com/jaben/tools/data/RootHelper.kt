@@ -63,17 +63,17 @@ object RootHelper {
             val finished = process.waitFor(6, TimeUnit.SECONDS)
             if (!finished) {
                 process.destroyForcibly()
-                return@withContext RootCheckResult(false, "Root 授权请求超时", foundSu)
+                return@withContext RootCheckResult(false, "未获取 Root 权限", foundSu)
             }
             val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             val ok = process.exitValue() == 0 && output.contains("uid=0")
             if (ok) {
-                RootCheckResult(true, "已获取 Root 权限 ($output)", foundSu ?: "su")
+                RootCheckResult(true, "已获取 Root 权限", foundSu ?: "su")
             } else {
-                RootCheckResult(false, if (output.isNotEmpty()) "未授权 Root: $output" else "未获取到 Root 权限", foundSu)
+                RootCheckResult(false, "未获取 Root 权限", foundSu)
             }
         }.getOrElse { err ->
-            RootCheckResult(false, "未检测到可用 su (${err.message ?: "无权限"})", foundSu)
+            RootCheckResult(false, "未获取 Root 权限", foundSu)
         }
     }
 

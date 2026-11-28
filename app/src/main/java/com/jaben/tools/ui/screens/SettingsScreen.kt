@@ -230,9 +230,9 @@ fun SettingsScreen(
                     icon = Icons.Rounded.AdminPanelSettings,
                     title = "Root 权限检测",
                     subtitle = when {
-                        isCheckingRoot -> "正在检测 su 权限..."
+                        isCheckingRoot -> "正在检测..."
                         rootStatus != null -> rootStatus!!.detail
-                        else -> "点击检测设备是否已获取 Root 权限"
+                        else -> "点击检测 Root 状态"
                     },
                     onClick = {
                         if (!isCheckingRoot) {
@@ -275,7 +275,7 @@ fun SettingsScreen(
                 SettingsEntryCard(
                     icon = Icons.Rounded.InstallMobile,
                     title = "静默安装更新",
-                    subtitle = "下载更新后自动通过 Root (pm install) 静默安装",
+                    subtitle = "需 Root 权限，下载后静默安装",
                     onClick = {
                         val next = !silentInstallEnabled
                         silentInstallEnabled = next
@@ -297,7 +297,7 @@ fun SettingsScreen(
                 SettingsEntryCard(
                     icon = Icons.Rounded.DeleteSweep,
                     title = "安装后自动删除安装包",
-                    subtitle = "更新安装完成后自动清理下载的 APK 文件",
+                    subtitle = "安装完成后自动清理安装包",
                     onClick = {
                         val next = !autoDeleteApkEnabled
                         autoDeleteApkEnabled = next
