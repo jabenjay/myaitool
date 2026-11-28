@@ -736,6 +736,8 @@ struct BuildHistorySheet: View {
     @State private var isLoadingMore = false
     @State private var expandedRunId: Int64?
     @State private var logsCache: [Int64: String] = [:]
+    @State private var pendingOversizedLog: (run: WorkflowRunInfo, text: String)?
+    @State private var saveToastMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -747,9 +749,17 @@ struct BuildHistorySheet: View {
                                 expandedRunId = nil
                             } else {
                                 expandedRunId = run.id
-                                if logsCache[run.id] == nil {
+                                if let existing = logsCache[run.id] {
+                                    if existing.components(separatedBy: .newlines).count > 1000 {
+                                        pendingOversizedLog = (run, existing)
+                                    }
+                                } else {
                                     Task {
-                                        logsCache[run.id] = (try? await engine.fetchRunLog(pat, repo: repo, runId: run.id)) ?? "获取日志失败"
+                                        let fetched = (try? await engine.fetchRunLog(pat, repo: repo, runId: run.id)) ?? "获取日志失败"
+                                        logsCache[run.id] = fetched
+                                        if expandedRunId == run.id && fetched.components(separatedBy: .newlines).count > 1000 {
+                                            pendingOversizedLog = (run, fetched)
+                                        }
                                     }
                                 }
                             }
@@ -772,6 +782,7 @@ struct BuildHistorySheet: View {
                         if expandedRunId == run.id {
                             let logText = logsCache[run.id] ?? ""
                             let lines = logText.isEmpty ? [] : logText.components(separatedBy: .newlines)
+                            let isOversized = lines.count > 1000
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack {
                                     Text(logText.isEmpty ? "正在拉取日志..." : "日志 (\(lines.count) 行)")
@@ -779,11 +790,21 @@ struct BuildHistorySheet: View {
                                         .foregroundColor(.accentColor)
                                     Spacer()
                                     if !logText.isEmpty {
-                                        Button("复制") { UIPasteboard.general.string = logText }
-                                            .font(.system(size: 11))
+                                        if !isOversized {
+                                            Button("复制") { UIPasteboard.general.string = logText }
+                                                .font(.system(size: 11))
+                                        }
+                                        Button("保存 .txt") {
+                                            saveLogToAppFolder(logText, runNumber: run.runNumber)
+                                        }
+                                        .font(.system(size: 11))
                                     }
                                 }
-                                if !lines.isEmpty {
+                                if isOversized {
+                                    Text("日志内容过多（共 \(lines.count) 行，超过 1000 行）无法展示，请保存为 TXT 文件到本地查看。")
+                                        .font(.system(size: 11.5))
+                                        .foregroundColor(.secondary)
+                                } else if !lines.isEmpty {
                                     ScrollView {
                                         LazyVStack(alignment: .leading, spacing: 2) {
                                             ForEach(Array(lines.enumerated()), id: \.offset) { idx, l in
@@ -843,6 +864,57 @@ struct BuildHistorySheet: View {
                 runs = initialRuns
                 hasMore = initialRuns.count >= 15
             }
+            .alert(
+                "日志内容过多",
+                isPresented: Binding(
+                    get: { pendingOversizedLog != nil },
+                    set: { if !$0 { pendingOversizedLog = nil } }
+                ),
+                presenting: pendingOversizedLog
+            ) { item in
+                Button("确认保存") {
+                    saveLogToAppFolder(item.text, runNumber: item.run.runNumber)
+                    pendingOversizedLog = nil
+                }
+                Button("取消", role: .cancel) {
+                    pendingOversizedLog = nil
+                }
+            } message: { item in
+                let lineCount = item.text.components(separatedBy: .newlines).count
+                Text("该构建日志共 \(lineCount) 行（超过 1000 行），内容过多无法展示，是否直接保存日志文件到本地？\n\n保存路径：Jools/files/workflow_run_\(item.run.runNumber)_log.txt")
+            }
+            .alert(
+                "提示",
+                isPresented: Binding(
+                    get: { saveToastMessage != nil },
+                    set: { if !$0 { saveToastMessage = nil } }
+                )
+            ) {
+                Button("确定", role: .cancel) { saveToastMessage = nil }
+            } message: {
+                Text(saveToastMessage ?? "")
+            }
+        }
+    }
+
+    private func saveLogToAppFolder(_ text: String, runNumber: Int) {
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let filesDir = docs.appendingPathComponent("files", isDirectory: true)
+        let fileName = "workflow_run_\(runNumber)_log.txt"
+        let outUrl = filesDir.appendingPathComponent(fileName)
+        do {
+            if !fm.fileExists(atPath: filesDir.path) {
+                try fm.createDirectory(at: filesDir, withIntermediateDirectories: true)
+            }
+            guard let data = text.data(using: .utf8) else {
+                saveToastMessage = "保存失败：文本编码异常"
+                return
+            }
+            try data.write(to: outUrl, options: .atomic)
+            saveToastMessage = "已保存至 文件 -> 我的 iPhone -> Jools -> files -> \(fileName)"
+        } catch {
+            saveToastMessage = "保存失败：\(error.localizedDescription)"
         }
     }
 

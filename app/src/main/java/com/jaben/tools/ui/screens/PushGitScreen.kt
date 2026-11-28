@@ -1275,6 +1275,7 @@ fun PushGitScreen(
         var expandedHistoryRunId by remember { mutableStateOf<Long?>(null) }
         val historyLogsCache = remember { mutableStateMapOf<Long, String>() }
         var loadingLogRunId by remember { mutableStateOf<Long?>(null) }
+        var pendingSaveOversizedRun by remember { mutableStateOf<Pair<WorkflowRunInfo, String>?>(null) }
 
         Dialog(
             onDismissRequest = { showRunHistoryDialog = false },
@@ -1358,12 +1359,20 @@ fun PushGitScreen(
                                                     expandedHistoryRunId = null
                                                 } else {
                                                     expandedHistoryRunId = run.id
-                                                    if (!historyLogsCache.containsKey(run.id) && pat.isNotBlank()) {
+                                                    val existing = historyLogsCache[run.id]
+                                                    if (existing != null) {
+                                                        if (existing.lines().size > 1000) {
+                                                            pendingSaveOversizedRun = run to existing
+                                                        }
+                                                    } else if (pat.isNotBlank()) {
                                                         loadingLogRunId = run.id
                                                         scope.launch {
                                                             engine.fetchFailedRunLog(pat, targetRepo, run.id)
                                                                 .onSuccess { logText ->
                                                                     historyLogsCache[run.id] = logText
+                                                                    if (expandedHistoryRunId == run.id && logText.lines().size > 1000) {
+                                                                        pendingSaveOversizedRun = run to logText
+                                                                    }
                                                                 }
                                                                 .onFailure { err ->
                                                                     historyLogsCache[run.id] = "获取日志失败: ${err.message}"
@@ -1426,6 +1435,7 @@ fun PushGitScreen(
                                         val previewLines = remember(cachedLog) {
                                             if (cachedLog.isBlank()) emptyList() else cachedLog.lines()
                                         }
+                                        val isOversizedLog = previewLines.size > 1000
                                         Surface(
                                             shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
                                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
@@ -1441,22 +1451,24 @@ fun PushGitScreen(
                                                 ) {
                                                     Text(
                                                         text = if (isFetchingThisLog) "正在拉取日志..."
-                                                        else "日志 (${cachedLog.lines().size} 行)",
+                                                        else "日志 (${previewLines.size} 行)",
                                                         color = MaterialTheme.colorScheme.primary,
                                                         fontSize = 11.sp,
                                                         fontWeight = FontWeight.SemiBold,
                                                         modifier = Modifier.weight(1f)
                                                     )
                                                     if (cachedLog.isNotBlank()) {
-                                                        TextButton(
-                                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                                            onClick = {
-                                                                clipboardManager.setText(AnnotatedString(cachedLog))
-                                                                Toast.makeText(context, "已复制日志", Toast.LENGTH_SHORT).show()
-                                                            },
-                                                            modifier = Modifier.height(26.dp)
-                                                        ) {
-                                                            Text("复制", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp)
+                                                        if (!isOversizedLog) {
+                                                            TextButton(
+                                                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                                                onClick = {
+                                                                    clipboardManager.setText(AnnotatedString(cachedLog))
+                                                                    Toast.makeText(context, "已复制日志", Toast.LENGTH_SHORT).show()
+                                                                },
+                                                                modifier = Modifier.height(26.dp)
+                                                            ) {
+                                                                Text("复制", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp)
+                                                            }
                                                         }
                                                         TextButton(
                                                             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
@@ -1471,7 +1483,7 @@ fun PushGitScreen(
                                                                 )
                                                                 Toast.makeText(
                                                                     context,
-                                                                    if (uri != null) "已保存 $fileName" else "保存失败",
+                                                                    if (uri != null) "已保存到 ${OutputStorageHelper.getDisplayPath(context, OutputStorageHelper.SUB_FILES)}/$fileName" else "保存失败",
                                                                     Toast.LENGTH_SHORT
                                                                 ).show()
                                                             },
@@ -1483,6 +1495,12 @@ fun PushGitScreen(
                                                 }
                                                 if (isFetchingThisLog) {
                                                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                                } else if (isOversizedLog) {
+                                                    Text(
+                                                        text = "日志内容过多（共 ${previewLines.size} 行，超过 1000 行）无法展示，请保存为 TXT 文件到本地查看。",
+                                                        fontSize = 11.5.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
                                                 } else if (previewLines.isNotEmpty()) {
                                                     SelectionContainer {
                                                         Column(
@@ -1577,6 +1595,46 @@ fun PushGitScreen(
                     }
                 }
             }
+        }
+
+        pendingSaveOversizedRun?.let { (run, logText) ->
+            val fileName = "workflow_run_${run.runNumber}_log.txt"
+            val saveDir = OutputStorageHelper.getDisplayPath(context, OutputStorageHelper.SUB_FILES)
+            AlertDialog(
+                onDismissRequest = { pendingSaveOversizedRun = null },
+                title = { Text("日志内容过多") },
+                text = {
+                    Text("该构建日志共 ${logText.lines().size} 行（超过 1000 行），内容过多无法展示，是否直接保存日志文件到本地？
+
+保存路径：$saveDir/$fileName")
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val uri = OutputStorageHelper.saveStream(
+                                context = context,
+                                subFolder = OutputStorageHelper.SUB_FILES,
+                                fileName = fileName,
+                                mimeType = "text/plain",
+                                inputStream = ByteArrayInputStream(logText.toByteArray(Charsets.UTF_8))
+                            )
+                            Toast.makeText(
+                                context,
+                                if (uri != null) "已保存到 $saveDir/$fileName" else "保存失败",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            pendingSaveOversizedRun = null
+                        }
+                    ) {
+                        Text("确认保存")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingSaveOversizedRun = null }) {
+                        Text("取消")
+                    }
+                }
+            )
         }
     }
 
