@@ -101,73 +101,118 @@ final class BrowserDownloadManager: ObservableObject {
         saveMeta()
 
         let task = Task {
-            do {
-                var req = URLRequest(url: url, timeoutInterval: 60)
-                req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
+            let candidates = GitHubMirrorHelper.buildCandidateURLs(urlStr)
+            var lastError: Error = NSError(domain: "JoolsDownload", code: -1, userInfo: [
+                NSLocalizedDescriptionKey: "下载失败"
+            ])
+            var succeeded = false
 
-                let (bytes, response) = try await URLSession.shared.bytes(for: req)
-                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                    throw NSError(domain: "JoolsDownload", code: http.statusCode, userInfo: [
-                        NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"
-                    ])
-                }
+            for candStr in candidates {
+                guard let candURL = URL(string: candStr) else { continue }
+                var destURLToClean: URL? = nil
+                do {
+                    var req = URLRequest(url: candURL, timeoutInterval: 60)
+                    req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
 
-                let expected = response.expectedContentLength
-                var resolvedName = safeName
-                if let respName = response.suggestedFilename, !respName.isEmpty, respName != "Unknown" {
-                    resolvedName = respName.replacingOccurrences(of: "/", with: "_")
-                }
+                    let (bytes, response) = try await URLSession.shared.bytes(for: req)
+                    if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                        throw NSError(domain: "JoolsDownload", code: http.statusCode, userInfo: [
+                            NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"
+                        ])
+                    }
 
-                let storedName = "\(Int(Date().timeIntervalSince1970))_\(resolvedName)"
-                let destURL = downloadsDir.appendingPathComponent(storedName)
-                if fm.fileExists(atPath: destURL.path) { try? fm.removeItem(at: destURL) }
-                fm.createFile(atPath: destURL.path, contents: nil)
-                let handle = try FileHandle(forWritingTo: destURL)
-                defer { try? handle.close() }
+                    let respMime = (response.mimeType ?? "").lowercased()
+                    let extLower = (safeName as NSString).pathExtension.lowercased()
+                    let requiresBinary = ["ipa", "zip", "p12", "mobileprovision", "apk"].contains(extLower)
+                    if requiresBinary && respMime.contains("text/html") {
+                        throw NSError(domain: "JoolsDownload", code: -2, userInfo: [
+                            NSLocalizedDescriptionKey: "镜像返回了网页而非安装包"
+                        ])
+                    }
 
-                var buffer = Data()
-                buffer.reserveCapacity(64 * 1024)
-                var received: Int64 = 0
-                var lastUiUpdate = Date()
+                    let expected = response.expectedContentLength
+                    var resolvedName = safeName
+                    if let respName = response.suggestedFilename, !respName.isEmpty, respName != "Unknown", !respName.lowercased().hasSuffix(".html") {
+                        resolvedName = respName.replacingOccurrences(of: "/", with: "_")
+                    }
 
-                for try await byte in bytes {
-                    if Task.isCancelled { throw CancellationError() }
-                    buffer.append(byte)
-                    received += 1
-                    if buffer.count >= 32 * 1024 {
-                        try handle.write(contentsOf: buffer)
-                        buffer.removeAll(keepingCapacity: true)
-                        if Date().timeIntervalSince(lastUiUpdate) >= 0.25 {
-                            lastUiUpdate = Date()
-                            updateProgress(id: id, downloaded: received, total: expected, fileName: resolvedName)
+                    let storedName = "\(Int(Date().timeIntervalSince1970))_\(resolvedName)"
+                    let destURL = downloadsDir.appendingPathComponent(storedName)
+                    destURLToClean = destURL
+                    if fm.fileExists(atPath: destURL.path) { try? fm.removeItem(at: destURL) }
+                    fm.createFile(atPath: destURL.path, contents: nil)
+                    let handle = try FileHandle(forWritingTo: destURL)
+                    defer { try? handle.close() }
+
+                    var buffer = Data()
+                    buffer.reserveCapacity(64 * 1024)
+                    var received: Int64 = 0
+                    var lastUiUpdate = Date()
+                    var headerChecked = false
+                    let needsZipHeader = ["ipa", "zip"].contains((resolvedName as NSString).pathExtension.lowercased())
+
+                    for try await byte in bytes {
+                        if Task.isCancelled { throw CancellationError() }
+                        buffer.append(byte)
+                        received += 1
+
+                        if needsZipHeader && !headerChecked && received >= 4 {
+                            headerChecked = true
+                            if buffer[0] != 0x50 || buffer[1] != 0x4B {
+                                throw NSError(domain: "JoolsDownload", code: -3, userInfo: [
+                                    NSLocalizedDescriptionKey: "下载内容不是有效的 ZIP/IPA 安装包（可能被镜像拦截）"
+                                ])
+                            }
+                        }
+
+                        if buffer.count >= 32 * 1024 {
+                            try handle.write(contentsOf: buffer)
+                            buffer.removeAll(keepingCapacity: true)
+                            if Date().timeIntervalSince(lastUiUpdate) >= 0.25 {
+                                lastUiUpdate = Date()
+                                updateProgress(id: id, downloaded: received, total: expected, fileName: resolvedName)
+                            }
                         }
                     }
-                }
-                if !buffer.isEmpty {
-                    try handle.write(contentsOf: buffer)
-                }
-
-                var importedIpa = false
-                if resolvedName.lowercased().hasSuffix(".ipa") {
-                    if (try? IpaManager.shared.importIpa(from: destURL, asSigned: false)) != nil {
-                        importedIpa = true
+                    if !buffer.isEmpty {
+                        try handle.write(contentsOf: buffer)
                     }
-                }
+                    if needsZipHeader && received < 22 {
+                        throw NSError(domain: "JoolsDownload", code: -4, userInfo: [
+                            NSLocalizedDescriptionKey: "下载的文件不完整（大小异常）"
+                        ])
+                    }
 
-                if let idx = items.firstIndex(where: { $0.id == id }) {
-                    items[idx].fileName = resolvedName
-                    items[idx].status = .completed
-                    items[idx].progress = 1.0
-                    items[idx].downloadedBytes = received
-                    items[idx].totalBytes = max(expected, received)
-                    items[idx].localFileName = storedName
-                    items[idx].importedToUnsignedIpa = importedIpa
-                    saveMeta()
+                    var importedIpa = false
+                    if resolvedName.lowercased().hasSuffix(".ipa") {
+                        if (try? IpaManager.shared.importIpa(from: destURL, asSigned: false)) != nil {
+                            importedIpa = true
+                        }
+                    }
+
+                    if let idx = items.firstIndex(where: { $0.id == id }) {
+                        items[idx].fileName = resolvedName
+                        items[idx].status = .completed
+                        items[idx].progress = 1.0
+                        items[idx].downloadedBytes = received
+                        items[idx].totalBytes = max(expected, received)
+                        items[idx].localFileName = storedName
+                        items[idx].importedToUnsignedIpa = importedIpa
+                        saveMeta()
+                    }
+                    succeeded = true
+                    break
+                } catch {
+                    if let d = destURLToClean { try? fm.removeItem(at: d) }
+                    lastError = error
+                    if Task.isCancelled { break }
                 }
-            } catch {
+            }
+
+            if !succeeded {
                 if let idx = items.firstIndex(where: { $0.id == id }) {
                     items[idx].status = .failed
-                    items[idx].errorMessage = error.localizedDescription
+                    items[idx].errorMessage = lastError.localizedDescription
                     saveMeta()
                 }
             }

@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import CommonCrypto
 import Compression
 import CryptoKit
 import Network
@@ -139,6 +140,13 @@ final class IpaManager: ObservableObject {
 
         let attrs = try fm.attributesOfItem(atPath: destURL.path)
         let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+        let head = (try? FileHandle(forReadingFrom: destURL))?.readData(ofLength: 4) ?? Data()
+        if size < 22 || head.count < 2 || head[0] != 0x50 || head[1] != 0x4B {
+            try? fm.removeItem(at: destURL)
+            throw NSError(domain: "IpaManager", code: -10, userInfo: [
+                NSLocalizedDescriptionKey: "文件不是有效的 IPA/ZIP 安装包（可能下载不完整或被镜像返回了网页）"
+            ])
+        }
         let info = parseIpaInfoPlist(ipaURL: destURL)
 
         let item = IpaPackageItem(
@@ -172,22 +180,41 @@ final class IpaManager: ObservableObject {
         let options = [kSecImportExportPassphrase as String: password] as CFDictionary
         var rawItems: CFArray?
         let status = SecPKCS12Import(data as CFData, options, &rawItems)
-        guard status == errSecSuccess,
-              let arr = rawItems as? [[String: Any]],
-              let first = arr.first else {
-            throw NSError(domain: "JoolsIPA", code: Int(status), userInfo: [
-                NSLocalizedDescriptionKey: status == errSecAuthFailed ? "P12 密码错误" : "无效的 P12 证书文件 (code: \(status))"
-            ])
-        }
 
         var commonName = sourceURL.deletingPathExtension().lastPathComponent
-        if let identityRef = first[kSecImportItemIdentity as String] {
-            let identity = identityRef as! SecIdentity
-            var certRef: SecCertificate?
-            if SecIdentityCopyCertificate(identity, &certRef) == errSecSuccess,
-               let cert = certRef,
-               let summary = SecCertificateCopySubjectSummary(cert) as String? {
+        if status == errSecSuccess,
+           let arr = rawItems as? [[String: Any]],
+           let first = arr.first {
+            if let identityRef = first[kSecImportItemIdentity as String] {
+                let identity = identityRef as! SecIdentity
+                var certRef: SecCertificate?
+                if SecIdentityCopyCertificate(identity, &certRef) == errSecSuccess,
+                   let cert = certRef,
+                   let summary = SecCertificateCopySubjectSummary(cert) as String? {
+                    commonName = summary
+                }
+            } else if let chain = first[kSecImportItemCertChain as String] as? [SecCertificate],
+                      let cert = chain.first,
+                      let summary = SecCertificateCopySubjectSummary(cert) as String? {
                 commonName = summary
+            }
+        } else if status == errSecAuthFailed {
+            throw NSError(domain: "JoolsIPA", code: Int(status), userInfo: [
+                NSLocalizedDescriptionKey: "P12 密码错误"
+            ])
+        } else {
+            // Fallback for P12 files that SecPKCS12Import rejects (e.g. OpenSSL 3 AES-256-CBC or Keychain entitlement -34018)
+            switch PKCS12Fallback.verifyAndInspect(data: data, password: password) {
+            case .success(let summary):
+                if let s = summary, !s.isEmpty { commonName = s }
+            case .wrongPassword:
+                throw NSError(domain: "JoolsIPA", code: Int(errSecAuthFailed), userInfo: [
+                    NSLocalizedDescriptionKey: "P12 密码错误"
+                ])
+            case .invalidFile:
+                throw NSError(domain: "JoolsIPA", code: Int(status), userInfo: [
+                    NSLocalizedDescriptionKey: "无效的 P12 证书文件 (code: \(status))"
+                ])
             }
         }
 
@@ -342,17 +369,24 @@ final class IpaManager: ObservableObject {
         let options = [kSecImportExportPassphrase as String: cert.password] as CFDictionary
         var rawItems: CFArray?
         let status = SecPKCS12Import(p12Data as CFData, options, &rawItems)
-        guard status == errSecSuccess,
-              let arr = rawItems as? [[String: Any]],
-              let first = arr.first,
-              let identityRef = first[kSecImportItemIdentity as String] else {
+        var privateKey: SecKey? = nil
+        if status == errSecSuccess,
+           let arr = rawItems as? [[String: Any]],
+           let first = arr.first,
+           let identityRef = first[kSecImportItemIdentity as String] {
+            let identity = identityRef as! SecIdentity
+            SecIdentityCopyPrivateKey(identity, &privateKey)
+        } else if status == errSecAuthFailed {
             throw NSError(domain: "JoolsIPA", code: Int(status), userInfo: [
                 NSLocalizedDescriptionKey: "证书加载失败，请检查 P12 密码"
             ])
+        } else {
+            if case .wrongPassword = PKCS12Fallback.verifyAndInspect(data: p12Data, password: cert.password) {
+                throw NSError(domain: "JoolsIPA", code: Int(errSecAuthFailed), userInfo: [
+                    NSLocalizedDescriptionKey: "证书加载失败，请检查 P12 密码"
+                ])
+            }
         }
-        let identity = identityRef as! SecIdentity
-        var privateKey: SecKey?
-        SecIdentityCopyPrivateKey(identity, &privateKey)
 
         let workDir = fm.temporaryDirectory.appendingPathComponent("ipa_sign_\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: workDir, withIntermediateDirectories: true)
@@ -770,5 +804,208 @@ private extension Data {
         append(UInt8((value >> 8) & 0xFF))
         append(UInt8((value >> 16) & 0xFF))
         append(UInt8((value >> 24) & 0xFF))
+    }
+}
+
+
+private enum PKCS12Fallback {
+    enum Result {
+        case success(summary: String?)
+        case wrongPassword
+        case invalidFile
+    }
+
+    private struct TLV {
+        let tag: UInt8
+        let value: Data
+        let raw: Data
+    }
+
+    static func verifyAndInspect(data: Data, password: String) -> Result {
+        var off = 0
+        guard let pfx = readTLV(data, &off), pfx.tag == 0x30 else { return .invalidFile }
+        var pfxOff = 0
+        guard let ver = readTLV(pfx.value, &pfxOff), ver.tag == 0x02,
+              let authSafe = readTLV(pfx.value, &pfxOff), authSafe.tag == 0x30 else {
+            return .invalidFile
+        }
+        // Optional MacData
+        if let macData = readTLV(pfx.value, &pfxOff), macData.tag == 0x30 {
+            if let authSafeContent = extractContentInfoOctetOrRaw(authSafe.value) {
+                var macOff = 0
+                if let digestInfo = readTLV(macData.value, &macOff), digestInfo.tag == 0x30,
+                   let saltTLV = readTLV(macData.value, &macOff), saltTLV.tag == 0x04 {
+                    var iter = 1
+                    if let iterTLV = readTLV(macData.value, &macOff), iterTLV.tag == 0x02 {
+                        iter = readInt(iterTLV.value)
+                    }
+                    var diOff = 0
+                    if let algSeq = readTLV(digestInfo.value, &diOff), algSeq.tag == 0x30,
+                       let digestTLV = readTLV(digestInfo.value, &diOff), digestTLV.tag == 0x04 {
+                        var algOff = 0
+                        if let oidTLV = readTLV(algSeq.value, &algOff), oidTLV.tag == 0x06 {
+                            let useSha256 = (oidTLV.value == Data([0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01]))
+                            let useSha1 = (oidTLV.value == Data([0x2B, 0x0E, 0x03, 0x02, 0x1A]))
+                            if useSha256 || useSha1 {
+                                let macKey = pkcs12Kdf(
+                                    password: password,
+                                    salt: saltTLV.value,
+                                    iterations: max(1, iter),
+                                    id: 3,
+                                    keyLen: useSha256 ? 32 : 20,
+                                    useSha256: useSha256
+                                )
+                                let computed = hmac(key: macKey, data: authSafeContent, useSha256: useSha256)
+                                if computed != digestTLV.value {
+                                    return .wrongPassword
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return .success(summary: nil)
+    }
+
+    private static func extractContentInfoOctetOrRaw(_ contentInfo: Data) -> Data? {
+        var off = 0
+        guard let _ = readTLV(contentInfo, &off),
+              let ctx = readTLV(contentInfo, &off) else { return nil }
+        var ctxOff = 0
+        if let inner = readTLV(ctx.value, &ctxOff), inner.tag == 0x04 {
+            return inner.value
+        }
+        return ctx.value
+    }
+
+    private static func readInt(_ d: Data) -> Int {
+        var v = 0
+        for b in d { v = (v << 8) | Int(b) }
+        return v
+    }
+
+    private static func readTLV(_ data: Data, _ offset: inout Int) -> TLV? {
+        guard offset < data.count else { return nil }
+        let start = offset
+        let tag = data[offset]
+        offset += 1
+        guard offset < data.count else { return nil }
+        let firstLen = data[offset]
+        offset += 1
+        if firstLen == 0x80 {
+            // Indefinite length BER: scan until 0x00 0x00 at top level (bounded fallback)
+            let valStart = offset
+            var depth = 1
+            var scan = offset
+            while scan + 1 < data.count {
+                if data[scan] == 0x00 && data[scan + 1] == 0x00 {
+                    depth -= 1
+                    if depth == 0 {
+                        let val = data.subdata(in: valStart..<scan)
+                        offset = scan + 2
+                        return TLV(tag: tag, value: val, raw: data.subdata(in: start..<offset))
+                    }
+                    scan += 2
+                    continue
+                }
+                scan += 1
+            }
+            return nil
+        }
+        let len: Int
+        if firstLen & 0x80 == 0 {
+            len = Int(firstLen)
+        } else {
+            let n = Int(firstLen & 0x7F)
+            guard n > 0, n <= 4, offset + n <= data.count else { return nil }
+            var acc = 0
+            for _ in 0..<n {
+                acc = (acc << 8) | Int(data[offset])
+                offset += 1
+            }
+            len = acc
+        }
+        guard len >= 0, offset + len <= data.count else { return nil }
+        let val = data.subdata(in: offset..<(offset + len))
+        offset += len
+        return TLV(tag: tag, value: val, raw: data.subdata(in: start..<offset))
+    }
+
+    private static func hmac(key: Data, data: Data, useSha256: Bool) -> Data {
+        let alg = CCHmacAlgorithm(useSha256 ? kCCHmacAlgSHA256 : kCCHmacAlgSHA1)
+        let outLen = Int(useSha256 ? CC_SHA256_DIGEST_LENGTH : CC_SHA1_DIGEST_LENGTH)
+        var out = [UInt8](repeating: 0, count: outLen)
+        key.withUnsafeBytes { kp in
+            data.withUnsafeBytes { dp in
+                CCHmac(alg, kp.baseAddress, key.count, dp.baseAddress, data.count, &out)
+            }
+        }
+        return Data(out)
+    }
+
+    private static func hash(_ data: Data, useSha256: Bool) -> Data {
+        if useSha256 {
+            var out = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+            data.withUnsafeBytes { _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &out) }
+            return Data(out)
+        } else {
+            var out = [UInt8](repeating: 0, count: Int(CC_SHA1_DIGEST_LENGTH))
+            data.withUnsafeBytes { _ = CC_SHA1($0.baseAddress, CC_LONG(data.count), &out) }
+            return Data(out)
+        }
+    }
+
+    private static func pkcs12Kdf(password: String, salt: Data, iterations: Int, id: UInt8, keyLen: Int, useSha256: Bool) -> Data {
+        let v = 64
+        let u = useSha256 ? 32 : 20
+        var passBytes = Data()
+        for scalar in password.utf16 {
+            passBytes.append(UInt8((scalar >> 8) & 0xFF))
+            passBytes.append(UInt8(scalar & 0xFF))
+        }
+        passBytes.append(0)
+        passBytes.append(0)
+
+        let D = Data(repeating: id, count: v)
+        func repeatToBlock(_ src: Data) -> Data {
+            if src.isEmpty { return Data() }
+            let total = ((src.count + v - 1) / v) * v
+            var out = Data(capacity: total)
+            while out.count < total {
+                out.append(src)
+            }
+            return out.prefix(total)
+        }
+        let S = repeatToBlock(salt)
+        let P = repeatToBlock(passBytes)
+        var I = S + P
+
+        var derived = Data()
+        while derived.count < keyLen {
+            var A = D + I
+            for _ in 0..<iterations {
+                A = hash(A, useSha256: useSha256)
+            }
+            derived.append(A)
+            if derived.count >= keyLen { break }
+
+            let B = repeatToBlock(A)
+            var newI = Data()
+            var pos = 0
+            while pos + v <= I.count {
+                var carry: UInt16 = 1
+                var block = [UInt8](repeating: 0, count: v)
+                for j in stride(from: v - 1, through: 0, by: -1) {
+                    let sum = UInt16(I[pos + j]) + UInt16(B[j]) + carry
+                    block[j] = UInt8(sum & 0xFF)
+                    carry = sum >> 8
+                }
+                newI.append(contentsOf: block)
+                pos += v
+            }
+            I = newI
+        }
+        return derived.prefix(keyLen)
     }
 }
