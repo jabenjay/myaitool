@@ -85,7 +85,7 @@ object SshEngine {
                 .lines()
                 .filterNot { it.trim().startsWith("-----") }
                 .joinToString("")
-                .replace("\s+".toRegex(), "")
+                .replace(Regex("\\s+"), "")
             if (b64.isNotBlank()) {
                 val der = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
                 val kf = java.security.KeyFactory.getInstance("RSA")
