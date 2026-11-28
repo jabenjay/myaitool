@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.Proxy
 import java.net.URL
@@ -197,7 +198,7 @@ object AppUpdateChecker {
                                     if (silent && apkFile.exists()) {
                                         CoroutineScope(Dispatchers.IO).launch {
                                             val (ok, msg) = RootHelper.silentInstallApk(apkFile)
-                                            AppLogManager.i("Update", "Silent install: ok=$ok msg=$msg")
+                                            AppLogManager.log("Update", "Silent install: ok=$ok msg=$msg")
                                             if (ok && autoDel) {
                                                 RootHelper.deleteFileWithRootFallback(apkFile)
                                                 runCatching { dm.remove(downloadId) }
