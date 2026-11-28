@@ -59,6 +59,7 @@ struct SshView: View {
     @State private var keyPemInput = ""
     @State private var showKeyFileImporter = false
     @State private var generatedPublicKey = ""
+    @State private var editingKeyItem: SshKeyItem?
 
     // Active connection
     @State private var activeProfile: SshServerProfile?
@@ -783,7 +784,7 @@ struct SshView: View {
                     let resolved = try await sftp.getRealPath(atPath: path)
                     let list = try await sftp.listDirectory(atPath: resolved)
                     return list.compactMap { entry -> SshRemoteFileItem? in
-                        let name = entry.filename
+                        let name = entry.path
                         if name == "." || name == ".." { return nil }
                         let isDir = entry.longname.hasPrefix("d")
                         let full = resolved == "/" ? "/\(name)" : "\(resolved.hasSuffix("/") ? String(resolved.dropLast()) : resolved)/\(name)"
@@ -968,7 +969,7 @@ struct SshView: View {
         let pubLine = "ssh-ed25519 " + pubBlob.base64EncodedString() + " jools@ios"
 
         var privSection = Data()
-        let checkInt = UInt32.random(in: 1...UInt32.max).bigEndian
+        var checkInt = UInt32.random(in: 1...UInt32.max).bigEndian
         privSection.append(Data(bytes: &checkInt, count: 4))
         privSection.append(Data(bytes: &checkInt, count: 4))
         privSection.append(sshStr("ssh-ed25519"))

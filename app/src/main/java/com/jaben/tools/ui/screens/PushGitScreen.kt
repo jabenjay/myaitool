@@ -1,6 +1,9 @@
 package com.jaben.tools.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
+import androidx.documentfile.provider.DocumentFile
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -1276,6 +1279,27 @@ fun PushGitScreen(
         val historyLogsCache = remember { mutableStateMapOf<Long, String>() }
         var loadingLogRunId by remember { mutableStateOf<Long?>(null) }
         var pendingSaveOversizedRun by remember { mutableStateOf<Pair<WorkflowRunInfo, String>?>(null) }
+        var customLogTreeUri by remember { mutableStateOf<Uri?>(null) }
+        var customLogDirLabel by remember { mutableStateOf<String?>(null) }
+        val logDirPicker = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocumentTree()
+        ) { treeUri: Uri? ->
+            if (treeUri != null) {
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        treeUri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+                }
+                val rawSeg = treeUri.lastPathSegment.orEmpty()
+                val friendly = rawSeg
+                    .removePrefix("primary:")
+                    .replace(":", "/")
+                    .ifBlank { "自定义文件夹" }
+                customLogTreeUri = treeUri
+                customLogDirLabel = friendly
+            }
+        }
 
         Dialog(
             onDismissRequest = { showRunHistoryDialog = false },
@@ -1599,36 +1623,101 @@ fun PushGitScreen(
 
         pendingSaveOversizedRun?.let { (run, logText) ->
             val fileName = "workflow_run_${run.runNumber}_log.txt"
-            val saveDir = OutputStorageHelper.getDisplayPath(context, OutputStorageHelper.SUB_FILES)
+            val defaultSaveDir = OutputStorageHelper.getDisplayPath(context, OutputStorageHelper.SUB_FILES)
+            val activeSaveDir = customLogDirLabel ?: defaultSaveDir
+            val displayFullPath = "$activeSaveDir/$fileName"
             AlertDialog(
-                onDismissRequest = { pendingSaveOversizedRun = null },
-                title = { Text("日志内容过多") },
+                onDismissRequest = {
+                    pendingSaveOversizedRun = null
+                    customLogTreeUri = null
+                    customLogDirLabel = null
+                },
+                title = { Text("提示") },
                 text = {
-                    Text("该构建日志共 ${logText.lines().size} 行（超过 1000 行），内容过多无法展示，是否直接保存日志文件到本地？\n\n保存路径：$saveDir/$fileName")
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("日志内容过多，无法展示，是否保存日志文件到本地？")
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { logDirPicker.launch(null) }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Folder,
+                                    contentDescription = "选择保存路径",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "保存路径（点击可更改）：",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = displayFullPath,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
                 },
                 confirmButton = {
                     Button(
                         onClick = {
-                            val uri = OutputStorageHelper.saveStream(
-                                context = context,
-                                subFolder = OutputStorageHelper.SUB_FILES,
-                                fileName = fileName,
-                                mimeType = "text/plain",
-                                inputStream = ByteArrayInputStream(logText.toByteArray(Charsets.UTF_8))
-                            )
+                            val selectedUri = customLogTreeUri
+                            val savedOk = if (selectedUri != null) {
+                                runCatching {
+                                    val dirDoc = DocumentFile.fromTreeUri(context, selectedUri) ?: return@runCatching false
+                                    dirDoc.findFile(fileName)?.delete()
+                                    val outDoc = dirDoc.createFile("text/plain", fileName) ?: return@runCatching false
+                                    context.contentResolver.openOutputStream(outDoc.uri)?.use { out ->
+                                        out.write(logText.toByteArray(Charsets.UTF_8))
+                                    } ?: return@runCatching false
+                                    true
+                                }.getOrDefault(false)
+                            } else {
+                                OutputStorageHelper.saveStream(
+                                    context = context,
+                                    subFolder = OutputStorageHelper.SUB_FILES,
+                                    fileName = fileName,
+                                    mimeType = "text/plain",
+                                    inputStream = ByteArrayInputStream(logText.toByteArray(Charsets.UTF_8))
+                                ) != null
+                            }
                             Toast.makeText(
                                 context,
-                                if (uri != null) "已保存到 $saveDir/$fileName" else "保存失败",
+                                if (savedOk) "已保存到 $displayFullPath" else "保存失败",
                                 Toast.LENGTH_SHORT
                             ).show()
                             pendingSaveOversizedRun = null
+                            customLogTreeUri = null
+                            customLogDirLabel = null
                         }
                     ) {
                         Text("确认保存")
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { pendingSaveOversizedRun = null }) {
+                    TextButton(
+                        onClick = {
+                            pendingSaveOversizedRun = null
+                            customLogTreeUri = null
+                            customLogDirLabel = null
+                        }
+                    ) {
                         Text("取消")
                     }
                 }

@@ -239,7 +239,7 @@ struct BuiltInVideoPlayerView: View {
                 )
             )
         }
-        .background(isFullscreen ? Color.black.ignoresSafeArea() : Color.clear)
+        .background((isFullscreen ? Color.black : Color.clear).ignoresSafeArea())
         .statusBarHidden(isFullscreen)
         .onAppear { startPlayer() }
         .onDisappear {

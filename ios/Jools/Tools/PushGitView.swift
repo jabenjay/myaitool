@@ -738,6 +738,8 @@ struct BuildHistorySheet: View {
     @State private var logsCache: [Int64: String] = [:]
     @State private var pendingOversizedLog: (run: WorkflowRunInfo, text: String)?
     @State private var saveToastMessage: String?
+    @State private var customLogFolderUrl: URL?
+    @State private var showLogDirPicker = false
 
     var body: some View {
         NavigationStack {
@@ -864,24 +866,85 @@ struct BuildHistorySheet: View {
                 runs = initialRuns
                 hasMore = initialRuns.count >= 15
             }
-            .alert(
-                "日志内容过多",
-                isPresented: Binding(
-                    get: { pendingOversizedLog != nil },
-                    set: { if !$0 { pendingOversizedLog = nil } }
-                ),
-                presenting: pendingOversizedLog
-            ) { item in
-                Button("确认保存") {
-                    saveLogToAppFolder(item.text, runNumber: item.run.runNumber)
-                    pendingOversizedLog = nil
+            .overlay {
+                if let item = pendingOversizedLog {
+                    let fileName = "workflow_run_\(item.run.runNumber)_log.txt"
+                    let displayPath = customLogFolderUrl.map { "\($0.lastPathComponent)/\(fileName)" } ?? "Jools/files/\(fileName)"
+                    ZStack {
+                        Color.black.opacity(0.38)
+                            .ignoresSafeArea()
+                            .onTapGesture {
+                                pendingOversizedLog = nil
+                                customLogFolderUrl = nil
+                            }
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("提示")
+                                .font(.system(size: 18, weight: .semibold))
+                            Text("日志内容过多，无法展示，是否保存日志文件到本地？")
+                                .font(.system(size: 14))
+                                .foregroundColor(.secondary)
+                            Button {
+                                showLogDirPicker = true
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "folder.fill")
+                                        .font(.system(size: 15))
+                                        .foregroundColor(.accentColor)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("保存路径（点击可更改）：")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                        Text(displayPath)
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundColor(.accentColor)
+                                            .multilineTextAlignment(.leading)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(10)
+                                .background(Color(uiColor: .secondarySystemGroupedBackground))
+                                .cornerRadius(10)
+                            }
+                            .buttonStyle(.plain)
+
+                            HStack(spacing: 12) {
+                                Spacer()
+                                Button("取消") {
+                                    pendingOversizedLog = nil
+                                    customLogFolderUrl = nil
+                                }
+                                .foregroundColor(.secondary)
+                                Button("确认保存") {
+                                    if let folder = customLogFolderUrl {
+                                        saveLogToCustomFolder(item.text, folderUrl: folder, runNumber: item.run.runNumber)
+                                    } else {
+                                        saveLogToAppFolder(item.text, runNumber: item.run.runNumber)
+                                    }
+                                    pendingOversizedLog = nil
+                                    customLogFolderUrl = nil
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
+                        }
+                        .padding(20)
+                        .background(Color(uiColor: .systemBackground))
+                        .cornerRadius(18)
+                        .shadow(color: .black.opacity(0.2), radius: 16, y: 6)
+                        .padding(.horizontal, 28)
+                    }
                 }
-                Button("取消", role: .cancel) {
-                    pendingOversizedLog = nil
+            }
+            .fileImporter(
+                isPresented: $showLogDirPicker,
+                allowedContentTypes: [.folder],
+                allowsMultipleSelection: false
+            ) { res in
+                if case .success(let urls) = res, let url = urls.first {
+                    customLogFolderUrl = url
                 }
-            } message: { item in
-                let lineCount = item.text.components(separatedBy: .newlines).count
-                Text("该构建日志共 \(lineCount) 行（超过 1000 行），内容过多无法展示，是否直接保存日志文件到本地？\n\n保存路径：Jools/files/workflow_run_\(item.run.runNumber)_log.txt")
             }
             .alert(
                 "提示",
@@ -894,6 +957,23 @@ struct BuildHistorySheet: View {
             } message: {
                 Text(saveToastMessage ?? "")
             }
+        }
+    }
+
+    private func saveLogToCustomFolder(_ text: String, folderUrl: URL, runNumber: Int) {
+        let acc = folderUrl.startAccessingSecurityScopedResource()
+        defer { if acc { folderUrl.stopAccessingSecurityScopedResource() } }
+        let fileName = "workflow_run_\(runNumber)_log.txt"
+        let outUrl = folderUrl.appendingPathComponent(fileName)
+        do {
+            guard let data = text.data(using: .utf8) else {
+                saveToastMessage = "保存失败：文本编码异常"
+                return
+            }
+            try data.write(to: outUrl, options: .atomic)
+            saveToastMessage = "已保存至 \(folderUrl.lastPathComponent)/\(fileName)"
+        } catch {
+            saveToastMessage = "保存失败：\(error.localizedDescription)"
         }
     }
 
